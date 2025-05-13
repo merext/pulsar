@@ -1,6 +1,6 @@
 // strategies/src/models.rs
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 
 #[derive(Debug, Deserialize)]
 pub struct Kline {

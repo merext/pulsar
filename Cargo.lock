@@ -106,6 +106,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "strategies",
  "tokio",
 ]
 

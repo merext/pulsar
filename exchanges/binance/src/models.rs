@@ -70,6 +70,22 @@ pub struct Kline {
     pub ignore: String, // Ignore
 }
 
+impl From<Kline> for strategies::models::Kline {
+    fn from(k: Kline) -> Self {
+        strategies::models::Kline {
+            open_time: k.start_time,
+            close_time: k.close_time,
+            symbol: k.symbol,
+            interval: k.interval,
+            open_price: k.open_price,
+            close_price: k.close_price,
+            high_price: k.high_price,
+            low_price: k.low_price,
+            volume: k.base_volume,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TradeMessage {
     pub stream: String,
@@ -110,4 +126,21 @@ pub struct TradeData {
 
     #[serde(rename = "M")]
     pub ignore: bool,
+}
+
+impl From<TradeData> for strategies::models::TradeData {
+    fn from(t: TradeData) -> Self {
+        strategies::models::TradeData {
+            event_type: t.event_type,
+            event_time: t.event_time,
+            symbol: t.symbol,
+            trade_id: t.trade_id,
+            price: t.price,
+            quantity: t.quantity,
+            buyer_order_id: t.buyer_order_id.unwrap_or_default(),
+            seller_order_id: t.seller_order_id.unwrap_or_default(),
+            trade_time: t.trade_time,
+            is_buyer_market_maker: t.is_buyer_market_maker,
+        }
+    }
 }
