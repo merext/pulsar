@@ -3,6 +3,7 @@ use binance_spot_connector_rust::{
     market_stream::kline::KlineStream,
     tokio_tungstenite::BinanceWebSocketClient,
 };
+use crate::models::{KlineMessage};
 use futures_util::StreamExt;
 use log::info;
 
@@ -20,13 +21,21 @@ impl BinanceClient {
 
         info!("Subscribed to 1m Kline stream for {}", symbol);
 
-        // Read messages indefinitely
         while let Some(message) = conn.as_mut().next().await {
             match message {
                 Ok(msg) => {
                     let binary_data = msg.into_data();
                     let data = std::str::from_utf8(&binary_data)?;
-                    info!("Received: {}", data);
+                    match serde_json::from_str::<KlineMessage>(data) {
+                        Ok(parsed) => {
+                            let kline = parsed.data.kline;
+                            info!("{:?}", kline);
+                            // You can now send this `kline` to a strategy or processor here
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse kline message: {}", e);
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error receiving message: {:?}", e);

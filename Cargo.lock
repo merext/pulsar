@@ -93,6 +93,8 @@ dependencies = [
  "binance_spot_connector_rust",
  "futures-util",
  "log",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

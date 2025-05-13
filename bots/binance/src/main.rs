@@ -5,7 +5,7 @@ use log::LevelFilter;
 #[tokio::main]
 async fn main() {
     Builder::from_default_env()
-        .filter_level(LevelFilter::Debug)
+        .filter_level(LevelFilter::Info)
         .init();
 
     if let Err(e) = BinanceClient::subscribe_klines("BTCUSDT").await {
