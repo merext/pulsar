@@ -1,9 +1,10 @@
 use binance_spot_connector_rust::{
     market::klines::KlineInterval,
     market_stream::kline::KlineStream,
+    market_stream::trade::TradeStream,
     tokio_tungstenite::BinanceWebSocketClient,
 };
-use crate::models::{KlineMessage};
+use crate::models::{KlineMessage, TradeMessage};
 use futures_util::StreamExt;
 use log::info;
 
@@ -47,6 +48,41 @@ impl BinanceClient {
         // Cleanly close connection if the loop exits
         conn.close().await?;
 
+        Ok(())
+    }
+
+    pub async fn subscribe_trades(symbol: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
+
+        conn.subscribe(vec![
+            &TradeStream::new(symbol).into()
+        ]).await;
+
+        info!("Subscribed to trade stream for {}", symbol);
+
+        while let Some(message) = conn.as_mut().next().await {
+            match message {
+                Ok(msg) => {
+                    let binary_data = msg.into_data();
+                    let data = std::str::from_utf8(&binary_data)?;
+                    match serde_json::from_str::<TradeMessage>(data) {
+                        Ok(parsed) => {
+                            let trade = parsed.data;
+                            info!("{:?}", trade);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse trade message: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error receiving trade message: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+        conn.close().await?;
         Ok(())
     }
 }

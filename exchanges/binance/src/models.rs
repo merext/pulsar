@@ -69,3 +69,45 @@ pub struct Kline {
     #[serde(rename = "B")]
     pub ignore: String, // Ignore
 }
+
+#[derive(Debug, Deserialize)]
+pub struct TradeMessage {
+    pub stream: String,
+    pub data: TradeData,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TradeData {
+    #[serde(rename = "e")]
+    pub event_type: String,
+
+    #[serde(rename = "E")]
+    pub event_time: u64,
+
+    #[serde(rename = "s")]
+    pub symbol: String,
+
+    #[serde(rename = "t")]
+    pub trade_id: u64,
+
+    #[serde(rename = "p")]
+    pub price: String,
+
+    #[serde(rename = "q")]
+    pub quantity: String,
+
+    #[serde(rename = "b")]
+    pub buyer_order_id: Option<u64>,
+
+    #[serde(rename = "a")]
+    pub seller_order_id: Option<u64>,
+
+    #[serde(rename = "T")]
+    pub trade_time: u64,
+
+    #[serde(rename = "m")]
+    pub is_buyer_market_maker: bool,
+
+    #[serde(rename = "M")]
+    pub ignore: bool,
+}

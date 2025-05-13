@@ -8,7 +8,7 @@ async fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    if let Err(e) = BinanceClient::subscribe_klines("BTCUSDT").await {
+    if let Err(e) = BinanceClient::subscribe_trades("BTCUSDT").await {
         eprintln!("WebSocket subscription failed: {}", e);
     }
 }

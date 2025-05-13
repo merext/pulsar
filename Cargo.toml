@@ -3,6 +3,6 @@ resolver = "3"
 members = [
     "core",
     "exchanges/binance",
-    "strategies/mean_reversion",
     "bots/binance",
+    "strategies",
 ]
