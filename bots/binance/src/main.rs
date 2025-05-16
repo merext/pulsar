@@ -2,6 +2,7 @@ use binance_exchange::client::BinanceClient;
 use env_logger::Builder;
 use log::LevelFilter;
 use strategies::mean_reversion::MeanReversionStrategy;
+use strategies::position::Position;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt; // For using .next() on streams
 
@@ -19,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         last_sma: None,
         recent_trades: Vec::new(),
         max_trade_window: 40,
+        position: Position::Flat,
     };
 
     // Subscribe to Kline and Trade streams

@@ -1,4 +1,5 @@
 use crate::models::{Kline, TradeData};
+use crate::position::Position;
 use crate::strategy::Strategy;
 use log::info;
 
@@ -8,6 +9,7 @@ pub struct MeanReversionStrategy {
     pub last_sma: Option<f64>,
     pub recent_trades: Vec<f64>,
     pub max_trade_window: usize,
+    pub position: Position,
 }
 
 #[async_trait::async_trait]
@@ -34,21 +36,35 @@ impl Strategy for MeanReversionStrategy {
         let threshold = 0.0002;
         let deviation = (close - sma) / sma;
 
-        if deviation < -threshold {
-            info!(
-                "📈 BUY signal - price {:.2} below SMA {:.2} (deviation {:.5}, threshold {:.5})",
-                close, sma, deviation, -threshold
-            );
-        } else if deviation > threshold {
-            info!(
-                "📉 SELL signal - price {:.2} above SMA {:.2} (deviation {:.5}, threshold {:.5})",
-                close, sma, deviation, threshold
-            );
-        } else {
-            info!(
-                "🤝 HOLD - price {:.2} near SMA {:.2} (deviation {:.5}, threshold ±{:.5})",
-                close, sma, deviation, threshold
-            );
+        match self.position {
+            Position::Flat => {
+                if deviation < -threshold {
+                    self.position = Position::Long;
+                    info!(
+                        "📥 ENTER LONG @ {:.5} (SMA {:.5}, deviation {:.5})",
+                        close, sma, deviation
+                    );
+                } else {
+                    info!(
+                        "🤝 HOLD (Flat) @ {:.5} (SMA {:.5}, deviation {:.5})",
+                        close, sma, deviation
+                    );
+                }
+            }
+            Position::Long => {
+                if deviation > threshold {
+                    self.position = Position::Flat;
+                    info!(
+                        "📤 EXIT LONG @ {:.5} (SMA {:.5}, deviation {:.5})",
+                        close, sma, deviation
+                    );
+                } else {
+                    info!(
+                        "📈 STILL LONG @ {:.5} (SMA {:.5}, deviation {:.5})",
+                        close, sma, deviation
+                    );
+                }
+            }
         }
     }
 
