@@ -1,14 +1,13 @@
-use binance_spot_connector_rust::{
-    market::klines::KlineInterval,
-    market_stream::kline::KlineStream,
-    market_stream::trade::TradeStream,
-    tokio_tungstenite::BinanceWebSocketClient,
-};
 use crate::models::{KlineMessage, TradeMessage};
+use binance_spot_connector_rust::{
+    market::klines::KlineInterval, market_stream::kline::KlineStream,
+    market_stream::trade::TradeStream, tokio_tungstenite::BinanceWebSocketClient,
+};
 use futures_util::StreamExt;
 use log::info;
-use strategies::models::{Kline as StrategyKline, TradeData as StrategyTradeData};
+use std::io::BufReader;
 use std::pin::Pin;
+use strategies::models::{Kline as StrategyKline, TradeData as StrategyTradeData};
 use tokio_stream::Stream;
 
 pub struct BinanceClient;
@@ -21,9 +20,11 @@ impl BinanceClient {
 
         // Subscribe and discard the subscription ID (u64)
         _ = conn
-            .subscribe(vec![&KlineStream::new(symbol, KlineInterval::Minutes1).into()])
+            .subscribe(vec![
+                &KlineStream::new(symbol, KlineInterval::Minutes1).into(),
+            ])
             .await;
-        
+
         info!("Subscribed to 1m Kline stream for {}", symbol);
 
         let stream = async_stream::stream! {
@@ -52,13 +53,12 @@ impl BinanceClient {
 
     pub async fn subscribe_trades(
         symbol: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = StrategyTradeData> + Send>>, Box<dyn std::error::Error>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = StrategyTradeData> + Send>>, Box<dyn std::error::Error>>
+    {
         let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
 
         // Subscribe and discard the subscription ID (u64)
-        _ = conn
-            .subscribe(vec![&TradeStream::new(symbol).into()])
-            .await;
+        _ = conn.subscribe(vec![&TradeStream::new(symbol).into()]).await;
 
         info!("Subscribed to trade stream for {}", symbol);
 
@@ -83,6 +83,81 @@ impl BinanceClient {
             let _ = conn.close().await;
         };
 
+        Ok(Box::pin(stream))
+    }
+
+    pub async fn backtest_klines(
+        zip_url: &str,
+        symbol: &str,
+        interval: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = StrategyKline> + Send>>, Box<dyn std::error::Error>> {
+        use csv::ReaderBuilder;
+        use futures_util::stream;
+        use reqwest::Client;
+        use std::io::Cursor;
+        use zip::ZipArchive;
+
+        use strategies::models::Kline as StrategyKline;
+
+        #[allow(dead_code)]
+        #[derive(Debug, serde::Deserialize)]
+        struct BinanceCsvKlineRow(
+            u64,    // open time
+            String, // open price
+            String, // high price
+            String, // low price
+            String, // close price
+            String, // volume
+            u64,    // close time
+            String, // quote asset volume (ignored)
+            u64,    // number of trades (ignored)
+            String, // taker buy base volume (ignored)
+            String, // taker buy quote volume (ignored)
+            String, // ignore
+        );
+
+        // Step 1: Download ZIP from URL
+        let client = Client::new();
+        let resp = client.get(zip_url).send().await?.bytes().await?;
+        let cursor = Cursor::new(resp);
+
+        // Step 2: Open ZIP archive
+        let mut archive = ZipArchive::new(cursor)?;
+        let mut file = archive.by_index(0)?;
+        let mut reader = ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(BufReader::new(&mut file));
+
+        // Step 3: Parse CSV into StrategyKline list
+        let mut rows = Vec::new();
+        let symbol = symbol.to_string();
+        let interval = interval.to_string();
+
+        for result in reader.deserialize::<BinanceCsvKlineRow>() {
+            match result {
+                Ok(row) => {
+                    let kline = StrategyKline {
+                        open_time: row.0,
+                        close_time: row.6,
+                        open_price: row.1,
+                        high_price: row.2,
+                        low_price: row.3,
+                        close_price: row.4,
+                        volume: row.5,
+                        symbol: symbol.clone(),
+                        interval: interval.clone(),
+                    };
+                    rows.push(kline);
+                }
+                Err(e) => {
+                    eprintln!("Failed to parse row: {}", e);
+                    continue;
+                }
+            }
+        }
+
+        // Step 4: Yield as async stream
+        let stream = stream::iter(rows);
         Ok(Box::pin(stream))
     }
 }

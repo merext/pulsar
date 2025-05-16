@@ -24,15 +24,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Subscribe to Kline and Trade streams
-    let mut trade_stream = BinanceClient::subscribe_trades("DOGEUSDT").await?;
-    let mut kline_stream = BinanceClient::subscribe_klines("DOGEUSDT").await?;
+    // let mut trade_stream = BinanceClient::subscribe_trades("DOGEUSDT").await?;
+    // let mut kline_stream = BinanceClient::subscribe_klines("DOGEUSDT").await?;
+    let mut kline_stream = BinanceClient::backtest_klines(
+        "https://data.binance.vision/data/spot/daily/klines/DOGEUSDT/1m/DOGEUSDT-1m-2025-03-04.zip",
+        "DOGEUSDT",
+        "1m",
+    )
+    .await?;
+    while let Some(kline) = kline_stream.next().await {
+        strategy.on_kline(kline).await;
+    }
 
     // Concurrently process both streams
     loop {
         tokio::select! {
-            Some(trade) = trade_stream.next() => {
-                strategy.on_trade(trade).await;
-            }
+            // Some(trade) = trade_stream.next() => {
+            //     strategy.on_trade(trade).await;
+            // }
 
             Some(kline) = kline_stream.next() => {
                 strategy.on_kline(kline).await;
