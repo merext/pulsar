@@ -1,6 +1,7 @@
 use crate::models::{Kline, TradeData};
 use crate::position::Position;
 use crate::strategy::Strategy;
+use crate::trader::Signal;
 use log::info;
 
 pub struct MeanReversionStrategy {
@@ -33,37 +34,19 @@ impl Strategy for MeanReversionStrategy {
         let sma: f64 = self.prices.iter().sum::<f64>() / self.prices.len() as f64;
         self.last_sma = Some(sma);
 
-        let threshold = 0.0002;
-        let deviation = (close - sma) / sma;
+        let signal = self.get_signal(close, sma);
 
-        match self.position {
-            Position::Flat => {
-                if deviation < -threshold {
-                    self.position = Position::Long;
-                    info!(
-                        "📥 ENTER LONG @ {:.5} (SMA {:.5}, deviation {:.5})",
-                        close, sma, deviation
-                    );
-                } else {
-                    info!(
-                        "🤝 HOLD (Flat) @ {:.5} (SMA {:.5}, deviation {:.5})",
-                        close, sma, deviation
-                    );
-                }
+        match signal {
+            Signal::Buy => {
+                self.position = Position::Long;
+                info!("📥 ENTER LONG @ {:.5} (SMA {:.5})", close, sma);
             }
-            Position::Long => {
-                if deviation > threshold {
-                    self.position = Position::Flat;
-                    info!(
-                        "📤 EXIT LONG @ {:.5} (SMA {:.5}, deviation {:.5})",
-                        close, sma, deviation
-                    );
-                } else {
-                    info!(
-                        "📈 STILL LONG @ {:.5} (SMA {:.5}, deviation {:.5})",
-                        close, sma, deviation
-                    );
-                }
+            Signal::Sell => {
+                self.position = Position::Flat;
+                info!("📤 EXIT LONG @ {:.5} (SMA {:.5})", close, sma);
+            }
+            Signal::Hold => {
+                info!("🤝 HOLD @ {:.5} (SMA {:.5})", close, sma);
             }
         }
     }
@@ -85,20 +68,43 @@ impl Strategy for MeanReversionStrategy {
 
         let avg_trade_price =
             self.recent_trades.iter().copied().sum::<f64>() / self.recent_trades.len() as f64;
-        let deviation = (avg_trade_price - sma) / sma;
 
-        let confirmation_threshold = 0.0025;
+        let signal = self.get_signal(avg_trade_price, sma);
 
-        if deviation < -confirmation_threshold {
-            info!(
-                "✅ CONFIRMED BUY - trade avg {:.2} well below SMA {:.2}",
-                avg_trade_price, sma
-            );
-        } else if deviation > confirmation_threshold {
-            info!(
-                "✅ CONFIRMED SELL - trade avg {:.2} well above SMA {:.2}",
-                avg_trade_price, sma
-            );
+        match signal {
+            Signal::Buy => {
+                info!(
+                    "✅ CONFIRMED BUY - trade avg {:.5} well below SMA {:.5}",
+                    avg_trade_price, sma
+                );
+            }
+            Signal::Sell => {
+                info!(
+                    "✅ CONFIRMED SELL - trade avg {:.5} well above SMA {:.5}",
+                    avg_trade_price, sma
+                );
+            }
+            Signal::Hold => {
+                info!(
+                    "🤝 CONFIRMED HOLD - trade avg {:.5} near SMA {:.5}",
+                    avg_trade_price, sma
+                );
+            }
+        }
+    }
+}
+
+impl MeanReversionStrategy {
+    pub fn get_signal(&self, close: f64, sma: f64) -> Signal {
+        let threshold = 0.0002;
+        let deviation = (close - sma) / sma;
+
+        if self.position == Position::Flat && deviation < -threshold {
+            Signal::Buy
+        } else if self.position == Position::Long && deviation > threshold {
+            Signal::Sell
+        } else {
+            Signal::Hold
         }
     }
 }
