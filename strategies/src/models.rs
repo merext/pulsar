@@ -1,8 +1,8 @@
 // strategies/src/models.rs
 
-use serde::{Deserialize};
+use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Kline {
     pub open_time: u64,
     pub close_time: u64,
@@ -15,7 +15,7 @@ pub struct Kline {
     pub volume: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct TradeData {
     pub event_type: String,
     pub event_time: u64,
