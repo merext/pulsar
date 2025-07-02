@@ -1,4 +1,9 @@
 pub mod mean_reversion;
+pub mod rsi_strategy;
+pub mod spline_strategy;
+pub mod order_book_imbalance;
+pub mod liquidity_sweep;
+pub mod zscore_strategy;
 pub mod models;
 pub mod position;
 pub mod strategy;

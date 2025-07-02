@@ -1,12 +1,11 @@
+use futures_util::future::FutureExt; // For .now_or_never()
 use binance_exchange::client::BinanceClient;
 use env_logger::Builder;
 use log::LevelFilter;
-use std::env;
 use std::io::Write;
-use strategies::mean_reversion::MeanReversionStrategy;
-use strategies::position::Position;
+use strategies::rsi_strategy::RsiStrategy;
 use strategies::strategy::Strategy;
-use strategies::trader::{Signal, VirtualTrader};
+use strategies::trader::VirtualTrader;
 use tokio_stream::StreamExt; // For using .next() on streams
 
 #[tokio::main]
@@ -26,44 +25,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init();
 
-    // Instantiate the strategy with required state (position removed)
-    let mut strategy = MeanReversionStrategy {
-        window_size: 20,
-        prices: Vec::new(),
-        last_sma: None,
-        recent_trades: Vec::new(),
-        max_trade_window: 40,
-    };
+    // Instantiate the strategy with required state
+    let period = 14;
+    let overbought = 70.0;
+    let oversold = 30.0;
+    let mut strategy = RsiStrategy::new(period, overbought, oversold);
 
     // Initialize virtual trader to track position and PnL
     let mut trader = VirtualTrader::new();
 
+    #[cfg(feature = "backtest")]
     let mut kline_stream = BinanceClient::backtest_klines(
-        "https://data.binance.vision/data/spot/daily/klines/DOGEUSDT/1m/DOGEUSDT-1m-2025-03-14.zip",
+        "https://data.binance.vision/data/spot/daily/klines/DOGEUSDT/1m/DOGEUSDT-1m-2025-02-21.zip",
         "DOGEUSDT",
         "1m",
     )
     .await?;
 
-    // let mut kline_stream = BinanceClient::subscribe_klines("DOGEUSDT").await?;
+    #[cfg(not(feature = "backtest"))]
+    let mut kline_stream = BinanceClient::kline_stream("dogeusdt", "1m").await?;
 
-    while let Some(kline) = kline_stream.next().await {
-        strategy.on_kline(kline.clone()).await;
+    #[cfg(not(feature = "backtest"))]
+    let mut trade_stream = BinanceClient::subscribe_trades("dogeusdt").await?;
 
-        let close_price = kline.close_price.parse().unwrap_or(0.0);
-        let sma = strategy.last_sma.unwrap_or(close_price);
+    // Process remaining klines
+    loop {
+        tokio::select! {
+            kline_result = kline_stream.next() => {
+                if let Some(kline) = kline_result {
+                    let close_price = kline.close_price.parse().unwrap_or(0.0);
+                    let close_time = kline.close_time as f64;
 
-        let signal = strategy.get_signal(close_price, sma, trader.position);
+                    let signal = strategy.get_signal(close_price, close_time, trader.position);
 
-        trader.on_signal(signal, close_price);
+                    trader.on_signal(signal, close_price);
 
-        log::debug!(
-            "Signal: {}, Position: {:?}, Realized PnL: {:.5}, Unrealized PnL: {:.5}",
-            signal,
-            trader.position,
-            trader.realized_pnl,
-            trader.unrealized_pnl(close_price)
-        );
+                    log::info!(
+                        "Signal: {}, Position: {:?}, Realized PnL: {:.5}, Unrealized PnL: {:.5}",
+                        signal,
+                        trader.position,
+                        trader.realized_pnl,
+                        trader.unrealized_pnl(close_price)
+                    );
+
+                    strategy.on_kline(kline.clone()).await;
+                } else {
+                    // Kline stream exhausted
+                    #[cfg(feature = "backtest")]
+                    break; // In backtest, if kline stream is done, we are done
+                    #[cfg(not(feature = "backtest"))]
+                    // In live, kline stream might just be slow, keep waiting for trades
+                    {}
+                }
+            },
+            trade_result = async { 
+                #[cfg(not(feature = "backtest"))] {
+                    trade_stream.next().await
+                }
+                #[cfg(feature = "backtest")] {
+                    futures::future::pending().await
+                }
+            } => {
+                #[cfg(not(feature = "backtest"))]
+                if let Some(trade) = trade_result {
+                    strategy.on_trade(trade).await;
+                } else {
+                    // Trade stream exhausted, if kline stream is also exhausted, break
+                    if kline_stream.next().now_or_never().is_none() {
+                        break;
+                    }
+                }
+            },
+        }
     }
 
     Ok(())

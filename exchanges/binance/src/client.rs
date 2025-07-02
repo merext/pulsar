@@ -13,6 +13,27 @@ use tokio_stream::Stream;
 pub struct BinanceClient;
 
 impl BinanceClient {
+    fn get_kline_interval(interval: &str) -> Result<KlineInterval, Box<dyn std::error::Error>> {
+        match interval {
+            "1m" => Ok(KlineInterval::Minutes1),
+            "3m" => Ok(KlineInterval::Minutes3),
+            "5m" => Ok(KlineInterval::Minutes5),
+            "15m" => Ok(KlineInterval::Minutes15),
+            "30m" => Ok(KlineInterval::Minutes30),
+            "1h" => Ok(KlineInterval::Hours1),
+            "2h" => Ok(KlineInterval::Hours2),
+            "4h" => Ok(KlineInterval::Hours4),
+            "6h" => Ok(KlineInterval::Hours6),
+            "8h" => Ok(KlineInterval::Hours8),
+            "12h" => Ok(KlineInterval::Hours12),
+            "1d" => Ok(KlineInterval::Days1),
+            "3d" => Ok(KlineInterval::Days3),
+            "1w" => Ok(KlineInterval::Weeks1),
+            "1M" => Ok(KlineInterval::Months1),
+            _ => Err(format!("Invalid kline interval: {}", interval).into()),
+        }
+    }
+
     pub async fn subscribe_klines(
         symbol: &str,
     ) -> Result<Pin<Box<dyn Stream<Item = StrategyKline> + Send>>, Box<dyn std::error::Error>> {
@@ -55,6 +76,79 @@ impl BinanceClient {
         symbol: &str,
     ) -> Result<Pin<Box<dyn Stream<Item = StrategyTradeData> + Send>>, Box<dyn std::error::Error>>
     {
+        let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
+
+        // Subscribe and discard the subscription ID (u64)
+        _ = conn.subscribe(vec![&TradeStream::new(symbol).into()]).await;
+
+        info!("Subscribed to trade stream for {}", symbol);
+
+        let stream = async_stream::stream! {
+            while let Some(message) = conn.as_mut().next().await {
+                match message {
+                    Ok(msg) => {
+                        let binary_data = msg.into_data();
+                        if let Ok(data) = std::str::from_utf8(&binary_data) {
+                            if let Ok(parsed) = serde_json::from_str::<TradeMessage>(data) {
+                                yield parsed.data.into(); // Convert to StrategyTradeData
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error receiving trade message: {:?}", e);
+                        break;
+                    }
+                }
+            }
+
+            let _ = conn.close().await;
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    pub async fn kline_stream(
+        symbol: &str,
+        interval: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = StrategyKline> + Send>>, Box<dyn std::error::Error>> {
+        let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
+
+        // Subscribe and discard the subscription ID (u64)
+        _ = conn
+            .subscribe(vec![
+                &KlineStream::new(symbol, Self::get_kline_interval(interval)?).into(),
+            ])
+            .await;
+
+        info!("Subscribed to {} Kline stream for {}", interval, symbol);
+
+        let stream = async_stream::stream! {
+            while let Some(message) = conn.as_mut().next().await {
+                match message {
+                    Ok(msg) => {
+                        let binary_data = msg.into_data();
+                        if let Ok(data) = std::str::from_utf8(&binary_data) {
+                            if let Ok(parsed) = serde_json::from_str::<KlineMessage>(data) {
+                                yield parsed.data.kline.into(); // Convert to StrategyKline
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error receiving kline message: {:?}", e);
+                        break;
+                    }
+                }
+            }
+
+            let _ = conn.close().await;
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    pub async fn trade_stream(
+        symbol: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = StrategyTradeData> + Send>>, Box<dyn std::error::Error>> {
         let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
 
         // Subscribe and discard the subscription ID (u64)

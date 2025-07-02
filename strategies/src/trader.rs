@@ -25,14 +25,14 @@ impl VirtualTrader {
                     self.position = Position::Long;
                     self.entry_price = price;
                     self.trades_executed += 1;
-                    log::info!("Entered LONG at price {:.5}", price);
+                    log::debug!("Entered LONG at price {:.5}", price);
                 }
             }
             Signal::Sell => {
                 if self.position == Position::Long {
                     let profit = price - self.entry_price;
                     self.realized_pnl += profit;
-                    log::info!(
+                    log::error!(
                         "Exited LONG at price {:.5}, profit {:.5}, total PnL {:.5}",
                         price,
                         profit,
