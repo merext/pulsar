@@ -1,14 +1,12 @@
 use binance_exchange::client::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
-use chrono::Utc;
 use env_logger::Builder;
 use log::LevelFilter;
 use std::io::Write;
 use strategies::rsi_strategy::RsiStrategy;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
-use trade::trader::Trader;
-// For using .next() on streams
+use trade::trader::Trader; // For using .next() on streams
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,13 +31,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let oversold = 30.0;
     let mut strategy = RsiStrategy::new(period, overbought, oversold);
 
-    // Initialize virtual trader to track position and PnL
+    // Initialize trader with API credentials
     let trading_symbol = "DOGEUSDT".to_string();
-    let mut trader = BinanceTrader::new(trading_symbol.clone());
+    // IMPORTANT: Replace with your actual Binance API Key and Secret
+    let api_key = "YOUR_BINANCE_API_KEY";
+    let api_secret = "YOUR_BINANCE_API_SECRET";
+    let mut trader = BinanceTrader::new(trading_symbol.clone(), api_key, api_secret).await;
 
-    let mut kline_stream = BinanceClient::kline_stream(&trading_symbol, "1m").await?;
+    let binance_client = BinanceClient::new().await;
 
-    let mut trade_stream = BinanceClient::subscribe_trades(&trading_symbol).await?;
+    let mut kline_stream = binance_client.kline_stream(&trading_symbol, "1m").await?;
 
     // Process remaining klines
     #[allow(unreachable_code)] // This loop is intended to run indefinitely for a live bot
@@ -54,13 +55,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     trader.on_signal(signal, close_price).await;
 
-                    let position = trader.position();
-
                     log::info!(
-                        "{} | {} | Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
-                        Utc::now().timestamp(), // Unix timestamp (in seconds)
+                        "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
+                        trader.position().symbol,
                         signal,
-                        position.to_string(),
+                        trader.position(),
                         trader.unrealized_pnl(close_price),
                         trader.realized_pnl()
                     );
@@ -69,11 +68,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     // In live, kline stream might just be slow, keep waiting for trades
                     {}
-                }
-            },
-            trade_result = trade_stream.next() => {
-                if let Some(trade) = trade_result {
-                    strategy.on_trade(trade).await;
                 }
             },
         }

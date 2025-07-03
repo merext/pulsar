@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Kline {
     pub open_time: u64,
     pub open: f64,
