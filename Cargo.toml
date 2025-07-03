@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "core",
+    
     "exchanges/binance",
     "bots/binance",
     "strategies",
