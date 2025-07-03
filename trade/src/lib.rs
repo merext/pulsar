@@ -1,3 +1,5 @@
-pub fn example_function() {
-    println!("This is a shared function across the bot.");
-}
+pub mod executor;
+pub mod market;
+pub mod trader;
+pub mod signal;
+pub mod models;

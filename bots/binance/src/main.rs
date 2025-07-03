@@ -5,7 +5,7 @@ use log::LevelFilter;
 use std::io::Write;
 use strategies::rsi_strategy::RsiStrategy;
 use strategies::strategy::Strategy;
-use strategies::trader::VirtualTrader;
+use trade::trader::{VirtualTrader, Trader};
 use tokio_stream::StreamExt; // For using .next() on streams
 
 #[tokio::main]
@@ -53,22 +53,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::select! {
             kline_result = kline_stream.next() => {
                 if let Some(kline) = kline_result {
-                    let close_price = kline.close_price.parse().unwrap_or(0.0);
+                    let close_price = kline.close;
                     let close_time = kline.close_time as f64;
 
-                    let signal = strategy.get_signal(close_price, close_time, trader.position);
+                    let signal = strategy.get_signal(close_price, close_time, trader.position());
 
-                    trader.on_signal(signal, close_price);
+                    trader.on_signal(signal, close_price).await;
 
                     log::info!(
-                        "Signal: {}, Position: {:?}, Realized PnL: {:.5}, Unrealized PnL: {:.5}",
+                        "Signal: {:?}, Position: {:?}, Unrealized PnL: {:.5}",
                         signal,
-                        trader.position,
-                        trader.realized_pnl,
+                        trader.position(),
                         trader.unrealized_pnl(close_price)
                     );
 
-                    strategy.on_kline(kline.clone()).await;
+                    strategy.on_kline(kline).await;
                 } else {
                     // Kline stream exhausted
                     #[cfg(feature = "backtest")]

@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use trade::models::{Kline as TradeKline, TradeData as TradeTradeData};
 
 #[derive(Debug, Deserialize)]
 pub struct KlineMessage {
@@ -70,18 +71,20 @@ pub struct Kline {
     pub ignore: String, // Ignore
 }
 
-impl From<Kline> for strategies::models::Kline {
+impl From<Kline> for TradeKline {
     fn from(k: Kline) -> Self {
-        strategies::models::Kline {
+        TradeKline {
             open_time: k.start_time,
+            open: k.open_price.parse().unwrap_or_default(),
+            high: k.high_price.parse().unwrap_or_default(),
+            low: k.low_price.parse().unwrap_or_default(),
+            close: k.close_price.parse().unwrap_or_default(),
+            volume: k.base_volume.parse().unwrap_or_default(),
             close_time: k.close_time,
-            symbol: k.symbol,
-            interval: k.interval,
-            open_price: k.open_price,
-            close_price: k.close_price,
-            high_price: k.high_price,
-            low_price: k.low_price,
-            volume: k.base_volume,
+            quote_asset_volume: k.quote_volume.parse().unwrap_or_default(),
+            number_of_trades: k.num_trades,
+            taker_buy_base_asset_volume: k.taker_buy_base_volume.parse().unwrap_or_default(),
+            taker_buy_quote_asset_volume: k.taker_buy_quote_volume.parse().unwrap_or_default(),
         }
     }
 }
@@ -128,19 +131,16 @@ pub struct TradeData {
     pub ignore: bool,
 }
 
-impl From<TradeData> for strategies::models::TradeData {
+impl From<TradeData> for TradeTradeData {
     fn from(t: TradeData) -> Self {
-        strategies::models::TradeData {
-            event_type: t.event_type,
-            event_time: t.event_time,
-            symbol: t.symbol,
-            trade_id: t.trade_id,
-            price: t.price,
-            quantity: t.quantity,
-            buyer_order_id: t.buyer_order_id.unwrap_or_default(),
-            seller_order_id: t.seller_order_id.unwrap_or_default(),
-            trade_time: t.trade_time,
-            is_buyer_market_maker: t.is_buyer_market_maker,
+        TradeTradeData {
+            id: t.trade_id,
+            price: t.price.parse().unwrap_or_default(),
+            qty: t.quantity.parse().unwrap_or_default(),
+            quote_qty: (t.price.parse::<f64>().unwrap_or_default() * t.quantity.parse::<f64>().unwrap_or_default()),
+            time: t.trade_time,
+            is_buyer_maker: t.is_buyer_market_maker,
+            is_best_match: false, // This field is not available in Binance TradeData, setting to false
         }
     }
 }

@@ -1,8 +1,7 @@
-use crate::models::{Kline, TradeData};
-use crate::position::Position;
+use trade::models::{Kline, TradeData};
+use trade::trader::Position;
 use crate::strategy::Strategy;
-use crate::trader::Signal;
-use async_trait::async_trait;
+use trade::signal::Signal;
 use std::collections::VecDeque;
 
 pub struct RsiStrategy {
@@ -54,10 +53,10 @@ impl RsiStrategy {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Strategy for RsiStrategy {
     async fn on_kline(&mut self, kline: Kline) {
-        let close_price = kline.close_price.parse::<f64>().unwrap_or_default();
+        let close_price = kline.close;
         self.prices.push_back(close_price);
         if self.prices.len() > self.period + 1 {
             self.prices.pop_front();

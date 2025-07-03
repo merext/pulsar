@@ -1,8 +1,7 @@
-use crate::models::{Kline, TradeData};
-use crate::position::Position;
+use trade::models::{Kline, TradeData};
+use trade::trader::Position;
 use crate::strategy::Strategy;
-use crate::trader::Signal;
-use async_trait::async_trait;
+use trade::signal::Signal;
 use std::collections::VecDeque;
 
 pub struct LiquiditySweep {
@@ -27,8 +26,8 @@ impl LiquiditySweep {
         let mut low = f64::MAX;
 
         for kline in self.klines.iter() {
-            let kline_high = kline.high_price.parse::<f64>().unwrap_or_default();
-            let kline_low = kline.low_price.parse::<f64>().unwrap_or_default();
+            let kline_high = kline.high;
+            let kline_low = kline.low;
 
             if kline_high > high {
                 high = kline_high;
@@ -41,7 +40,7 @@ impl LiquiditySweep {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Strategy for LiquiditySweep {
     async fn on_kline(&mut self, kline: Kline) {
         self.klines.push_back(kline);
@@ -67,13 +66,13 @@ impl Strategy for LiquiditySweep {
         let (swing_high, swing_low) = self.find_swing_high_low();
 
         // Check for bullish sweep (price sweeps below swing low and reverses)
-        if current_price > swing_low && self.klines.back().unwrap().low_price.parse::<f64>().unwrap_or_default() < swing_low {
+        if current_price > swing_low && self.klines.back().unwrap().low < swing_low {
             // Simple reversal: current price is above the swept low
             return Signal::Buy;
         }
 
         // Check for bearish sweep (price sweeps above swing high and reverses)
-        if current_price < swing_high && self.klines.back().unwrap().high_price.parse::<f64>().unwrap_or_default() > swing_high {
+        if current_price < swing_high && self.klines.back().unwrap().high > swing_high {
             // Simple reversal: current price is below the swept high
             return Signal::Sell;
         }

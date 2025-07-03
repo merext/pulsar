@@ -7,8 +7,8 @@ use futures_util::StreamExt;
 use log::info;
 use std::io::BufReader;
 use std::pin::Pin;
-use strategies::models::{Kline as StrategyKline, TradeData as StrategyTradeData};
 use tokio_stream::Stream;
+use trade::models::{Kline as TradeKline, TradeData as TradeTradeData};
 
 pub struct BinanceClient;
 
@@ -36,7 +36,7 @@ impl BinanceClient {
 
     pub async fn subscribe_klines(
         symbol: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = StrategyKline> + Send>>, Box<dyn std::error::Error>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = TradeKline> + Send>>, Box<dyn std::error::Error>> {
         let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
 
         // Subscribe and discard the subscription ID (u64)
@@ -55,7 +55,7 @@ impl BinanceClient {
                         let binary_data = msg.into_data();
                         if let Ok(data) = std::str::from_utf8(&binary_data) {
                             if let Ok(parsed) = serde_json::from_str::<KlineMessage>(data) {
-                                yield parsed.data.kline.into(); // Convert to StrategyKline
+                                yield parsed.data.kline.into(); // Convert to TradeKline
                             }
                         }
                     }
@@ -74,7 +74,7 @@ impl BinanceClient {
 
     pub async fn subscribe_trades(
         symbol: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = StrategyTradeData> + Send>>, Box<dyn std::error::Error>>
+    ) -> Result<Pin<Box<dyn Stream<Item = TradeTradeData> + Send>>, Box<dyn std::error::Error>>
     {
         let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
 
@@ -90,7 +90,7 @@ impl BinanceClient {
                         let binary_data = msg.into_data();
                         if let Ok(data) = std::str::from_utf8(&binary_data) {
                             if let Ok(parsed) = serde_json::from_str::<TradeMessage>(data) {
-                                yield parsed.data.into(); // Convert to StrategyTradeData
+                                yield parsed.data.into(); // Convert to TradeTradeData
                             }
                         }
                     }
@@ -110,7 +110,7 @@ impl BinanceClient {
     pub async fn kline_stream(
         symbol: &str,
         interval: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = StrategyKline> + Send>>, Box<dyn std::error::Error>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = TradeKline> + Send>>, Box<dyn std::error::Error>> {
         let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
 
         // Subscribe and discard the subscription ID (u64)
@@ -129,7 +129,7 @@ impl BinanceClient {
                         let binary_data = msg.into_data();
                         if let Ok(data) = std::str::from_utf8(&binary_data) {
                             if let Ok(parsed) = serde_json::from_str::<KlineMessage>(data) {
-                                yield parsed.data.kline.into(); // Convert to StrategyKline
+                                yield parsed.data.kline.into(); // Convert to TradeKline
                             }
                         }
                     }
@@ -148,7 +148,7 @@ impl BinanceClient {
 
     pub async fn trade_stream(
         symbol: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = StrategyTradeData> + Send>>, Box<dyn std::error::Error>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = TradeTradeData> + Send>>, Box<dyn std::error::Error>> {
         let (mut conn, _) = BinanceWebSocketClient::connect_async_default().await?;
 
         // Subscribe and discard the subscription ID (u64)
@@ -163,7 +163,7 @@ impl BinanceClient {
                         let binary_data = msg.into_data();
                         if let Ok(data) = std::str::from_utf8(&binary_data) {
                             if let Ok(parsed) = serde_json::from_str::<TradeMessage>(data) {
-                                yield parsed.data.into(); // Convert to StrategyTradeData
+                                yield parsed.data.into(); // Convert to TradeTradeData
                             }
                         }
                     }
@@ -182,16 +182,14 @@ impl BinanceClient {
 
     pub async fn backtest_klines(
         zip_url: &str,
-        symbol: &str,
-        interval: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = StrategyKline> + Send>>, Box<dyn std::error::Error>> {
+        _symbol: &str,
+        _interval: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = TradeKline> + Send>>, Box<dyn std::error::Error>> {
         use csv::ReaderBuilder;
         use futures_util::stream;
         use reqwest::Client;
         use std::io::Cursor;
         use zip::ZipArchive;
-
-        use strategies::models::Kline as StrategyKline;
 
         #[allow(dead_code)]
         #[derive(Debug, serde::Deserialize)]
@@ -222,24 +220,26 @@ impl BinanceClient {
             .has_headers(false)
             .from_reader(BufReader::new(&mut file));
 
-        // Step 3: Parse CSV into StrategyKline list
+        // Step 3: Parse CSV into TradeKline list
         let mut rows = Vec::new();
-        let symbol = symbol.to_string();
-        let interval = interval.to_string();
+        let _symbol = _symbol.to_string();
+        let _interval = _interval.to_string();
 
         for result in reader.deserialize::<BinanceCsvKlineRow>() {
             match result {
                 Ok(row) => {
-                    let kline = StrategyKline {
+                    let kline = TradeKline {
                         open_time: row.0,
+                        open: row.1.parse().unwrap_or_default(),
+                        high: row.2.parse().unwrap_or_default(),
+                        low: row.3.parse().unwrap_or_default(),
+                        close: row.4.parse().unwrap_or_default(),
+                        volume: row.5.parse().unwrap_or_default(),
                         close_time: row.6,
-                        open_price: row.1,
-                        high_price: row.2,
-                        low_price: row.3,
-                        close_price: row.4,
-                        volume: row.5,
-                        symbol: symbol.clone(),
-                        interval: interval.clone(),
+                        quote_asset_volume: row.7.parse().unwrap_or_default(),
+                        number_of_trades: row.8,
+                        taker_buy_base_asset_volume: row.9.parse().unwrap_or_default(),
+                        taker_buy_quote_asset_volume: row.10.parse().unwrap_or_default(),
                     };
                     rows.push(kline);
                 }

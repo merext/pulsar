@@ -1,7 +1,7 @@
-use crate::models::{Kline, TradeData};
-use crate::position::Position;
+use trade::models::{Kline, TradeData};
+use trade::trader::Position;
 use crate::strategy::Strategy;
-use crate::trader::Signal;
+use trade::signal::Signal;
 use log::{debug, info};
 use splines::{Interpolation, Key, Spline};
 
@@ -44,22 +44,13 @@ impl SplineStrategy {
             );
         }
     }
-
-    
 }
 
 #[async_trait::async_trait]
 impl Strategy for SplineStrategy {
     async fn on_kline(&mut self, kline: Kline) {
-        let close: f64 = match kline.close_price.parse() {
-            Ok(v) => v,
-            Err(_) => {
-                debug!("Invalid close price: {}", kline.close_price);
-                return;
-            }
-        };
-
-        let timestamp = kline.close_time as f64; // Assuming nanoseconds
+        let close: f64 = kline.close;
+        let timestamp = kline.close_time as f64;
 
         if self.prices.len() == self.window_size {
             // Remove oldest

@@ -1,8 +1,7 @@
-use crate::models::{Kline, TradeData};
-use crate::position::Position;
+use trade::models::{Kline, TradeData};
+use trade::trader::Position;
 use crate::strategy::Strategy;
-use crate::trader::Signal;
-use async_trait::async_trait;
+use trade::signal::Signal;
 use std::collections::VecDeque;
 
 pub struct OrderBookImbalance {
@@ -31,8 +30,8 @@ impl OrderBookImbalance {
         let mut sell_volume = 0.0;
 
         for trade in self.trades.iter() {
-            let quantity = trade.quantity.parse::<f64>().unwrap_or_default();
-            if trade.is_buyer_market_maker {
+            let quantity = trade.qty;
+            if trade.is_buyer_maker {
                 buy_volume += quantity;
             } else {
                 sell_volume += quantity;
@@ -48,7 +47,7 @@ impl OrderBookImbalance {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Strategy for OrderBookImbalance {
     async fn on_kline(&mut self, _kline: Kline) {
         // Not directly used for OBI, but can be used for price context if needed
