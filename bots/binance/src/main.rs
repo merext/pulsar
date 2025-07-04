@@ -7,7 +7,7 @@ use std::io::Write;
 use strategies::rsi_strategy::RsiStrategy;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
-use trade::trader::Trader; // For using .next() on streams
+use trade::trader::{TradeMode, Trader}; // For using .next() on streams
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let signal = strategy.get_signal(close_price, close_time, binance_trader.position());
 
-                    binance_trader.on_signal(signal, close_price).await;
+                    binance_trader.on_signal(signal, close_price, 0.01, TradeMode::Emulated).await;
 
                     log::info!(
                         "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",

@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::signal::Signal;
+use async_trait::async_trait;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -14,16 +14,20 @@ impl fmt::Display for Position {
         write!(
             f,
             "{{ symbol: {}, qty: {:.5}, entry: {:.5} }}",
-            self.symbol,
-            self.quantity,
-            self.entry_price
+            self.symbol, self.quantity, self.entry_price
         )
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradeMode {
+    Real,
+    Emulated,
+}
+
 #[async_trait]
 pub trait Trader {
-    async fn on_signal(&mut self, signal: Signal, price: f64);
+    async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64, mode: TradeMode);
     fn unrealized_pnl(&self, current_price: f64) -> f64;
     fn realized_pnl(&self) -> f64;
     fn position(&self) -> Position;

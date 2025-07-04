@@ -70,13 +70,13 @@ impl BinanceClient {
                         .unwrap_or(0.0),
                 };
 
-                eprintln!("Kline: {:?}", trade_kline);
+                // log::debug!("{:?}", trade_kline);
 
                 if let Err(err) = tx.try_send(trade_kline) {
-                    eprintln!("Failed to send kline to stream: {:?}", err);
+                    log::error!("Failed to send kline to stream: {:?}", err);
                 }
             } else {
-                eprintln!("Received message without kline data: {:?}", msg);
+                log::warn!("Received message without kline data: {:?}", msg);
             }
         });
 
