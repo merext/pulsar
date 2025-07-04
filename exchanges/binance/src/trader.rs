@@ -6,7 +6,7 @@ use binance_sdk::spot::websocket_api::{
 };
 use log::{error, info};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
@@ -68,6 +68,9 @@ impl Trader for BinanceTrader {
 
                     if mode == TradeMode::Emulated {
                         info!("BinanceTrader (emulated): Buy order placed successfully");
+                        // Simulate a buy in emulated mode
+                        self.position.quantity = quantity.to_f64().unwrap_or(0.0);
+                        self.position.entry_price = price;
                     } else {
                         match self.connection.order_place(params).await {
                             Ok(response) => {
@@ -115,6 +118,10 @@ impl Trader for BinanceTrader {
                             "BinanceTrader (emulated): Placing SELL order for {} at {}",
                             symbol, price
                         );
+                        // Simulate a sell in emulated mode
+                        self.position.quantity = 0.0;
+                        self.position.entry_price = 0.0;
+                        self.realized_pnl += pnl;
                     } else {
                         match self.connection.order_place(params).await {
                             Ok(response) => {

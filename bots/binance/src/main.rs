@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let signal = strategy.get_signal(close_price, close_time, binance_trader.position());
 
-                    binance_trader.on_signal(signal, close_price, 0.01, TradeMode::Emulated).await;
+                    binance_trader.on_signal(signal, close_price, 1.0, TradeMode::Emulated).await;
 
                     log::info!(
                         "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
