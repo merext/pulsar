@@ -2,6 +2,7 @@ use binance_exchange::client::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use env_logger::Builder;
 use log::LevelFilter;
+use std::env;
 use std::io::Write;
 use strategies::rsi_strategy::RsiStrategy;
 use strategies::strategy::Strategy;
@@ -32,12 +33,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut strategy = RsiStrategy::new(period, overbought, oversold);
 
     // Initialize trader with API credentials
-    let trading_symbol = "DOGEUSDT".to_string();
+    let trading_symbol = "DOGEUSDT";
     // IMPORTANT: Replace with your actual Binance API Key and Secret
-    let api_key = "YOUR_BINANCE_API_KEY";
-    let api_secret = "YOUR_BINANCE_API_SECRET";
-    let mut trader = BinanceTrader::new(trading_symbol.clone(), api_key, api_secret).await;
+    let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set in the environment");
+    let api_secret =
+        env::var("BINANCE_API_SECRET").expect("API_SECRET must be set in the environment");
 
+    let mut binance_trader = BinanceTrader::new(&trading_symbol, &api_key, &api_secret).await;
     let binance_client = BinanceClient::new().await;
 
     let mut kline_stream = binance_client.kline_stream(&trading_symbol, "1m").await?;
@@ -51,17 +53,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let close_price = kline.close;
                     let close_time = kline.close_time as f64;
 
-                    let signal = strategy.get_signal(close_price, close_time, trader.position());
+                    let signal = strategy.get_signal(close_price, close_time, binance_trader.position());
 
-                    trader.on_signal(signal, close_price).await;
+                    binance_trader.on_signal(signal, close_price).await;
 
                     log::info!(
                         "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
-                        trader.position().symbol,
+                        binance_trader.position().symbol,
                         signal,
-                        trader.position(),
-                        trader.unrealized_pnl(close_price),
-                        trader.realized_pnl()
+                        binance_trader.position(),
+                        binance_trader.unrealized_pnl(close_price),
+                        binance_trader.realized_pnl()
                     );
 
                     strategy.on_kline(kline).await;

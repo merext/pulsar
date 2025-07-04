@@ -18,7 +18,7 @@ pub struct BinanceTrader {
 }
 
 impl BinanceTrader {
-    pub async fn new(symbol: String, api_key: &str, api_secret: &str) -> Self {
+    pub async fn new(symbol: &str, api_key: &str, api_secret: &str) -> Self {
         let config = ConfigurationWebsocketApi::builder()
             .api_key(api_key)
             .api_secret(api_secret)
@@ -35,7 +35,7 @@ impl BinanceTrader {
         BinanceTrader {
             connection,
             position: Position {
-                symbol,
+                symbol: symbol.to_string(),
                 quantity: 0.0,
                 entry_price: 0.0,
             },
