@@ -37,3 +37,17 @@ pub enum MarketEvent {
     Kline(Kline),
     Trade(TradeData),
 }
+
+#[derive(Debug)]
+pub struct Trade {
+    pub event_type: String,
+    pub event_time: u64,
+    pub symbol: String,
+    pub trade_id: u64,
+    pub price: f64,
+    pub quantity: f64,
+    pub buyer_order_id: Option<u64>,
+    pub seller_order_id: Option<u64>,
+    pub trade_time: u64,
+    pub is_buyer_market_maker: bool,
+}

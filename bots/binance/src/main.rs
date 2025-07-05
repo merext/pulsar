@@ -43,14 +43,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut binance_trader = BinanceTrader::new(&trading_symbol, &api_key, &api_secret).await;
 
     loop {
-        let mut kline_stream = loop {
+        let (mut kline_stream, mut trade_stream) = loop {
             match BinanceClient::new().await {
                 Ok(binance_client) => {
-                    match binance_client.kline_stream(&trading_symbol, "1m").await {
-                        Ok(stream) => break stream,
-                        Err(e) => {
+                    let kline_stream_result = binance_client.kline_stream(&trading_symbol, "1m").await;
+                    let trade_stream_result = BinanceClient::new().await.unwrap().trade_stream(&trading_symbol).await;
+
+                    match (kline_stream_result, trade_stream_result) {
+                        (Ok(kline_stream), Ok(trade_stream)) => break (kline_stream, trade_stream),
+                        (Err(e), _) => {
                             log::error!(
                                 "Failed to create kline stream: {}. Retrying in 10 seconds...",
+                                e
+                            );
+                            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        }
+                        (_, Err(e)) => {
+                            log::error!(
+                                "Failed to create trade stream: {}. Retrying in 10 seconds...",
                                 e
                             );
                             tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -68,39 +78,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[allow(unreachable_code)] // This loop is intended to run indefinitely for a live bot
         loop {
             tokio::select! {
-            kline_result = tokio::time::timeout(Duration::from_secs(10), kline_stream.next()) => {
-                match kline_result {
-                    Ok(Some(kline)) => {
-                        let close_price = kline.close;
-                        let close_time = kline.close_time as f64;
+                kline_result = tokio::time::timeout(Duration::from_secs(10), kline_stream.next()) => {
+                    match kline_result {
+                        Ok(Some(kline)) => {
+                            let close_price = kline.close;
+                            let close_time = kline.close_time as f64;
 
-                        let signal = strategy.get_signal(close_price, close_time, binance_trader.position());
+                            let signal = strategy.get_signal(close_price, close_time, binance_trader.position());
 
-                        binance_trader.on_signal(signal, close_price, 1.0, TradeMode::Emulated).await;
+                            binance_trader.on_signal(signal, close_price, 1.0, TradeMode::Emulated).await;
 
-                        log::info!(
-                            "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
-                            binance_trader.position().symbol,
-                            signal,
-                            binance_trader.position(),
-                            binance_trader.unrealized_pnl(close_price),
-                            binance_trader.realized_pnl()
-                        );
+                            log::info!(
+                                "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
+                                binance_trader.position().symbol,
+                                signal,
+                                binance_trader.position(),
+                                binance_trader.unrealized_pnl(close_price),
+                                binance_trader.realized_pnl()
+                            );
 
-                        strategy.on_kline(kline).await;
+                            strategy.on_kline(kline).await;
+                        }
+                        Ok(None) => {
+                            // Stream ended, break the loop to reconnect
+                            break;
+                        }
+                        Err(_) => {
+                            // Timeout elapsed, break the loop to reconnect
+                            log::warn!("Kline stream timed out. Reconnecting...");
+                            break;
+                        }
                     }
-                    Ok(None) => {
-                        // Stream ended, break the loop to reconnect
-                        break;
+                },
+                trade_result = tokio::time::timeout(Duration::from_secs(10), trade_stream.next()) => {
+                    match trade_result {
+                        Ok(Some(trade)) => {
+                            log::info!("Received trade: {:?}", trade);
+                        }
+                        Ok(None) => {
+                            // Stream ended, break the loop to reconnect
+                            break;
+                        }
+                        Err(_) => {
+                            // Timeout elapsed, break the loop to reconnect
+                            log::warn!("Trade stream timed out. Reconnecting...");
+                            break;
+                        }
                     }
-                    Err(_) => {
-                        // Timeout elapsed, break the loop to reconnect
-                        log::warn!("Kline stream timed out. Reconnecting...");
-                        break;
-                    }
-                }
-            },
-        }
+                },
+            }
         }
     }
 }
