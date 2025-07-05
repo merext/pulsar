@@ -11,10 +11,6 @@ tokio-stream = "0.1"
 log = "0.4.27"
 strategies = { path = "../../strategies" }
 splines = "4.4"
-tokio-tungstenite = "0.22"
-futures-util = "0.3"
-futures = "0.3"
 trade = { path = "../../trade" }
-chrono = "0.4.41"
 
 

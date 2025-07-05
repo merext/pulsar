@@ -22,8 +22,12 @@ use trade::trader::{TradeMode, Trader}; // For using .next() on streams
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     let timeout = 30;
+    // unsafe {
+    //     std::env::set_var("RUST_LOG", "debug");
+    // }
 
     Builder::new()
+        .filter(None, LevelFilter::Off) // Disable all logging
         .filter_level(LevelFilter::Debug) // Set fixed log level
         .format(|buf, record| {
             let timestamp = SystemTime::now()
@@ -135,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             binance_trader.on_signal(signal, trade_price, 1.0, TradeMode::Emulated).await;
 
-                            log::info!(
+                            log::debug!(
                                 "{} | Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
                                 signal,
                                 binance_trader.position(),
