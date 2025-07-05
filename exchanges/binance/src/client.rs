@@ -20,10 +20,13 @@ impl BinanceClient {
 
         let client = SpotWsStreams::production(config);
 
-        let connection = client
-            .connect()
-            .await
-            .expect("Failed to connect to WebSocket Streams");
+        let connection = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            client.connect(),
+        )
+        .await
+        .expect("Failed to connect within 30 seconds")
+        .expect("Failed to connect to WebSocket Streams");
 
         BinanceClient {
             connection: connection,
