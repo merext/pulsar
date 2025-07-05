@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[allow(unreachable_code)] // This loop is intended to run indefinitely for a live bot
         loop {
             tokio::select! {
-            kline_result = tokio::time::timeout(Duration::from_secs(70), kline_stream.next()) => {
+            kline_result = tokio::time::timeout(Duration::from_secs(10), kline_stream.next()) => {
                 match kline_result {
                     Ok(Some(kline)) => {
                         let close_price = kline.close;
