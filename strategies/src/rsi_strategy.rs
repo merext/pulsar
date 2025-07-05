@@ -1,4 +1,14 @@
-use trade::models::{Kline, TradeData};
+//! # Relative Strength Index (RSI) Strategy
+//! 
+//! This strategy utilizes the Relative Strength Index (RSI), a momentum oscillator that measures the speed and change of price movements.
+//! RSI oscillates between zero and 100 and is typically used to identify overbought or oversold conditions in an asset.
+//! 
+//! The strategy generates a sell signal when the RSI crosses above a defined overbought threshold (e.g., 70),
+//! indicating that the asset may be overvalued and due for a price correction.
+//! Conversely, a buy signal is generated when the RSI falls below a defined oversold threshold (e.g., 30),
+//! suggesting the asset may be undervalued and due for a price rebound.
+
+use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
@@ -55,13 +65,7 @@ impl RsiStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for RsiStrategy {
-    async fn on_kline(&mut self, kline: Kline) {
-        let close_price = kline.close;
-        self.prices.push_back(close_price);
-        if self.prices.len() > self.period + 1 {
-            self.prices.pop_front();
-        }
-    }
+    
 
     async fn on_trade(&mut self, trade: TradeData) {
         let trade_price = trade.price;

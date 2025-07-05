@@ -1,4 +1,15 @@
-use trade::models::{Kline, TradeData};
+//! # Z-Score Strategy
+//! 
+//! This strategy identifies trading opportunities by measuring how many standard deviations the current price
+//! is away from its historical mean (its Z-score). It is a statistical approach to mean reversion.
+//! 
+//! The strategy calculates the mean and standard deviation of prices over a defined period.
+//! A buy signal is generated when the Z-score falls below a negative threshold (e.g., -2),
+//! indicating that the price is significantly oversold and likely to revert upwards.
+//! Conversely, a sell signal is generated when the Z-score rises above a positive threshold (e.g., +2),
+//! indicating that the price is significantly overbought and likely to revert downwards.
+
+use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
@@ -39,16 +50,14 @@ impl ZScoreStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for ZScoreStrategy {
-    async fn on_kline(&mut self, kline: Kline) {
-        let close_price = kline.close;
-        self.prices.push_back(close_price);
+    
+
+    async fn on_trade(&mut self, trade: TradeData) {
+        let price = trade.price;
+        self.prices.push_back(price);
         if self.prices.len() > self.period {
             self.prices.pop_front();
         }
-    }
-
-    async fn on_trade(&mut self, _trade: TradeData) {
-        // Not used in this strategy
     }
 
     fn get_signal(

@@ -1,7 +1,17 @@
-use crate::models::{Kline, TradeData};
-use crate::position::Position;
+//! # Momentum Scalping Strategy
+//! 
+//! This strategy aims to profit from very short-term price momentum by identifying rapid price changes.
+//! It is designed for high-frequency trading (HFT) environments where quick entry and exit are crucial.
+//! 
+//! The strategy tracks recent price movements within a defined window.
+//! A buy signal is generated if the price change over this window exceeds a positive threshold,
+//! indicating upward momentum. Conversely, a sell signal is generated if the price change falls below a negative threshold,
+//! indicating downward momentum.
+
+use trade::models::TradeData;
+use trade::trader::Position;
 use crate::strategy::Strategy;
-use crate::trader::Signal;
+use trade::signal::Signal;
 use async_trait::async_trait;
 use std::collections::VecDeque;
 
@@ -23,12 +33,10 @@ impl MomentumScalping {
 
 #[async_trait]
 impl Strategy for MomentumScalping {
-    async fn on_kline(&mut self, _kline: Kline) {
-        // Not directly used for this strategy, but could be for broader context
-    }
+    
 
     async fn on_trade(&mut self, trade: TradeData) {
-        let price = trade.price.parse::<f64>().unwrap_or_default();
+        let price = trade.price;
         self.recent_prices.push_back(price);
         if self.recent_prices.len() > self.trade_window_size {
             self.recent_prices.pop_front();

@@ -1,72 +1,76 @@
-use trade::models::{Kline, TradeData};
+//! # Mean Reversion Strategy
+//! 
+//! This strategy is based on the principle that asset prices tend to revert to their historical average or mean price over time.
+//! It identifies opportunities when the price deviates significantly from its moving average, expecting it to return to the mean.
+//! 
+//! The strategy generates a buy signal when the current price falls below its Simple Moving Average (SMA),
+//! anticipating a bounce back towards the mean. Conversely, it generates a sell signal when the price rises above its SMA,
+//! expecting a pull back.
+
+use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
-use log::{debug, info};
+
+
+use std::collections::VecDeque;
 
 pub struct MeanReversionStrategy {
     pub window_size: usize,
-    pub prices: Vec<f64>,
+    pub prices: VecDeque<f64>,
     pub last_sma: Option<f64>,
-    pub recent_trades: Vec<f64>,
+    pub recent_trades: VecDeque<f64>,
     pub max_trade_window: usize,
+}
+
+impl MeanReversionStrategy {
+    pub fn new(window_size: usize, max_trade_window: usize) -> Self {
+        Self {
+            window_size,
+            prices: VecDeque::with_capacity(window_size),
+            last_sma: None,
+            recent_trades: VecDeque::with_capacity(max_trade_window),
+            max_trade_window,
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl Strategy for MeanReversionStrategy {
-    async fn on_kline(&mut self, kline: Kline) {
-        let close: f64 = kline.close;
-
-        self.prices.push(close);
-        if self.prices.len() > self.window_size {
-            self.prices.remove(0);
-        }
-
-        if self.prices.len() < self.window_size {
-            info!("waiting... {}", self.window_size - self.prices.len());
-            return;
-        }
-
-        let sma: f64 = self.prices.iter().sum::<f64>() / self.prices.len() as f64;
-        self.last_sma = Some(sma);
-
-        debug!("🤝 HOLD @ {:.5} (SMA {:.5})", close, sma);
-    }
-
     async fn on_trade(&mut self, trade: TradeData) {
-        let price: f64 = trade.price;
-
-        self.recent_trades.push(price);
-        if self.recent_trades.len() > self.max_trade_window {
-            self.recent_trades.remove(0);
+        let price = trade.price;
+        self.prices.push_back(price);
+        if self.prices.len() > self.window_size {
+            self.prices.pop_front();
         }
 
-        let Some(sma) = self.last_sma else {
-            return;
-        };
+        self.recent_trades.push_back(price);
+        if self.recent_trades.len() > self.max_trade_window {
+            self.recent_trades.pop_front();
+        }
 
-        let avg_trade_price =
-            self.recent_trades.iter().copied().sum::<f64>() / self.recent_trades.len() as f64;
-
-        info!(
-            "Recent trade avg price {:.5} near SMA {:.5}",
-            avg_trade_price, sma
-        );
+        // Update SMA
+        if self.prices.len() == self.window_size {
+            let sum: f64 = self.prices.iter().sum();
+            self.last_sma = Some(sum / self.window_size as f64);
+        }
     }
 
-    /// Determines trading signal based on price, SMA, and current position.
-    fn get_signal(&self, close: f64, _ts: f64, current_position: Position) -> Signal {
-        let Some(sma) = self.last_sma else {
-            return Signal::Hold;
-        };
-
-        let threshold = 0.004;
-        let deviation = (close - sma) / sma;
-
-        if current_position.quantity == 0.0 && deviation < -threshold {
-            Signal::Buy
-        } else if current_position.quantity > 0.0 && deviation > threshold {
-            Signal::Sell
+    fn get_signal(
+        &self,
+        current_price: f64,
+        _current_timestamp: f64,
+        _current_position: Position,
+    ) -> Signal {
+        if let Some(sma) = self.last_sma {
+            // Simple mean reversion: buy if price is below SMA, sell if above
+            if current_price < sma {
+                Signal::Buy
+            } else if current_price > sma {
+                Signal::Sell
+            } else {
+                Signal::Hold
+            }
         } else {
             Signal::Hold
         }

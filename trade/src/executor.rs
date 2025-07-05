@@ -1,6 +1,6 @@
 use crate::market::MarketDataProvider;
-use crate::models::{Kline, MarketEvent, TradeData};
-use crate::trader::{TradeMode, Trader};
+use crate::models::{MarketEvent, TradeData};
+use crate::trader::Trader;
 use tokio::select;
 
 #[allow(async_fn_in_trait)]
@@ -11,7 +11,6 @@ pub trait Strategy {
         ts: f64,
         position: crate::trader::Position,
     ) -> crate::signal::Signal;
-    async fn on_kline(&mut self, kline: Kline);
     async fn on_trade(&mut self, trade: TradeData);
 }
 
@@ -45,11 +44,7 @@ where
             select! {
                 Some(event) = self.market.next_event() => {
                     match event {
-                        MarketEvent::Kline(kline) => {
-                            let signal = self.strategy.get_signal(kline.price(), kline.ts(), self.trader.position());
-                            self.trader.on_signal(signal, kline.price(), 0.0, TradeMode::Emulated).await;
-                            self.strategy.on_kline(kline).await;
-                        },
+                        
                         MarketEvent::Trade(trade) => {
                             self.strategy.on_trade(trade).await;
                         },

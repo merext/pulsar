@@ -3,19 +3,6 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct Kline {
-    pub open_time: u64,
-    pub close_time: u64,
-    pub symbol: String,
-    pub interval: String,
-    pub open_price: String,
-    pub close_price: String,
-    pub high_price: String,
-    pub low_price: String,
-    pub volume: String,
-}
-
-#[derive(Debug, Deserialize, Clone)]
 pub struct TradeData {
     pub event_type: String,
     pub event_time: u64,

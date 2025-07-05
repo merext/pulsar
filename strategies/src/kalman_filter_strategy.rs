@@ -1,7 +1,16 @@
-use crate::models::{Kline, TradeData};
-use crate::position::Position;
+//! # Kalman Filter Strategy
+//! 
+//! This strategy utilizes a Kalman Filter to estimate the true price and its velocity from noisy trade data.
+//! It aims to reduce lag and noise in price tracking, providing a smoother signal for trading decisions.
+//! 
+//! The strategy generates buy or sell signals based on the deviation of the current price from the Kalman Filter's estimated price.
+//! A positive deviation exceeding a defined threshold suggests a potential sell opportunity (price is overvalued relative to its estimated true value),
+//! while a negative deviation below a threshold suggests a potential buy opportunity (price is undervalued).
+
+use trade::models::TradeData;
+use trade::trader::Position;
 use crate::strategy::Strategy;
-use crate::trader::Signal;
+use trade::signal::Signal;
 use async_trait::async_trait;
 use nalgebra::{Matrix2, Vector2};
 
@@ -88,14 +97,8 @@ impl KalmanFilterStrategy {
 
 #[async_trait]
 impl Strategy for KalmanFilterStrategy {
-    async fn on_kline(&mut self, kline: Kline) {
-        let close_price = kline.close_price.parse::<f64>().unwrap_or_default();
-        self.predict();
-        self.update(close_price);
-    }
-
     async fn on_trade(&mut self, trade: TradeData) {
-        let price = trade.price.parse::<f64>().unwrap_or_default();
+        let price = trade.price;
         self.predict();
         self.update(price);
     }
