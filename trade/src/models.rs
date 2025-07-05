@@ -38,7 +38,7 @@ pub enum MarketEvent {
     Trade(TradeData),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Trade {
     pub event_type: String,
     pub event_time: u64,
@@ -50,4 +50,18 @@ pub struct Trade {
     pub seller_order_id: Option<u64>,
     pub trade_time: u64,
     pub is_buyer_market_maker: bool,
+}
+
+impl From<Trade> for TradeData {
+    fn from(trade: Trade) -> Self {
+        TradeData {
+            id: trade.trade_id,
+            price: trade.price,
+            qty: trade.quantity,
+            quote_qty: trade.price * trade.quantity,
+            time: trade.trade_time,
+            is_buyer_maker: trade.is_buyer_market_maker,
+            is_best_match: false,
+        }
+    }
 }

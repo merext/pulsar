@@ -63,8 +63,12 @@ impl Strategy for RsiStrategy {
         }
     }
 
-    async fn on_trade(&mut self, _trade: TradeData) {
-        // Not used in this strategy
+    async fn on_trade(&mut self, trade: TradeData) {
+        let trade_price = trade.price;
+        self.prices.push_back(trade_price);
+        if self.prices.len() > self.period + 1 {
+            self.prices.pop_front();
+        }
     }
 
     fn get_signal(

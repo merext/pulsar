@@ -46,8 +46,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (mut kline_stream, mut trade_stream) = loop {
             match BinanceClient::new().await {
                 Ok(binance_client) => {
-                    let kline_stream_result = binance_client.kline_stream(&trading_symbol, "1m").await;
-                    let trade_stream_result = BinanceClient::new().await.unwrap().trade_stream(&trading_symbol).await;
+                    let kline_stream_result =
+                        binance_client.kline_stream(&trading_symbol, "1m").await;
+                    let trade_stream_result = BinanceClient::new()
+                        .await
+                        .unwrap()
+                        .trade_stream(&trading_symbol)
+                        .await;
 
                     match (kline_stream_result, trade_stream_result) {
                         (Ok(kline_stream), Ok(trade_stream)) => break (kline_stream, trade_stream),
@@ -68,7 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to connect to Binance: {}. Retrying in 10 seconds...", e);
+                    log::error!(
+                        "Failed to connect to Binance: {}. Retrying in 10 seconds...",
+                        e
+                    );
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 }
             }
@@ -89,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             binance_trader.on_signal(signal, close_price, 1.0, TradeMode::Emulated).await;
 
                             log::info!(
-                                "Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
+                                "KLINE | Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
                                 binance_trader.position().symbol,
                                 signal,
                                 binance_trader.position(),
@@ -114,6 +122,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match trade_result {
                         Ok(Some(trade)) => {
                             log::info!("Received trade: {:?}", trade);
+                            strategy.on_trade(trade.clone().into()).await;
+
+                            let trade_price = trade.price;
+                            let trade_time = trade.trade_time as f64;
+
+                            let signal = strategy.get_signal(trade_price, trade_time, binance_trader.position());
+
+                            binance_trader.on_signal(signal, trade_price, 1.0, TradeMode::Emulated).await;
+
+                            log::info!(
+                                "TRADE | Symbol: {}, Signal: {}, Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
+                                binance_trader.position().symbol,
+                                signal,
+                                binance_trader.position(),
+                                binance_trader.unrealized_pnl(trade_price),
+                                binance_trader.realized_pnl()
+                            );
                         }
                         Ok(None) => {
                             // Stream ended, break the loop to reconnect
