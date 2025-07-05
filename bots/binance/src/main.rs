@@ -21,6 +21,8 @@ use trade::trader::{TradeMode, Trader}; // For using .next() on streams
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
+    let timeout = 30;
+
     Builder::new()
         .filter_level(LevelFilter::Debug) // Set fixed log level
         .format(|buf, record| {
@@ -98,18 +100,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(stream) => break stream,
                     Err(e) => {
                         log::error!(
-                            "Failed to create trade stream: {}. Retrying in 10 seconds...",
-                            e
+                            "Failed to create trade stream: {}. Retrying in {} seconds...",
+                            e,
+                            timeout
                         );
                         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                     }
                 },
                 Err(e) => {
                     log::error!(
-                        "Failed to connect to Binance: {}. Retrying in 10 seconds...",
-                        e
+                        "Failed to connect to Binance: {}. Retrying in {} seconds...",
+                        e,
+                        timeout
                     );
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(timeout)).await;
                 }
             }
         };
@@ -118,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[allow(unreachable_code)] // This loop is intended to run indefinitely for a live bot
         loop {
             tokio::select! {
-                trade_result = tokio::time::timeout(Duration::from_secs(10), trade_stream.next()) => {
+                trade_result = tokio::time::timeout(Duration::from_secs(timeout), trade_stream.next()) => {
                     match trade_result {
                         Ok(Some(trade)) => {
                             // log::info!("Received trade: {:?}", trade);
