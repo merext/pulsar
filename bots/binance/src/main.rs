@@ -40,9 +40,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::var("BINANCE_API_SECRET").expect("API_SECRET must be set in the environment");
 
     let mut binance_trader = BinanceTrader::new(&trading_symbol, &api_key, &api_secret).await;
-    let binance_client = BinanceClient::new().await;
 
-    let mut kline_stream = binance_client.kline_stream(&trading_symbol, "1m").await?;
+    let mut kline_stream = loop {
+        match BinanceClient::new().await {
+            Ok(binance_client) => {
+                match binance_client.kline_stream(&trading_symbol, "1m").await {
+                    Ok(stream) => break stream,
+                    Err(e) => {
+                        log::error!("Failed to create kline stream: {}. Retrying in 10 seconds...", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to connect to Binance: {}. Retrying in 10 seconds...", e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            }
+        }
+    };
 
     // Process remaining klines
     #[allow(unreachable_code)] // This loop is intended to run indefinitely for a live bot

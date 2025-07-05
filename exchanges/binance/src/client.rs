@@ -1,9 +1,10 @@
-use anyhow::Context;
+use anyhow::{anyhow, Context, Result};
 use binance_sdk::config::ConfigurationWebsocketStreams;
 use binance_sdk::spot::{
     SpotWsStreams,
     websocket_streams::{KlineIntervalEnum, KlineParams, WebsocketStreams},
 };
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use trade::models::Kline as TradeKline;
@@ -13,28 +14,25 @@ pub struct BinanceClient {
 }
 
 impl BinanceClient {
-    pub async fn new() -> Self {
+    pub async fn new() -> Result<Self> {
         let config = ConfigurationWebsocketStreams::builder()
             .build()
-            .expect("Failed to build config");
+            .context("Failed to build config")?;
 
         let client = SpotWsStreams::production(config);
 
-        let connection = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            client.connect(),
-        )
-        .await
-        .expect("Failed to connect within 10 seconds")
-        .expect("Failed to connect to WebSocket Streams");
+        let connection_result =
+            tokio::time::timeout(Duration::from_secs(10), client.connect()).await;
 
-        BinanceClient {
-            connection: connection,
-        }
+        let connection = connection_result
+            .map_err(|_| anyhow!("Connection timed out"))?
+            .context("Failed to connect to WebSocket Streams")?;
+
+        Ok(BinanceClient { connection })
     }
 
     pub async fn kline_stream(
-        &self,
+        self,
         symbol: &str,
         interval: &str,
     ) -> Result<impl futures_util::Stream<Item = TradeKline>, Box<dyn std::error::Error>> {
@@ -73,7 +71,7 @@ impl BinanceClient {
                         .unwrap_or(0.0),
                 };
 
-                // log::debug!("{:?}", trade_kline);
+                // log::debug!("{:#?}", trade_kline);
 
                 if let Err(err) = tx.try_send(trade_kline) {
                     log::error!("Failed to send kline to stream: {:?}", err);
