@@ -103,8 +103,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             let signal = strategy.get_signal(trade_price, trade_time, binance_trader.position());
 
-                            // binance_trader.on_signal(signal, trade_price, 1.0, TradeMode::Emulated).await;
-                            binance_trader.on_signal(signal, trade_price, 0.1, TradeMode::Real).await;
+
+                            let min_notional = 1.0;
+                            let raw_quantity = min_notional / trade_price;
+                            let quantity_step = 1.0; // get this from exchangeInfo or hardcode per symbol
+                            let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
+                            binance_trader.on_signal(signal, trade_price, quantity_to_trade, TradeMode::Real).await;
 
                             debug!(
                                 signal = %signal,
