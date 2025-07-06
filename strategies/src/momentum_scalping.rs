@@ -48,9 +48,9 @@ impl Strategy for MomentumScalping {
         _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         if self.recent_prices.len() < self.trade_window_size {
-            return Signal::Hold;
+            return (Signal::Hold, 0.0);
         }
 
         let first_price = self.recent_prices.front().unwrap_or(&0.0);
@@ -58,12 +58,19 @@ impl Strategy for MomentumScalping {
 
         let price_change = last_price - first_price;
 
+        let signal: Signal;
+        let mut confidence: f64 = 0.0;
+
         if price_change > self.price_change_threshold {
-            Signal::Buy
+            signal = Signal::Buy;
+            confidence = ((price_change - self.price_change_threshold) / self.price_change_threshold).min(1.0);
         } else if price_change < -self.price_change_threshold {
-            Signal::Sell
+            signal = Signal::Sell;
+            confidence = ((price_change.abs() - self.price_change_threshold) / self.price_change_threshold).min(1.0);
         } else {
-            Signal::Hold
+            signal = Signal::Hold;
+            confidence = 0.0;
         }
+        (signal, confidence)
     }
 }

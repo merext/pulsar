@@ -76,12 +76,12 @@ impl Strategy for SplineStrategy {
         _current_price: f64,
         _current_timestamp: f64, // Not used directly, we use last_ts
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         debug!("Entering get_signal");
 
         if self.last_spline.is_none() {
             debug!("No spline available, returning Hold");
-            return Signal::Hold;
+            return (Signal::Hold, 0.0);
         }
 
         let price_difference_threshold = 0.000000000000001; // Extremely small threshold for HFT
@@ -98,7 +98,7 @@ impl Strategy for SplineStrategy {
             // Ensure p_prev_ts is not before the first timestamp in the spline
             if p_prev_ts < *self.timestamps.first().unwrap() {
                 debug!(p_prev_ts = p_prev_ts, first_spline_timestamp = *self.timestamps.first().unwrap(), "p_prev_ts is before the first spline timestamp. Returning Hold.");
-                return Signal::Hold;
+                return (Signal::Hold, 0.0);
             }
 
             debug!(p_now_ts = format!("{:.0}", p_now_ts), "Sampling spline at p_now_ts.");
@@ -106,7 +106,7 @@ impl Strategy for SplineStrategy {
                 Some(p) => p,
                 None => {
                     debug!(p_now_ts = format!("{:.0}", p_now_ts), "Spline sample at p_now_ts returned None. Returning Hold.");
-                    return Signal::Hold;
+                    return (Signal::Hold, 0.0);
                 }
             };
 
@@ -115,13 +115,16 @@ impl Strategy for SplineStrategy {
                 Some(p) => p,
                 None => {
                     debug!(p_prev_ts = format!("{:.0}", p_prev_ts), "Spline sample at p_prev_ts returned None. Returning Hold.");
-                    return Signal::Hold;
+                    return (Signal::Hold, 0.0);
                 }
             };
             p_now - p_prev
         };
 
         info!(ts = format!("{:.0}", last_ts), difference = format!("{:.6}", price_difference), "Price difference calc.");
+
+        let signal: Signal;
+        let mut confidence: f64 = 0.0;
 
         if price_difference > price_difference_threshold {
             debug!(
@@ -130,7 +133,8 @@ impl Strategy for SplineStrategy {
                 threshold = format!("{:.6}", price_difference_threshold),
                 "Signal: Buy"
             );
-            Signal::Buy
+            signal = Signal::Buy;
+            confidence = ((price_difference - price_difference_threshold) / (price_difference_threshold * 10.0)).min(1.0); // Example confidence calculation
         } else if price_difference < -price_difference_threshold {
             debug!(
                 signal = "Sell",
@@ -138,7 +142,8 @@ impl Strategy for SplineStrategy {
                 threshold = format!("{:.6}", price_difference_threshold),
                 "Signal: Sell"
             );
-            Signal::Sell
+            signal = Signal::Sell;
+            confidence = ((price_difference.abs() - price_difference_threshold) / (price_difference_threshold * 10.0)).min(1.0); // Example confidence calculation
         } else {
             debug!(
                 signal = "Hold",
@@ -146,7 +151,9 @@ impl Strategy for SplineStrategy {
                 threshold = format!("{:.6}", price_difference_threshold),
                 "Signal: Hold"
             );
-            Signal::Hold
+            signal = Signal::Hold;
+            confidence = 0.0;
         }
+        (signal, confidence)
     }
 }

@@ -44,9 +44,9 @@ impl Strategy for VwapDeviationStrategy {
         _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         // This strategy requires K-line data, which is no longer available.
         // It needs to be re-implemented using TradeData or removed.
-        Signal::Hold
+        (Signal::Hold, 0.0)
     }
 }

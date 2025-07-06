@@ -103,10 +103,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let trade_price = trade.price;
                             let trade_time = trade.trade_time as f64;
 
-                            let signal = strategy.get_signal(trade_price, trade_time, binance_trader.position());
+                            let (signal, confidence) = strategy.get_signal(trade_price, trade_time, binance_trader.position());
 
 
-                            let min_notional = 1.0;
+                            let min_notional = 1.0 + 4.0 * confidence;
                             let raw_quantity = min_notional / trade_price;
                             let quantity_step = 1.0; // get this from exchangeInfo or hardcode per symbol
                             let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
@@ -114,6 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             debug!(
                                 signal = %signal,
+                                confidence = %confidence,
                                 position = ?binance_trader.position(),
                                 unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
                                 realized_pnl = format!("{:.6}", binance_trader.realized_pnl())

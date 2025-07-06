@@ -12,7 +12,7 @@ pub trait Strategy {
         _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
-        Signal::Hold
+    ) -> (Signal, f64) {
+        (Signal::Hold, 0.0)
     }
 }

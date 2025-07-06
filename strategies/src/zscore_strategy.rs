@@ -65,25 +65,37 @@ impl Strategy for ZScoreStrategy {
         current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         if self.prices.len() < self.period {
-            return Signal::Hold;
+            return (Signal::Hold, 0.0);
         }
 
         let (mean, std_dev) = self.calculate_mean_and_std_dev();
 
         if std_dev == 0.0 {
-            return Signal::Hold;
+            return (Signal::Hold, 0.0);
         }
 
         let z_score = (current_price - mean) / std_dev;
 
-        if z_score > self.buy_threshold {
-            Signal::Sell // Price is significantly above mean, overbought
-        } else if z_score < self.sell_threshold {
-            Signal::Buy // Price is significantly below mean, oversold
+        let signal: Signal;
+        let mut confidence: f64 = 0.0;
+
+        if z_score > self.sell_threshold {
+            signal = Signal::Sell;
+            // Calculate confidence for Sell signal
+            // The further z_score is above sell_threshold, the higher the confidence
+            confidence = ((z_score - self.sell_threshold) / 1.0).min(1.0); // Assuming 1.0 is a reasonable scaling factor for deviation
+        } else if z_score < self.buy_threshold {
+            signal = Signal::Buy;
+            // Calculate confidence for Buy signal
+            // The further z_score is below buy_threshold, the higher the confidence
+            confidence = ((self.buy_threshold - z_score) / 1.0).min(1.0); // Assuming 1.0 is a reasonable scaling factor for deviation
         } else {
-            Signal::Hold
+            signal = Signal::Hold;
+            confidence = 0.0; // No confidence for Hold signal
         }
+
+        (signal, confidence)
     }
 }

@@ -80,15 +80,24 @@ impl Strategy for RsiStrategy {
         _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         let rsi = self.calculate_rsi();
 
+        let signal: Signal;
+        let mut confidence: f64 = 0.0;
+
         if rsi > self.overbought {
-            Signal::Sell
+            signal = Signal::Sell;
+            // Confidence increases as RSI goes further above overbought
+            confidence = ((rsi - self.overbought) / (100.0 - self.overbought)).min(1.0);
         } else if rsi < self.oversold {
-            Signal::Buy
+            signal = Signal::Buy;
+            // Confidence increases as RSI goes further below oversold
+            confidence = ((self.oversold - rsi) / self.oversold).min(1.0);
         } else {
-            Signal::Hold
+            signal = Signal::Hold;
+            confidence = 0.0;
         }
+        (signal, confidence)
     }
 }

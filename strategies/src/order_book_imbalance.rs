@@ -72,15 +72,24 @@ impl Strategy for OrderBookImbalance {
         _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         let obi = self.calculate_obi();
 
+        let signal: Signal;
+        let mut confidence: f64 = 0.0;
+
         if obi > self.buy_threshold {
-            Signal::Buy
+            signal = Signal::Buy;
+            // Confidence increases as OBI goes further above buy_threshold
+            confidence = ((obi - self.buy_threshold) / (1.0 - self.buy_threshold)).min(1.0);
         } else if obi < self.sell_threshold {
-            Signal::Sell
+            signal = Signal::Sell;
+            // Confidence increases as OBI goes further below sell_threshold
+            confidence = ((self.sell_threshold - obi) / (self.sell_threshold - (-1.0))).min(1.0);
         } else {
-            Signal::Hold
+            signal = Signal::Hold;
+            confidence = 0.0;
         }
+        (signal, confidence)
     }
 }

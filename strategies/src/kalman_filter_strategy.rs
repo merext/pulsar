@@ -108,16 +108,23 @@ impl Strategy for KalmanFilterStrategy {
         current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         let estimated_price = self.state_estimate[0];
         let deviation = current_price - estimated_price;
 
+        let signal: Signal;
+        let mut confidence: f64 = 0.0;
+
         if deviation > self.signal_threshold {
-            Signal::Buy // Current price is significantly above estimated price
+            signal = Signal::Buy; // Current price is significantly above estimated price
+            confidence = (deviation / (self.signal_threshold * 2.0)).min(1.0); // Example confidence calculation
         } else if deviation < -self.signal_threshold {
-            Signal::Sell // Current price is significantly below estimated price
+            signal = Signal::Sell; // Current price is significantly below estimated price
+            confidence = (deviation.abs() / (self.signal_threshold * 2.0)).min(1.0); // Example confidence calculation
         } else {
-            Signal::Hold
+            signal = Signal::Hold;
+            confidence = 0.0;
         }
+        (signal, confidence)
     }
 }

@@ -61,18 +61,29 @@ impl Strategy for MeanReversionStrategy {
         current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
-    ) -> Signal {
+    ) -> (Signal, f64) {
         if let Some(sma) = self.last_sma {
-            // Simple mean reversion: buy if price is below SMA, sell if above
-            if current_price < sma {
-                Signal::Buy
-            } else if current_price > sma {
-                Signal::Sell
+            let deviation = current_price - sma;
+            let signal: Signal;
+            let mut confidence: f64 = 0.0;
+
+            // A simple confidence calculation: larger deviation means higher confidence
+            // Normalize deviation to a 0-1 range. You might need to tune the divisor.
+            let max_deviation_for_confidence = sma * 0.01; // Example: 1% of SMA as max deviation for 100% confidence
+
+            if deviation < 0.0 && current_price < sma { // Price is below SMA, potential buy
+                signal = Signal::Buy;
+                confidence = (deviation.abs() / max_deviation_for_confidence).min(1.0);
+            } else if deviation > 0.0 && current_price > sma { // Price is above SMA, potential sell
+                signal = Signal::Sell;
+                confidence = (deviation.abs() / max_deviation_for_confidence).min(1.0);
             } else {
-                Signal::Hold
+                signal = Signal::Hold;
+                confidence = 0.0;
             }
+            (signal, confidence)
         } else {
-            Signal::Hold
+            (Signal::Hold, 0.0)
         }
     }
 }
