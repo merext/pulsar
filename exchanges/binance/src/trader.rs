@@ -178,9 +178,58 @@ impl Trader for BinanceTrader {
         self.position.clone()
     }
 
-    async fn account_status(&self) -> Result<String, anyhow::Error> {
-        let params = AccountStatusParams::builder().build()?;
+    async fn account_status(&self) -> Result<(), anyhow::Error> {
+        let params = AccountStatusParams::builder()
+            .omit_zero_balances(true)
+            .build()?;
         let status = self.connection.account_status(params).await?;
-        Ok(format!("{:?}", status))
+        let data = status.data().unwrap();
+
+        use std::fmt::Write;
+
+        if let Some(account_type) = &data.account_type {
+            println!("Account Type:\t{}", account_type);
+        }
+
+        if let Some(uid) = &data.uid {
+            println!("UID:\t{}", uid);
+        }
+
+        if let Some(can_trade) = data.can_trade {
+            println!("Can Trade:\t{}", can_trade);
+        }
+
+        if let Some(can_withdraw) = data.can_withdraw {
+            println!("Can Withdraw:\t{}", can_withdraw);
+        }
+
+        if let Some(can_deposit) = data.can_deposit {
+            println!("Can Deposit:\t{}", can_deposit);
+        }
+
+        if let Some(permissions) = &data.permissions {
+            println!("Permissions:\t{:?}", permissions);
+        }
+
+        if let Some(rates) = &data.commission_rates {
+            println!("\nCommission Rates:");
+            println!("  Maker:\t{}", rates.maker.as_deref().unwrap_or("N/A"));
+            println!("  Taker:\t{}", rates.taker.as_deref().unwrap_or("N/A"));
+            println!("  Buyer:\t{}", rates.buyer.as_deref().unwrap_or("N/A"));
+            println!("  Seller:\t{}", rates.seller.as_deref().unwrap_or("N/A"));
+        }
+
+        if let Some(balances) = &data.balances {
+            println!("\nAsset\tFree\t\tLocked");
+            println!("-----\t--------\t--------");
+            for b in balances {
+                let asset = b.asset.as_deref().unwrap_or("-");
+                let free = b.free.as_deref().unwrap_or("0");
+                let locked = b.locked.as_deref().unwrap_or("0");
+                println!("{}\t{}\t{}", asset, free, locked);
+            }
+        }
+
+        Ok(())
     }
 }
