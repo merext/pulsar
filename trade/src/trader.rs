@@ -31,4 +31,5 @@ pub trait Trader {
     fn unrealized_pnl(&self, current_price: f64) -> f64;
     fn realized_pnl(&self) -> f64;
     fn position(&self) -> Position;
+    async fn account_status(&self) -> Result<String, anyhow::Error>;
 }

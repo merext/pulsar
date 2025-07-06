@@ -65,6 +65,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut binance_trader = BinanceTrader::new(&trading_symbol, &api_key, &api_secret).await;
 
+    match binance_trader.account_status().await {
+        Ok(status) => tracing::info!("Account status: {}", status),
+        Err(e) => tracing::error!("Failed to get account status: {:?}", e),
+    };
+
     loop {
         let mut trade_stream = loop {
             match BinanceClient::new().await {

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use binance_sdk::config::ConfigurationWebsocketApi;
 use binance_sdk::spot::SpotWsApi;
 use binance_sdk::spot::websocket_api::{
-    OrderPlaceParams, OrderPlaceSideEnum, OrderPlaceTypeEnum, WebsocketApi,
+    AccountStatusParams, OrderPlaceParams, OrderPlaceSideEnum, OrderPlaceTypeEnum, WebsocketApi,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -176,5 +176,11 @@ impl Trader for BinanceTrader {
 
     fn position(&self) -> Position {
         self.position.clone()
+    }
+
+    async fn account_status(&self) -> Result<String, anyhow::Error> {
+        let params = AccountStatusParams::builder().build()?;
+        let status = self.connection.account_status(params).await?;
+        Ok(format!("{:?}", status))
     }
 }
