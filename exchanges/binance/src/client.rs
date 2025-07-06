@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use trade::models::Trade as PulsarTrade;
+use tracing::{error};
 
 pub struct BinanceClient {
     connection: WebsocketStreams,
@@ -63,7 +64,7 @@ impl BinanceClient {
             };
 
             if let Err(err) = tx.try_send(trade) {
-                log::error!("Failed to send trade to stream: {:?}", err);
+                error!(error = ?err, "Failed to send trade to stream.");
             }
         });
 

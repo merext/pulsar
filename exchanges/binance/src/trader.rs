@@ -4,10 +4,10 @@ use binance_sdk::spot::SpotWsApi;
 use binance_sdk::spot::websocket_api::{
     OrderPlaceParams, OrderPlaceSideEnum, OrderPlaceTypeEnum, WebsocketApi,
 };
-use log::{error, info};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
+use tracing::{error, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 
@@ -53,10 +53,6 @@ impl Trader for BinanceTrader {
         match signal {
             Signal::Buy => {
                 if self.position.quantity == 0.0 {
-                    info!(
-                        "BinanceTrader: Placing BUY order for {} at {}",
-                        symbol, price
-                    );
                     let params = OrderPlaceParams::builder(
                         symbol.clone(),
                         OrderPlaceSideEnum::Buy,
@@ -67,7 +63,15 @@ impl Trader for BinanceTrader {
                     .unwrap();
 
                     if mode == TradeMode::Emulated {
-                        info!("BinanceTrader (emulated): Buy order placed successfully");
+                        info!(
+                            exchange = "binance",
+                            mode = "emulated",
+                            action = "place_buy_order",
+                            status = "success",
+                            symbol = %symbol,
+                            price = %format!("{:.6}", price),
+                            quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default())
+                        );
                         // Simulate a buy in emulated mode
                         self.position.quantity = quantity.to_f64().unwrap_or(0.0);
                         self.position.entry_price = price;
@@ -75,7 +79,7 @@ impl Trader for BinanceTrader {
                         match self.connection.order_place(params).await {
                             Ok(response) => {
                                 let data = response.data().unwrap();
-                                info!("BinanceTrader: Buy order placed successfully: {:?}", data);
+                                info!(exchange = "binance", action = "place_buy_order", status = "success", data = ?data);
                                 self.position.quantity = data
                                     .executed_qty
                                     .as_ref()
@@ -89,7 +93,14 @@ impl Trader for BinanceTrader {
                                     .unwrap_or(price);
                             }
                             Err(e) => {
-                                error!("BinanceTrader: Failed to place buy order: {:?}", e);
+                                error!(
+                                    exchange = "binance",
+                                    action = "place_buy_order",
+                                    status = "failed",
+                                    symbol = %symbol,
+                                    quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                                    error = ?e
+                                );
                             }
                         }
                     }
@@ -99,11 +110,6 @@ impl Trader for BinanceTrader {
                 if self.position.quantity > 0.0 {
                     let pnl = (price - self.position.entry_price) * self.position.quantity;
                     self.realized_pnl += pnl;
-
-                    info!(
-                        "BinanceTrader: Placing SELL order for {} at {}",
-                        symbol, price
-                    );
                     let params = OrderPlaceParams::builder(
                         symbol.clone(),
                         OrderPlaceSideEnum::Sell,
@@ -115,8 +121,14 @@ impl Trader for BinanceTrader {
 
                     if mode == TradeMode::Emulated {
                         info!(
-                            "BinanceTrader (emulated): Placing SELL order for {} at {}",
-                            symbol, price
+                            exchange = "binance",
+                            mode = "emulated",
+                            action = "place_sell_order",
+                            status = "success",
+                            symbol = %symbol,
+                            price = %format!("{:.6}", price),
+                            quantity = %format!("{:.6}", self.position.quantity),
+                            pnl = %format!("{:.6}", pnl)
                         );
                         // Simulate a sell in emulated mode
                         self.position.quantity = 0.0;
@@ -126,12 +138,19 @@ impl Trader for BinanceTrader {
                         match self.connection.order_place(params).await {
                             Ok(response) => {
                                 let data = response.data().unwrap();
-                                info!("BinanceTrader: Sell order placed successfully: {:?}", data);
+                                info!(exchange = "binance", action = "place_sell_order", status = "success", data = ?data);
                                 self.position.quantity = 0.0; // Assuming full sell
                                 self.position.entry_price = 0.0;
                             }
                             Err(e) => {
-                                error!("BinanceTrader: Failed to sell order: {:?}", e);
+                                error!(
+                                    exchange = "binance",
+                                    action = "place_sell_order",
+                                    status = "failed",
+                                    symbol = %symbol,
+                                    quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                                    error = ?e
+                                );
                             }
                         }
                     }

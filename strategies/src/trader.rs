@@ -1,4 +1,5 @@
 use crate::position::Position;
+use tracing::{debug, error};
 
 pub struct VirtualTrader {
     pub position: Position,
@@ -25,18 +26,18 @@ impl VirtualTrader {
                     self.position = Position::Long;
                     self.entry_price = price;
                     self.trades_executed += 1;
-                    log::debug!("Entered LONG at price {:.5}", price);
+                    debug!(price = format!("{:.6}", price), "Entered LONG.");
                 }
             }
             Signal::Sell => {
                 if self.position == Position::Long {
                     let profit = price - self.entry_price;
                     self.realized_pnl += profit;
-                    log::error!(
-                        "Exited LONG at price {:.5}, profit {:.5}, total PnL {:.5}",
-                        price,
-                        profit,
-                        self.realized_pnl
+                    error!(
+                        price = price,
+                        profit = profit,
+                        total_pnl = self.realized_pnl,
+                        "Exited LONG."
                     );
                     self.position = Position::Flat;
                     self.entry_price = 0.0;

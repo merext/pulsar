@@ -1,50 +1,18 @@
 use binance_exchange::client::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
-use env_logger::Builder;
-use log::LevelFilter;
-use splines::Interpolation;
 use std::env;
-use std::io::Write;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use strategies::kalman_filter_strategy::KalmanFilterStrategy;
-use strategies::mean_reversion::MeanReversionStrategy;
-use strategies::momentum_scalping::MomentumScalping;
-use strategies::order_book_imbalance::OrderBookImbalance;
-use strategies::rsi_strategy::RsiStrategy;
-use strategies::spline_strategy::SplineStrategy;
+use std::time::Duration;
 use strategies::strategy::Strategy;
-use strategies::vwap_deviation_strategy::VwapDeviationStrategy;
 use strategies::zscore_strategy::ZScoreStrategy;
 use tokio_stream::StreamExt;
-use trade::trader::{TradeMode, Trader}; // For using .next() on streams
+use tracing::{debug, error, warn};
+use trade::trader::{TradeMode, Trader};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logger
+    // Initialize tracing
     let timeout = 30;
-    // unsafe {
-    //     std::env::set_var("RUST_LOG", "debug");
-    // }
-
-    Builder::new()
-        .filter(None, LevelFilter::Off) // Disable all logging
-        .filter_level(LevelFilter::Debug) // Set fixed log level
-        .format(|buf, record| {
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            writeln!(
-                buf,
-                "[{} {} {}:{}] {}",
-                timestamp,
-                record.level(),
-                record.file().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                record.args()
-            )
-        })
-        .init();
+    tracing_subscriber::fmt::init();
 
     // Instantiate the strategy with required state
     // let period = 14;
@@ -103,19 +71,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(binance_client) => match binance_client.trade_stream(&trading_symbol).await {
                     Ok(stream) => break stream,
                     Err(e) => {
-                        log::error!(
-                            "Failed to create trade stream: {}. Retrying in {} seconds...",
-                            e,
-                            timeout
+                        error!(
+                            "action=create_trade_stream status=failed error={:?} retry_in_seconds={}",
+                            e, timeout
                         );
                         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                     }
                 },
                 Err(e) => {
-                    log::error!(
-                        "Failed to connect to Binance: {}. Retrying in {} seconds...",
-                        e,
-                        timeout
+                    error!(
+                        "action=connect_to_binance status=failed error={:?} retry_in_seconds={}",
+                        e, timeout
                     );
                     tokio::time::sleep(tokio::time::Duration::from_secs(timeout)).await;
                 }
@@ -137,14 +103,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             let signal = strategy.get_signal(trade_price, trade_time, binance_trader.position());
 
-                            binance_trader.on_signal(signal, trade_price, 1.0, TradeMode::Emulated).await;
+                            // binance_trader.on_signal(signal, trade_price, 1.0, TradeMode::Emulated).await;
+                            binance_trader.on_signal(signal, trade_price, 0.1, TradeMode::Real).await;
 
-                            log::debug!(
-                                "{} | Position: {}, Unrealized PnL: {:.5}, Realized PnL: {:.5}",
-                                signal,
-                                binance_trader.position(),
-                                binance_trader.unrealized_pnl(trade_price),
-                                binance_trader.realized_pnl()
+                            debug!(
+                                signal = %signal,
+                                position = ?binance_trader.position(),
+                                unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+                                realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
                             );
                         }
                         Ok(None) => {
@@ -152,8 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             break;
                         }
                         Err(_) => {
-                            // Timeout elapsed, break the loop to reconnect
-                            log::warn!("Trade stream timed out. Reconnecting...");
+                            warn!("action=trade_stream_timeout status=reconnecting");
                             break;
                         }
                     }

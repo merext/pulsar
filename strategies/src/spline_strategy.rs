@@ -11,7 +11,7 @@ use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
-use log::{debug, info};
+use tracing::{debug, info};
 use splines::{Interpolation, Key, Spline};
 
 pub struct SplineStrategy {
@@ -43,13 +43,13 @@ impl SplineStrategy {
                 .map(|(&t, &p)| Key::new(t, p, self.interpolation))
                 .collect();
             self.last_spline = Some(Spline::from_vec(points));
-            debug!("Spline updated with {} points.", self.window_size);
+            debug!(spline_points = self.window_size, "Spline updated.");
         } else {
             self.last_spline = None;
             info!(
-                "Waiting for enough data to build spline: need {}, have {}",
-                self.window_size,
-                self.prices.len()
+                need_data = self.window_size,
+                have_data = self.prices.len(),
+                "Waiting for enough data to build spline."
             );
         }
     }
@@ -97,48 +97,54 @@ impl Strategy for SplineStrategy {
 
             // Ensure p_prev_ts is not before the first timestamp in the spline
             if p_prev_ts < *self.timestamps.first().unwrap() {
-                debug!("p_prev_ts ({:.0}) is before the first spline timestamp ({:.0}). Returning Hold.", p_prev_ts, *self.timestamps.first().unwrap());
+                debug!(p_prev_ts = p_prev_ts, first_spline_timestamp = *self.timestamps.first().unwrap(), "p_prev_ts is before the first spline timestamp. Returning Hold.");
                 return Signal::Hold;
             }
 
-            debug!("Sampling spline at p_now_ts: {:.0}", p_now_ts);
+            debug!(p_now_ts = format!("{:.0}", p_now_ts), "Sampling spline at p_now_ts.");
             let p_now = match spline.sample(p_now_ts) {
                 Some(p) => p,
                 None => {
-                    debug!("Spline sample at p_now_ts ({:.0}) returned None. Returning Hold.", p_now_ts);
+                    debug!(p_now_ts = format!("{:.0}", p_now_ts), "Spline sample at p_now_ts returned None. Returning Hold.");
                     return Signal::Hold;
                 }
             };
 
-            debug!("Sampling spline at p_prev_ts: {:.0}", p_prev_ts);
+            debug!(p_prev_ts = format!("{:.0}", p_prev_ts), "Sampling spline at p_prev_ts.");
             let p_prev = match spline.sample(p_prev_ts) {
                 Some(p) => p,
                 None => {
-                    debug!("Spline sample at p_prev_ts ({:.0}) returned None. Returning Hold.", p_prev_ts);
+                    debug!(p_prev_ts = format!("{:.0}", p_prev_ts), "Spline sample at p_prev_ts returned None. Returning Hold.");
                     return Signal::Hold;
                 }
             };
             p_now - p_prev
         };
 
-        info!("Price difference calc => ts: {:.0}, difference: {:.18}", last_ts, price_difference); // Increased precision
+        info!(ts = format!("{:.0}", last_ts), difference = format!("{:.6}", price_difference), "Price difference calc.");
 
         if price_difference > price_difference_threshold {
             debug!(
-                "Signal: Buy (difference {:.18} > threshold {:.18})", // Increased precision
-                price_difference, price_difference_threshold
+                signal = "Buy",
+                difference = format!("{:.6}", price_difference),
+                threshold = format!("{:.6}", price_difference_threshold),
+                "Signal: Buy"
             );
             Signal::Buy
         } else if price_difference < -price_difference_threshold {
             debug!(
-                "Signal: Sell (difference {:.18} < -threshold {:.18})", // Increased precision
-                price_difference, price_difference_threshold
+                signal = "Sell",
+                difference = format!("{:.6}", price_difference),
+                threshold = format!("{:.6}", price_difference_threshold),
+                "Signal: Sell"
             );
             Signal::Sell
         } else {
             debug!(
-                "Signal: Hold (difference {:.18} within ±{:.18})", // Increased precision
-                price_difference, price_difference_threshold
+                signal = "Hold",
+                difference = format!("{:.6}", price_difference),
+                threshold = format!("{:.6}", price_difference_threshold),
+                "Signal: Hold"
             );
             Signal::Hold
         }
