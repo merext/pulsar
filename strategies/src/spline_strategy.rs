@@ -12,7 +12,7 @@ use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
 use tracing::{debug, info};
-use splines::{Interpolation, Key, Spline};
+pub use splines::{Interpolation, Key, Spline};
 
 pub struct SplineStrategy {
     pub window_size: usize,

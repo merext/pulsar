@@ -15,6 +15,7 @@ use crate::strategy::Strategy;
 use trade::signal::Signal;
 use std::collections::VecDeque;
 
+#[derive(Clone)]
 pub struct ZScoreStrategy {
     period: usize,
     buy_threshold: f64,
