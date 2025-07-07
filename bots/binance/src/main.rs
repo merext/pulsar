@@ -9,7 +9,7 @@ use tracing::{debug, error, warn};
 use trade::trader::{TradeMode, Trader};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing
     let timeout = 30;
     tracing_subscriber::fmt::init();
@@ -67,6 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     binance_trader.account_status().await?;
 
+    /*
     loop {
         let mut trade_stream = loop {
             match BinanceClient::new().await {
@@ -133,4 +134,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    */
+
+    let binance_client = BinanceClient::new().await?;
+    let mut trade_stream = binance_client
+        .trade_data("https://data.binance.vision/data/spot/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-05-26.zip")
+        .await?;
+
+    while let Some(trade) = trade_stream.next().await {
+        strategy.on_trade(trade.clone().into()).await;
+
+        let trade_price = trade.price;
+        let trade_time = trade.trade_time as f64;
+
+        let (signal, confidence) =
+            strategy.get_signal(trade_price, trade_time, binance_trader.position());
+
+        let min_notional = 1.0 + 4.0 * confidence;
+        let raw_quantity = min_notional / trade_price;
+        let quantity_step = 1.0; // get this from exchangeInfo or hardcode per symbol
+        let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
+        binance_trader
+            .on_signal(signal, trade_price, quantity_to_trade, TradeMode::Emulated)
+            .await;
+
+        debug!(
+            signal = %signal,
+            confidence = %confidence,
+            position = ?binance_trader.position(),
+            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
+        );
+    }
+
+    Ok(())
 }

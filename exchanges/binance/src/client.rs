@@ -93,20 +93,66 @@ impl BinanceClient {
         let mut archive = ZipArchive::new(cursor)?;
         let file = archive.by_index(0)?;
 
-        let mut rdr = ReaderBuilder::new().from_reader(file);
+        let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
         let mut trades = Vec::new();
 
         for result in rdr.records() {
-            let record = result?;
-            let trade = PulsarTrade {
-                trade_id: record[0].parse()?,
-                price: record[1].parse()?,
-                quantity: record[2].parse()?,
-                trade_time: record[3].parse()?,
-                is_buyer_market_maker: record[4].parse()?,
-                ..Default::default()
+            let record = match result {
+                Ok(record) => record,
+                Err(e) => {
+                    error!(error = ?e, "Failed to parse CSV record.");
+                    continue;
+                }
             };
-            trades.push(trade);
+
+            let trade_id: u64 = match record[0].parse() {
+                Ok(id) => id,
+                Err(e) => {
+                    error!(error = ?e, record = ?record, "Failed to parse trade_id.");
+                    continue;
+                }
+            };
+
+            let price: f64 = match record[1].parse() {
+                Ok(price) => price,
+                Err(e) => {
+                    error!(error = ?e, record = ?record, "Failed to parse price.");
+                    continue;
+                }
+            };
+
+            let quantity: f64 = match record[2].parse() {
+                Ok(quantity) => quantity,
+                Err(e) => {
+                    error!(error = ?e, record = ?record, "Failed to parse quantity.");
+                    continue;
+                }
+            };
+
+            let trade_time: u64 = match record[4].parse() {
+                Ok(time) => time,
+                Err(e) => {
+                    error!(error = ?e, record = ?record, "Failed to parse trade_time.");
+                    continue;
+                }
+            };
+
+            let is_buyer_market_maker: bool = match record[5].to_lowercase().parse() {
+                Ok(is_buyer) => is_buyer,
+                Err(e) => {
+                    error!(error = ?e, record = ?record, "Failed to parse is_buyer_market_maker.");
+                    continue;
+                }
+            };
+
+            trades.push(PulsarTrade {
+                trade_id,
+                price,
+                quantity,
+                trade_time,
+                is_buyer_market_maker,
+                ..Default::default()
+            });
         }
 
         Ok(trades)
