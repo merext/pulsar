@@ -12,7 +12,7 @@ pub enum MarketEvent {
     Trade(TradeData),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Trade {
     pub event_type: String,
     pub event_time: u64,

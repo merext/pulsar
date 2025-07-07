@@ -1,14 +1,19 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use binance_sdk::config::ConfigurationWebsocketStreams;
 use binance_sdk::spot::{
-    SpotWsStreams,
     websocket_streams::{TradeParams, WebsocketStreams},
+    SpotWsStreams,
 };
+use bytes::Bytes;
+use csv::ReaderBuilder;
+use futures_util::stream::{self, Stream};
+use std::io::Cursor;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use trade::models::Trade as PulsarTrade;
-use tracing::{error};
+use tracing::error;
+use zip::read::ZipArchive;
 
 pub struct BinanceClient {
     connection: WebsocketStreams,
@@ -47,7 +52,7 @@ impl BinanceClient {
             .await
             .context("Failed to subscribe to the trade stream")?;
 
-        let (tx, rx) = mpsc::channel(10);
+        let (tx, rx) = mpsc::channel(100);
 
         ws_stream.on_message(move |msg| {
             let trade = PulsarTrade {
@@ -69,5 +74,41 @@ impl BinanceClient {
         });
 
         Ok(ReceiverStream::new(rx))
+    }
+
+    pub async fn trade_data(
+        &self,
+        url: &str,
+    ) -> Result<impl Stream<Item = PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
+        let response = reqwest::get(url).await?.bytes().await?;
+        let trades = self.parse_trade_data(response)?;
+        Ok(stream::iter(trades))
+    }
+
+    fn parse_trade_data(
+        &self,
+        data: Bytes,
+    ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
+        let cursor = Cursor::new(data);
+        let mut archive = ZipArchive::new(cursor)?;
+        let file = archive.by_index(0)?;
+
+        let mut rdr = ReaderBuilder::new().from_reader(file);
+        let mut trades = Vec::new();
+
+        for result in rdr.records() {
+            let record = result?;
+            let trade = PulsarTrade {
+                trade_id: record[0].parse()?,
+                price: record[1].parse()?,
+                quantity: record[2].parse()?,
+                trade_time: record[3].parse()?,
+                is_buyer_market_maker: record[4].parse()?,
+                ..Default::default()
+            };
+            trades.push(trade);
+        }
+
+        Ok(trades)
     }
 }
