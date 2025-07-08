@@ -4,7 +4,7 @@ use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
 use tracing::debug;
-use trade::trader::{TradeMode, Trader};
+use trade::trader::Trader;
 
 pub async fn run_backtest(
     url: &str,
@@ -28,7 +28,7 @@ pub async fn run_backtest(
         let quantity_step = 1.0; // get this from exchangeInfo or hardcode per symbol
         let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
         binance_trader
-            .on_signal(signal, trade_price, quantity_to_trade, TradeMode::Emulated)
+            .on_emulate(signal, trade_price, quantity_to_trade)
             .await;
 
         debug!(

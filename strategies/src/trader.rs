@@ -19,7 +19,7 @@ impl VirtualTrader {
     }
 
     /// Process a trading signal at given price, update position and pnl accordingly.
-    pub fn on_signal(&mut self, signal: Signal, price: f64) {
+    pub fn on_emulate(&mut self, signal: Signal, price: f64) {
         match signal {
             Signal::Buy => {
                 if self.position == Position::Flat {

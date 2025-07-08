@@ -9,7 +9,7 @@ use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
 use tracing::{debug, error, info};
 use trade::signal::Signal;
-use trade::trader::{Position, TradeMode, Trader};
+use trade::trader::{Position, Trader};
 
 pub struct BinanceTrader {
     connection: WebsocketApi,
@@ -44,9 +44,10 @@ impl BinanceTrader {
     }
 }
 
+
 #[async_trait]
 impl Trader for BinanceTrader {
-    async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64, mode: TradeMode) {
+    async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
         let symbol = self.position.symbol.clone();
         let quantity = Decimal::from_f64(quantity).unwrap_or(dec!(0.0)); // Updated quantity conversion
 
@@ -62,55 +63,40 @@ impl Trader for BinanceTrader {
                     .build()
                     .unwrap();
 
-                    if mode == TradeMode::Emulated {
-                        info!(
-                            exchange = "binance",
-                            mode = "emulated",
-                            action = "place_buy_order",
-                            symbol = %symbol,
-                            price = %format!("{:.6}", price),
-                            quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
-                            profit = %format!("{:.6}", self.realized_pnl)
-                        );
-                        // Simulate a buy in emulated mode
-                        self.position.quantity = quantity.to_f64().unwrap_or(0.0);
-                        self.position.entry_price = price;
-                    } else {
-                        match self.connection.order_place(params).await {
-                            Ok(response) => {
-                                let data = response.data().unwrap();
-                                info!(
-                                    exchange = "binance",
-                                    mode = "trade",
-                                    action = "place_buy_order",
-                                    symbol = %symbol,
-                                    price = %format!("{:.6}", price),
-                                    quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
-                                    profit = %format!("{:.6}", self.realized_pnl)
-                                );
-                                debug!(exchange = "binance", action = "place_buy_order", status = "success", data = ?data);
-                                self.position.quantity = data
-                                    .executed_qty
-                                    .as_ref()
-                                    .and_then(|qty| qty.parse().ok())
-                                    .unwrap_or_default();
-                                self.position.entry_price = data
-                                    .fills
-                                    .as_ref()
-                                    .and_then(|fills| fills.first())
-                                    .and_then(|f| f.price.as_ref().and_then(|p| p.parse().ok()))
-                                    .unwrap_or(price);
-                            }
-                            Err(e) => {
-                                error!(
-                                    exchange = "binance",
-                                    action = "place_buy_order",
-                                    status = "failed",
-                                    symbol = %symbol,
-                                    quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
-                                    error = ?e
-                                );
-                            }
+                    match self.connection.order_place(params).await {
+                        Ok(response) => {
+                            let data = response.data().unwrap();
+                            info!(
+                                exchange = "binance",
+                                mode = "trade",
+                                action = "place_buy_order",
+                                symbol = %symbol,
+                                price = %format!("{:.6}", price),
+                                quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                                profit = %format!("{:.6}", self.realized_pnl)
+                            );
+                            debug!(exchange = "binance", action = "place_buy_order", status = "success", data = ?data);
+                            self.position.quantity = data
+                                .executed_qty
+                                .as_ref()
+                                .and_then(|qty| qty.parse().ok())
+                                .unwrap_or_default();
+                            self.position.entry_price = data
+                                .fills
+                                .as_ref()
+                                .and_then(|fills| fills.first())
+                                .and_then(|f| f.price.as_ref().and_then(|p| p.parse().ok()))
+                                .unwrap_or(price);
+                        }
+                        Err(e) => {
+                            error!(
+                                exchange = "binance",
+                                action = "place_buy_order",
+                                status = "failed",
+                                symbol = %symbol,
+                                quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                                error = ?e
+                            );
                         }
                     }
                 }
@@ -128,51 +114,81 @@ impl Trader for BinanceTrader {
                     .build()
                     .unwrap();
 
-                    if mode == TradeMode::Emulated {
-                        info!(
-                            exchange = "binance",
-                            mode = "emulated",
-                            action = "place_sell_order",
-                            symbol = %symbol,
-                            price = %format!("{:.6}", price),
-                            quantity = %format!("{:.6}", self.position.quantity),
-                            pnl = %format!("{:.6}", pnl),
-                            profit = %format!("{:.6}", self.realized_pnl)
-                        );
-                        // Simulate a sell in emulated mode
-                        self.position.quantity = 0.0;
-                        self.position.entry_price = 0.0;
-                        self.realized_pnl += pnl;
-                    } else {
-                        match self.connection.order_place(params).await {
-                            Ok(response) => {
-                                let data = response.data().unwrap();
-                                info!(
-                                    exchange = "binance",
-                                    mode = "trade",
-                                    action = "place_sell_order",
-                                    symbol = %symbol,
-                                    price = %format!("{:.6}", price),
-                                    quantity = %format!("{:.6}", self.position.quantity),
-                                    pnl = %format!("{:.6}", pnl),
-                                    profit = %format!("{:.6}", self.realized_pnl)
-                                );
-                                debug!(exchange = "binance", action = "place_sell_order", status = "success", data = ?data);
-                                self.position.quantity = 0.0; // Assuming full sell
-                                self.position.entry_price = 0.0;
-                            }
-                            Err(e) => {
-                                error!(
-                                    exchange = "binance",
-                                    action = "place_sell_order",
-                                    status = "failed",
-                                    symbol = %symbol,
-                                    quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
-                                    error = ?e
-                                );
-                            }
+                    match self.connection.order_place(params).await {
+                        Ok(response) => {
+                            let data = response.data().unwrap();
+                            info!(
+                                exchange = "binance",
+                                mode = "trade",
+                                action = "place_sell_order",
+                                symbol = %symbol,
+                                price = %format!("{:.6}", price),
+                                quantity = %format!("{:.6}", self.position.quantity),
+                                pnl = %format!("{:.6}", pnl),
+                                profit = %format!("{:.6}", self.realized_pnl)
+                            );
+                            debug!(exchange = "binance", action = "place_sell_order", status = "success", data = ?data);
+                            self.position.quantity = 0.0; // Assuming full sell
+                            self.position.entry_price = 0.0;
+                        }
+                        Err(e) => {
+                            error!(
+                                exchange = "binance",
+                                action = "place_sell_order",
+                                status = "failed",
+                                symbol = %symbol,
+                                quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                                error = ?e
+                            );
                         }
                     }
+                }
+            }
+            Signal::Hold => {
+                // Do nothing
+            }
+        }
+    }
+
+    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) {
+        let symbol = self.position.symbol.clone();
+        let quantity = Decimal::from_f64(quantity).unwrap_or(dec!(0.0)); // Updated quantity conversion
+
+        match signal {
+            Signal::Buy => {
+                if self.position.quantity == 0.0 {
+                    info!(
+                        exchange = "binance",
+                        mode = "emulated",
+                        action = "place_buy_order",
+                        symbol = %symbol,
+                        price = %format!("{:.6}", price),
+                        quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                        profit = %format!("{:.6}", self.realized_pnl)
+                    );
+                    // Simulate a buy in emulated mode
+                    self.position.quantity = quantity.to_f64().unwrap_or(0.0);
+                    self.position.entry_price = price;
+                }
+            }
+            Signal::Sell => {
+                if self.position.quantity > 0.0 {
+                    let pnl = (price - self.position.entry_price) * self.position.quantity;
+                    self.realized_pnl += pnl;
+                    info!(
+                        exchange = "binance",
+                        mode = "emulated",
+                        action = "place_sell_order",
+                        symbol = %symbol,
+                        price = %format!("{:.6}", price),
+                        quantity = %format!("{:.6}", self.position.quantity),
+                        pnl = %format!("{:.6}", pnl),
+                        profit = %format!("{:.6}", self.realized_pnl)
+                    );
+                    // Simulate a sell in emulated mode
+                    self.position.quantity = 0.0;
+                    self.position.entry_price = 0.0;
+                    self.realized_pnl += pnl;
                 }
             }
             Signal::Hold => {

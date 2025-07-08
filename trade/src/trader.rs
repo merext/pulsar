@@ -27,7 +27,8 @@ pub enum TradeMode {
 
 #[async_trait]
 pub trait Trader {
-    async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64, mode: TradeMode);
+    async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64);
+    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64);
     fn unrealized_pnl(&self, current_price: f64) -> f64;
     fn realized_pnl(&self) -> f64;
     fn position(&self) -> Position;

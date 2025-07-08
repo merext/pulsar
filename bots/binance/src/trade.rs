@@ -59,7 +59,14 @@ pub async fn run_trading(
                             let raw_quantity = min_notional / trade_price;
                             let quantity_step = 1.0; // get this from exchangeInfo or hardcode per symbol
                             let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
-                            binance_trader.on_signal(signal, trade_price, quantity_to_trade, trade_mode).await;
+                                                        match trade_mode {
+                                TradeMode::Real => {
+                                    binance_trader.on_signal(signal, trade_price, quantity_to_trade).await;
+                                }
+                                TradeMode::Emulated => {
+                                    binance_trader.on_emulate(signal, trade_price, quantity_to_trade).await;
+                                }
+                            }
 
                             debug!(
                                 signal = %signal,
