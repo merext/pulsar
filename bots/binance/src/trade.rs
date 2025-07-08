@@ -16,9 +16,18 @@ pub async fn run_trading(
     let mut trade_stream = binance_client.trade_stream(trading_symbol).await.expect("Failed to create trade stream");
 
     // Process trade stream
-    #[allow(unreachable_code)] // This loop is intended to run indefinitely for a live bot
     loop {
-        let trade = trade_stream.next().await.expect("Trade stream ended unexpectedly");
+        let trade = match tokio::time::timeout(std::time::Duration::from_secs(5), trade_stream.next()).await {
+            Ok(Some(trade)) => trade,
+            Ok(None) => {
+                // Stream ended, break the loop
+                break Ok(());
+            }
+            Err(_) => {
+                // Timeout occurred, continue to the next iteration
+                continue;
+            }
+        };
         strategy.on_trade(trade.clone().into()).await;
 
         let trade_price = trade.price;
