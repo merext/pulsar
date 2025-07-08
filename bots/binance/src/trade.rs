@@ -8,8 +8,8 @@ use trade::trader::{TradeMode, Trader};
 
 pub async fn run_trading(
     trading_symbol: &str,
-    api_key: &str,
-    api_secret: &str,
+    _api_key: &str,
+    _api_secret: &str,
     mut strategy: impl Strategy + Send,
     binance_trader: &mut BinanceTrader,
     trade_mode: TradeMode,

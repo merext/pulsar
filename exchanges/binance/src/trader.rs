@@ -7,7 +7,7 @@ use binance_sdk::spot::websocket_api::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 
@@ -67,10 +67,10 @@ impl Trader for BinanceTrader {
                             exchange = "binance",
                             mode = "emulated",
                             action = "place_buy_order",
-                            status = "success",
                             symbol = %symbol,
                             price = %format!("{:.6}", price),
-                            quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default())
+                            quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                            profit = %format!("{:.6}", self.realized_pnl)
                         );
                         // Simulate a buy in emulated mode
                         self.position.quantity = quantity.to_f64().unwrap_or(0.0);
@@ -79,7 +79,16 @@ impl Trader for BinanceTrader {
                         match self.connection.order_place(params).await {
                             Ok(response) => {
                                 let data = response.data().unwrap();
-                                info!(exchange = "binance", action = "place_buy_order", status = "success", data = ?data);
+                                info!(
+                                    exchange = "binance",
+                                    mode = "trade",
+                                    action = "place_buy_order",
+                                    symbol = %symbol,
+                                    price = %format!("{:.6}", price),
+                                    quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
+                                    profit = %format!("{:.6}", self.realized_pnl)
+                                );
+                                debug!(exchange = "binance", action = "place_buy_order", status = "success", data = ?data);
                                 self.position.quantity = data
                                     .executed_qty
                                     .as_ref()
@@ -124,11 +133,11 @@ impl Trader for BinanceTrader {
                             exchange = "binance",
                             mode = "emulated",
                             action = "place_sell_order",
-                            status = "success",
                             symbol = %symbol,
                             price = %format!("{:.6}", price),
                             quantity = %format!("{:.6}", self.position.quantity),
-                            pnl = %format!("{:.6}", pnl)
+                            pnl = %format!("{:.6}", pnl),
+                            profit = %format!("{:.6}", self.realized_pnl)
                         );
                         // Simulate a sell in emulated mode
                         self.position.quantity = 0.0;
@@ -138,7 +147,17 @@ impl Trader for BinanceTrader {
                         match self.connection.order_place(params).await {
                             Ok(response) => {
                                 let data = response.data().unwrap();
-                                info!(exchange = "binance", action = "place_sell_order", status = "success", data = ?data);
+                                info!(
+                                    exchange = "binance",
+                                    mode = "trade",
+                                    action = "place_sell_order",
+                                    symbol = %symbol,
+                                    price = %format!("{:.6}", price),
+                                    quantity = %format!("{:.6}", self.position.quantity),
+                                    pnl = %format!("{:.6}", pnl),
+                                    profit = %format!("{:.6}", self.realized_pnl)
+                                );
+                                debug!(exchange = "binance", action = "place_sell_order", status = "success", data = ?data);
                                 self.position.quantity = 0.0; // Assuming full sell
                                 self.position.entry_price = 0.0;
                             }
@@ -184,8 +203,6 @@ impl Trader for BinanceTrader {
             .build()?;
         let status = self.connection.account_status(params).await?;
         let data = status.data().unwrap();
-
-        use std::fmt::Write;
 
         if let Some(account_type) = &data.account_type {
             println!("Account Type:\t{}", account_type);

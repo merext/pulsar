@@ -17,20 +17,13 @@ use trade::signal::Signal;
 use async_trait::async_trait;
 
 
-pub struct VwapDeviationStrategy {
-    period: usize,
-    deviation_threshold: f64,
-}
+#[derive(Clone)]
+pub struct VwapDeviationStrategy {}
 
 impl VwapDeviationStrategy {
-    pub fn new(period: usize, deviation_threshold: f64) -> Self {
-        Self {
-            period,
-            deviation_threshold,
-        }
+    pub fn new() -> Self {
+        Self {}
     }
-
-    
 }
 
 #[async_trait]

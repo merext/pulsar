@@ -15,6 +15,7 @@ use trade::signal::Signal;
 use async_trait::async_trait;
 use std::collections::VecDeque;
 
+#[derive(Clone)]
 pub struct MomentumScalping {
     trade_window_size: usize,
     price_change_threshold: f64,
@@ -59,7 +60,7 @@ impl Strategy for MomentumScalping {
         let price_change = last_price - first_price;
 
         let signal: Signal;
-        let mut confidence: f64 = 0.0;
+        let confidence: f64;
 
         if price_change > self.price_change_threshold {
             signal = Signal::Buy;

@@ -14,6 +14,7 @@ use trade::signal::Signal;
 use async_trait::async_trait;
 use nalgebra::{Matrix2, Vector2};
 
+#[derive(Clone)]
 pub struct KalmanFilterStrategy {
     // State vector: [price, velocity]
     state_estimate: Vector2<f64>,
@@ -113,7 +114,7 @@ impl Strategy for KalmanFilterStrategy {
         let deviation = current_price - estimated_price;
 
         let signal: Signal;
-        let mut confidence: f64 = 0.0;
+        let confidence: f64;
 
         if deviation > self.signal_threshold {
             signal = Signal::Buy; // Current price is significantly above estimated price

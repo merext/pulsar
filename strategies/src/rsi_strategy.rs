@@ -14,6 +14,7 @@ use crate::strategy::Strategy;
 use trade::signal::Signal;
 use std::collections::VecDeque;
 
+#[derive(Clone)]
 pub struct RsiStrategy {
     period: usize,
     overbought: f64,
@@ -84,7 +85,7 @@ impl Strategy for RsiStrategy {
         let rsi = self.calculate_rsi();
 
         let signal: Signal;
-        let mut confidence: f64 = 0.0;
+        let confidence: f64;
 
         if rsi > self.overbought {
             signal = Signal::Sell;

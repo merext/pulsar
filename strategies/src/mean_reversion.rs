@@ -15,6 +15,7 @@ use trade::signal::Signal;
 
 use std::collections::VecDeque;
 
+#[derive(Clone)]
 pub struct MeanReversionStrategy {
     pub window_size: usize,
     pub prices: VecDeque<f64>,
@@ -65,7 +66,7 @@ impl Strategy for MeanReversionStrategy {
         if let Some(sma) = self.last_sma {
             let deviation = current_price - sma;
             let signal: Signal;
-            let mut confidence: f64 = 0.0;
+            let confidence: f64;
 
             // A simple confidence calculation: larger deviation means higher confidence
             // Normalize deviation to a 0-1 range. You might need to tune the divisor.

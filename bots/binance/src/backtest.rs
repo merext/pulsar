@@ -1,9 +1,10 @@
+// RUST_LOG=info,binance_sdk::common::websocket=error cargo run backtest --url https://data.binance.vision/data/spot/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-05-30.zip
 use binance_exchange::client::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
-use trade::trader::{TradeMode, Trader};
 use tracing::debug;
+use trade::trader::{TradeMode, Trader};
 
 pub async fn run_backtest(
     url: &str,

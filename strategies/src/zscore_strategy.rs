@@ -80,7 +80,7 @@ impl Strategy for ZScoreStrategy {
         let z_score = (current_price - mean) / std_dev;
 
         let signal: Signal;
-        let mut confidence: f64 = 0.0;
+        let confidence: f64;
 
         if z_score > self.sell_threshold {
             signal = Signal::Sell;

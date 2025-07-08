@@ -13,6 +13,7 @@ use crate::strategy::Strategy;
 use trade::signal::Signal;
 use std::collections::VecDeque;
 
+#[derive(Clone)]
 pub struct OrderBookImbalance {
     period: usize,
     buy_threshold: f64,
@@ -76,7 +77,7 @@ impl Strategy for OrderBookImbalance {
         let obi = self.calculate_obi();
 
         let signal: Signal;
-        let mut confidence: f64 = 0.0;
+        let confidence: f64;
 
         if obi > self.buy_threshold {
             signal = Signal::Buy;

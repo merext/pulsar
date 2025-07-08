@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct TradeData {
     pub id: u64,
     pub price: f64,
