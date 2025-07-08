@@ -99,8 +99,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let api_secret =
         env::var("BINANCE_API_SECRET").expect("API_SECRET must be set in the environment");
 
-    let mut binance_trader =
-        binance_exchange::trader::BinanceTrader::new(&trading_symbol, &api_key, &api_secret).await;
+    let trade_mode = match cli.command {
+        Commands::Trade => TradeMode::Real,
+        Commands::Emulate => TradeMode::Emulated,
+        Commands::Backtest { .. } => TradeMode::Emulated,
+    };
+
+    let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
+        &trading_symbol,
+        &api_key,
+        &api_secret,
+        trade_mode,
+    )
+    .await;
     binance_trader.account_status().await?;
 
     match cli.command {
