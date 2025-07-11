@@ -117,7 +117,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     match cli.command {
         Commands::Trade => {
             info!("Starting live trading...");
-            trade::run_trading(
+            trade::run_trade(
                 &trading_symbol,
                 &api_key,
                 &api_secret,
@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         Commands::Emulate => {
             info!("Starting emulation trading...");
-            trade::run_trading(
+            trade::run_trade(
                 &trading_symbol,
                 &api_key,
                 &api_secret,

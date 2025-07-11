@@ -1,19 +1,20 @@
 //! # Momentum Scalping Strategy
-//! 
+//!
 //! This strategy aims to profit from very short-term price momentum by identifying rapid price changes.
 //! It is designed for high-frequency trading (HFT) environments where quick entry and exit are crucial.
-//! 
+//!
 //! The strategy tracks recent price movements within a defined window.
 //! A buy signal is generated if the price change over this window exceeds a positive threshold,
 //! indicating upward momentum. Conversely, a sell signal is generated if the price change falls below a negative threshold,
 //! indicating downward momentum.
 
-use trade::models::TradeData;
-use trade::trader::Position;
 use crate::strategy::Strategy;
-use trade::signal::Signal;
 use async_trait::async_trait;
 use std::collections::VecDeque;
+use std::f64;
+use trade::models::TradeData;
+use trade::signal::Signal;
+use trade::trader::Position;
 
 #[derive(Clone)]
 pub struct MomentumScalping {
@@ -32,10 +33,14 @@ impl MomentumScalping {
     }
 }
 
+fn std_dev(prices: &VecDeque<f64>) -> f64 {
+    let mean = prices.iter().copied().sum::<f64>() / prices.len() as f64;
+    let variance = prices.iter().map(|p| (p - mean).powi(2)).sum::<f64>() / prices.len() as f64;
+    variance.sqrt()
+}
+
 #[async_trait]
 impl Strategy for MomentumScalping {
-    
-
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
         self.recent_prices.push_back(price);
@@ -62,12 +67,17 @@ impl Strategy for MomentumScalping {
         let signal: Signal;
         let confidence: f64;
 
+        let std = std_dev(&self.recent_prices);
+        if std == 0.0 {
+            return (Signal::Hold, 0.0);
+        }
+
         if price_change > self.price_change_threshold {
             signal = Signal::Buy;
-            confidence = ((price_change - self.price_change_threshold) / self.price_change_threshold).min(1.0);
+            confidence = ((price_change / std) - 1.0).max(0.0).min(1.0);
         } else if price_change < -self.price_change_threshold {
             signal = Signal::Sell;
-            confidence = ((price_change.abs() - self.price_change_threshold) / self.price_change_threshold).min(1.0);
+            confidence = ((price_change.abs() / std) - 1.0).max(0.0).min(1.0);
         } else {
             signal = Signal::Hold;
             confidence = 0.0;

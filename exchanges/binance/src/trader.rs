@@ -7,7 +7,7 @@ use binance_sdk::spot::websocket_api::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
-use tracing::{info};
+use tracing::{error, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 
@@ -50,14 +50,24 @@ impl BinanceTrader {
     }
 }
 
-
 #[async_trait]
 impl Trader for BinanceTrader {
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
         let symbol = self.position.symbol.clone();
         let quantity = Decimal::from_f64(quantity).expect("Failed to convert quantity to Decimal");
 
-        let connection = self.connection.as_ref().expect("Websocket connection not established for live trading");
+        let connection = match &self.connection {
+            Some(c) => c,
+            None => {
+                error!(
+                    exchange = "binance",
+                    action = "on_signal",
+                    status = "connection_missing",
+                    symbol = %symbol
+                );
+                return;
+            }
+        };
 
         match signal {
             Signal::Buy => {
@@ -71,8 +81,46 @@ impl Trader for BinanceTrader {
                     .build()
                     .expect("Failed to build order parameters");
 
-                    let response = connection.order_place(params).await.expect("Failed to place buy order");
-                    let data = response.data().expect("Failed to get data from buy order response");
+                    let response = match connection.order_place(params).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            error!(
+                                exchange = "binance",
+                                action = "place_buy_order",
+                                status = "failed",
+                                symbol = %symbol,
+                                quantity = %quantity,
+                                error = %e
+                            );
+                            return;
+                        }
+                    };
+                    let data = match response.data() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!(
+                                exchange = "binance",
+                                action = "buy_order_data",
+                                status = "failed",
+                                symbol = %symbol,
+                                error = %e
+                            );
+                            return;
+                        }
+                    };
+
+                    let fills = match data.fills.as_ref() {
+                        Some(f) => f,
+                        None => {
+                            error!(
+                                exchange = "binance",
+                                action = "buy_order_fills",
+                                status = "missing",
+                                symbol = %symbol
+                            );
+                            return;
+                        }
+                    };
 
                     self.position.quantity = data
                         .executed_qty
@@ -80,10 +128,7 @@ impl Trader for BinanceTrader {
                         .expect("Executed quantity not found in buy order response")
                         .parse()
                         .expect("Failed to parse executed quantity");
-                    self.position.entry_price = data
-                        .fills
-                        .as_ref()
-                        .expect("Fills not found in buy order response")
+                    self.position.entry_price = fills
                         .first()
                         .expect("No fills found in buy order response")
                         .price
@@ -106,7 +151,17 @@ impl Trader for BinanceTrader {
                     .build()
                     .expect("Failed to build order parameters");
 
-                    let _response = connection.order_place(params).await.expect("Failed to place sell order");
+                    if let Err(e) = connection.order_place(params).await {
+                        error!(
+                            exchange = "binance",
+                            action = "place_sell_order",
+                            status = "failed",
+                            symbol = %symbol,
+                            quantity = %quantity,
+                            error = %e
+                        );
+                        return;
+                    }
 
                     self.position.quantity = 0.0; // Assuming full sell
                     self.position.entry_price = 0.0;
