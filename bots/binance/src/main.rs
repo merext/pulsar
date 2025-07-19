@@ -21,7 +21,9 @@ enum Commands {
     Emulate,
     Backtest {
         #[arg(short, long)]
-        url: String,
+        url: Option<String>,
+        #[arg(short, long)]
+        path: Option<String>,
     },
 }
 
@@ -139,9 +141,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             )
             .await?;
         }
-        Commands::Backtest { url } => {
-            info!("Starting backtest with URL: {}", url);
-            backtest::run_backtest(&url, strategy.clone(), &mut binance_trader).await?;
+        Commands::Backtest { url, path } => {
+            if let Some(url) = url {
+                info!("Starting backtest with URL: {}", url);
+                backtest::run_backtest(&url, strategy.clone(), &mut binance_trader).await?;
+            } else if let Some(path) = path {
+                info!("Starting backtest with path: {}", path);
+                backtest::run_backtest(&path, strategy.clone(), &mut binance_trader).await?;
+            } else {
+                return Err("Either --url or --path must be provided for backtest".into());
+            }
         }
     }
 

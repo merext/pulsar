@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.41", features = ["derive"] }
 binance-exchange = { path = "../../exchanges/binance" }
+futures-util = "0.3.30"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 strategies = { path = "../../strategies" }

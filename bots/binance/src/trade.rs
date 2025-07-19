@@ -2,7 +2,7 @@ use binance_exchange::client::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
-use tracing::{debug, info};
+use tracing::debug;
 use trade::trader::{TradeMode, Trader};
 
 pub async fn run_trade(

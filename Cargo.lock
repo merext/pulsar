@@ -170,6 +170,7 @@ version = "0.1.0"
 dependencies = [
  "binance-exchange",
  "clap",
+ "futures-util",
  "splines",
  "strategies",
  "tokio",

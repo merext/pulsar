@@ -157,4 +157,13 @@ impl BinanceClient {
 
         Ok(trades)
     }
+
+    pub async fn trade_data_from_path(
+        &self,
+        path: &str,
+    ) -> Result<impl Stream<Item = PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
+        let file_content = tokio::fs::read(path).await?;
+        let trades = self.parse_trade_data(Bytes::from(file_content))?;
+        Ok(stream::iter(trades))
+    }
 }
