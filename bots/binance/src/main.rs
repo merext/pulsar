@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Momentum Scalping Strategy
     use strategies::momentum_scalping::MomentumScalping;
-    let trade_window_size = 5; // Example window size
+    let trade_window_size = 8; // Example window size
     let price_change_threshold = 0.00001; // Example threshold
     let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
 

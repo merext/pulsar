@@ -160,7 +160,7 @@ impl Trader for BinanceTrader {
                             quantity = %quantity,
                             error = %e
                         );
-                        return;
+                        std::process::exit(1);
                     }
 
                     self.position.quantity = 0.0; // Assuming full sell
