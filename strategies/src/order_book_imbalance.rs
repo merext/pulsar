@@ -1,17 +1,17 @@
 //! # Order Book Imbalance Strategy
-//! 
+//!
 //! This strategy analyzes the imbalance between buy and sell volumes within recent trades to predict short-term price movements.
 //! It operates on the principle that a significant imbalance can indicate immediate buying or selling pressure.
-//! 
+//!
 //! The strategy calculates an Order Book Imbalance (OBI) metric based on the volume of buyer-initiated versus seller-initiated trades within a defined period.
 //! A buy signal is generated if the OBI exceeds a positive threshold, indicating strong buying pressure.
 //! Conversely, a sell signal is generated if the OBI falls below a negative threshold, indicating strong selling pressure.
 
-use trade::models::TradeData;
-use trade::trader::Position;
 use crate::strategy::Strategy;
-use trade::signal::Signal;
 use std::collections::VecDeque;
+use trade::models::TradeData;
+use trade::signal::Signal;
+use trade::trader::Position;
 
 #[derive(Clone)]
 pub struct OrderBookImbalance {
@@ -59,8 +59,6 @@ impl OrderBookImbalance {
 
 #[async_trait::async_trait]
 impl Strategy for OrderBookImbalance {
-    
-
     async fn on_trade(&mut self, trade: TradeData) {
         self.trades.push_back(trade);
         if self.trades.len() > self.period {

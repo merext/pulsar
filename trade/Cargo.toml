@@ -5,6 +5,6 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.88"
-tokio = { version = "1.46.0", features = ["full"] }
+tokio = { version = "1.46.1", features = ["full"] }
 anyhow = "1.0"
 
