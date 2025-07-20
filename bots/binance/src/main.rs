@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Kalman Filter Strategy
     // use strategies::kalman_filter_strategy::KalmanFilterStrategy;
-    // let signal_threshold = 0.0001; // Example threshold, needs tuning
+    // let signal_threshold = 0.00001; // Example threshold, needs tuning
     // let strategy = KalmanFilterStrategy::new(signal_threshold);
 
     // Mean Reversion Strategy
@@ -56,16 +56,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = MeanReversionStrategy::new(window_size, max_trade_window);
 
     // Momentum Scalping Strategy
-    use strategies::momentum_scalping::MomentumScalping;
-    let trade_window_size = 8; // Example window size
-    let price_change_threshold = 0.00001; // Example threshold
-    let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
+    // use strategies::momentum_scalping::MomentumScalping;
+    // let trade_window_size = 5; // Example window size
+    // let price_change_threshold = 0.00001; // Example threshold
+    // let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
 
     // Order Book Imbalance Strategy
     // use strategies::order_book_imbalance::OrderBookImbalance;
-    // let period = 100; // Example period (number of trades)
-    // let buy_threshold = 0.1; // Example buy threshold
-    // let sell_threshold = -0.1; // Example sell threshold
+    // let period = 10; // Example period (number of trades)
+    // let buy_threshold = 0.00001; // Example buy threshold
+    // let sell_threshold = -0.00001; // Example sell threshold
     // let strategy = OrderBookImbalance::new(period, buy_threshold, sell_threshold);
 
     // Spline Strategy
@@ -82,16 +82,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // );
 
     // VWAP Deviation Strategy (Placeholder - requires re-implementation)
-    // use strategies::vwap_deviation_strategy::VwapDeviationStrategy;
-    // let period = 100; // Example period
-    // let deviation_threshold = 0.001; // Example threshold
-    // let strategy = VwapDeviationStrategy::new(period, deviation_threshold);
+    use strategies::vwap_deviation_strategy::VwapDeviationStrategy;
+    let period = 10; // Example period
+    let deviation_threshold = 0.00001; // Example threshold
+    let strategy = VwapDeviationStrategy::new(period, deviation_threshold);
 
     // Z-Score Strategy (Currently active)
     // use strategies::zscore_strategy::ZScoreStrategy;
     // let period = 50; // Example period
-    // let buy_threshold = -1.5; // Example buy threshold
-    // let sell_threshold = 1.5; // Example sell threshold
+    // let buy_threshold = -0.00001; // Example buy threshold
+    // let sell_threshold = 0.00001; // Example sell threshold
     // let strategy = ZScoreStrategy::new(period, buy_threshold, sell_threshold);
 
     // Initialize trader with API credentials

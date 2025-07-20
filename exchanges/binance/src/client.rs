@@ -55,6 +55,10 @@ impl BinanceClient {
         let (tx, rx) = mpsc::channel(100);
 
         ws_stream.on_message(move |msg| {
+            if msg.m.unwrap_or(false) {
+                return; // Ignore trades from market makers
+            }
+
             let trade = PulsarTrade {
                 event_type: msg.e.clone().unwrap_or_default(),
                 event_time: msg.e_uppercase.unwrap_or_default() as u64,
@@ -144,6 +148,10 @@ impl BinanceClient {
                     continue;
                 }
             };
+
+            if is_buyer_market_maker {
+                continue; // Ignore trades from market makers
+            }
 
             trades.push(PulsarTrade {
                 trade_id,
