@@ -4,8 +4,8 @@ use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
 use tracing::debug;
-use trade::trader::Trader;
 use trade::models::Trade;
+use trade::trader::Trader;
 
 pub async fn run_backtest(
     source: &str,
@@ -13,11 +13,12 @@ pub async fn run_backtest(
     binance_trader: &mut BinanceTrader,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new().await?;
-    let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin> = if source.starts_with("http") {
-        Box::new(binance_client.trade_data(source).await?)
-    } else {
-        Box::new(binance_client.trade_data_from_path(source).await?)
-    };
+    let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin> =
+        if source.starts_with("http") {
+            Box::new(binance_client.trade_data(source).await?)
+        } else {
+            Box::new(binance_client.trade_data_from_path(source).await?)
+        };
 
     while let Some(trade) = trade_stream.next().await {
         strategy.on_trade(trade.clone().into()).await;

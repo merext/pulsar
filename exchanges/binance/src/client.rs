@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use binance_sdk::config::ConfigurationWebsocketStreams;
 use binance_sdk::spot::{
-    websocket_streams::{TradeParams, WebsocketStreams},
     SpotWsStreams,
+    websocket_streams::{TradeParams, WebsocketStreams},
 };
 use bytes::Bytes;
 use csv::ReaderBuilder;
@@ -11,8 +11,8 @@ use std::io::Cursor;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use trade::models::Trade as PulsarTrade;
 use tracing::error;
+use trade::models::Trade as PulsarTrade;
 use zip::read::ZipArchive;
 
 pub struct BinanceClient {
@@ -55,9 +55,9 @@ impl BinanceClient {
         let (tx, rx) = mpsc::channel(100);
 
         ws_stream.on_message(move |msg| {
-            if msg.m.unwrap_or(false) {
-                return; // Ignore trades from market makers
-            }
+            // if msg.m.unwrap_or(false) {
+            //     return; // Ignore trades from market makers
+            // }
 
             let trade = PulsarTrade {
                 event_type: msg.e.clone().unwrap_or_default(),
