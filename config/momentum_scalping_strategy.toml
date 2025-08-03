@@ -13,9 +13,4 @@ signal_threshold = 0.1        # Extremely low confidence threshold for maximum s
 
 # Volume Analysis
 volume_alpha = 0.8            # More responsive volume EMA
-volume_beta = 0.2             # Higher weight for new volume data
-
-# Risk Management
-stop_loss_pct = 0.01          # 1% stop loss (tight for scalping)
-take_profit_pct = 0.02        # 2% take profit
-max_position_size = 0.05      # Maximum 5% of portfolio per trade 
+volume_beta = 0.2             # Higher weight for new volume data 

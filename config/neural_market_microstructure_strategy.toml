@@ -2,35 +2,10 @@
 # Optimized for profitability using momentum-based approach
 
 # Core parameters
-input_window = 20
-hidden_size = 32
-learning_rate = 0.001
-momentum_threshold = 0.01
-volume_threshold = 1.2
-volatility_threshold = 0.01
+short_window = 5
+medium_window = 20
+long_window = 100
+micro_window = 10
 
 # Signal filtering - Made more aggressive for trade generation
-signal_threshold = 0.01
-
-# Neural Network Parameters
-hidden_layer_size = 8    # Number of hidden neurons
-learning_rate = 0.01     # Learning rate for weight updates
-momentum_factor = 0.9    # Momentum for gradient descent
-
-# Risk Management
-volatility_filter = 0.02     # Minimum volatility threshold
-correlation_threshold = 0.7   # Signal correlation threshold
-max_drawdown = 0.05          # Maximum 5% drawdown
-
-# Multi-timeframe Weights
-short_weight = 0.4        # Weight for short-term signals
-medium_weight = 0.35      # Weight for medium-term signals
-long_weight = 0.25        # Weight for long-term signals
-signal_threshold = 0.6    # 60% confidence threshold
-
-# Market Regime Detection
-[regime_thresholds]
-trending_threshold = 0.02     # Trend strength threshold
-volatility_low = 0.15         # Low volatility threshold
-volatility_medium = 0.30      # Medium volatility threshold
-volatility_high = 0.50        # High volatility threshold 
+signal_threshold = 0.01 

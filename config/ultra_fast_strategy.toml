@@ -1,4 +1,4 @@
-# HFT Ultra-Fast Strategy Configuration
+# Ultra-Fast Strategy Configuration
 # Best for: Ultra-low latency directional trading, momentum capture
 
 # Core Parameters (optimized for speed)
@@ -12,11 +12,6 @@ buy_threshold = 0.00001    # Even lower buy threshold for maximum signals
 sell_threshold = -0.00001  # Even lower sell threshold for maximum signals
 volume_threshold = 0.5     # Lower volume threshold for more signals
 signal_threshold = 0.05    # Even lower confidence threshold for maximum signals
-
-# Risk Management (tight for HFT)
-stop_loss_pct = 0.002      # 0.2% stop loss
-take_profit_pct = 0.002    # 0.2% take profit
-max_position_size = 0.05   # 5% max position size
 
 # Signal Generation Parameters
 min_buffer_size = 3        # Very small buffer size for immediate signals
@@ -32,8 +27,3 @@ volume_signal_weight = 0.1  # Reduced volume confirmation weight
 # Volume Analysis
 volume_alpha = 0.8          # More responsive volume EMA
 volume_beta = 0.2           # Higher weight for new volume data
-
-# Performance Optimization
-enable_inline = true        # Enable inline functions
-use_fixed_arrays = true     # Use fixed arrays instead of VecDeque
-minimal_branching = true    # Minimize conditional branching

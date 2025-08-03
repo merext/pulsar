@@ -8,14 +8,5 @@ sell_threshold = 0.000005     # Lower sell threshold for more signals
 scale = 2.0                   # Very high scaling factor for strong signals
 signal_threshold = 0.1        # Very low threshold for maximum signals
 
-# Z-Score Logic
-zscore_threshold = 0.5        # Very low Z-score threshold for more signals
-mean_reversion_strength = 1.0 # Very high strength for strong signals
-
 # Momentum Parameters
-momentum_threshold = 0.00005  # Very low momentum threshold for more signals
-
-# Risk Management
-stop_loss_pct = 0.02          # 2% stop loss
-take_profit_pct = 0.04        # 4% take profit
-max_position_size = 0.1       # Maximum 10% of portfolio per trade 
+momentum_threshold = 0.00005  # Very low momentum threshold for more signals 

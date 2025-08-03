@@ -4,17 +4,7 @@
 # Core parameters
 period = 10
 deviation_threshold = 0.001
-scale = 2.0
 
 # Signal filtering - Optimized for maximum profitability
 signal_threshold = 0.005
-momentum_threshold = 0.000005
-
-# VWAP Logic
-volume_weight = 0.8           # Weight for volume in VWAP
-price_weight = 0.2            # Weight for price in VWAP
-
-# Risk Management
-stop_loss_pct = 0.02          # 2% stop loss
-take_profit_pct = 0.04        # 4% take profit
-max_position_size = 0.1       # Maximum 10% of portfolio per trade 
+momentum_threshold = 0.000005 

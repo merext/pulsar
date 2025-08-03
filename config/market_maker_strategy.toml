@@ -1,46 +1,13 @@
-# HFT Market Maker Strategy Configuration
+# Market Maker Strategy Configuration
 # Best for: Spread capture, order book analysis, inventory management
 
-# Order Book Parameters
-spread_multiplier = 1.5     # Multiplier for optimal spread calculation
-min_spread = 0.0001         # 0.01% minimum spread
-max_position = 1000.0       # Maximum position size
-inventory_target = 0.0      # Target inventory (0 = neutral)
-
-# Inventory Management
-max_inventory = 5000.0      # Maximum inventory before hedging
-hedge_threshold = 0.8       # Hedge when inventory > 80% of max
-inventory_cost_weight = 0.1 # Weight for inventory cost in P&L
-
-# Risk Controls
-max_loss_per_trade = 0.001  # 0.1% maximum loss per trade
-max_daily_loss = 0.01       # 1% maximum daily loss
-correlation_limit = 0.7     # Maximum correlation between positions
+# Signal Generation
 signal_threshold = 0.01     # 1% confidence threshold for maximum signals
-
-# Market Making Logic
-enable_dynamic_spread = true    # Adjust spread based on volatility
-enable_inventory_skew = true    # Skew prices based on inventory
-enable_volume_scaling = true    # Scale orders based on volume
-
-# Signal Generation Parameters
-hedge_confidence = 0.95         # Very high confidence for hedge signals
-bid_ask_confidence = 0.9        # Very high confidence for bid/ask signals
-bid_only_confidence = 0.95      # Very high confidence for bid-only signals
-ask_only_confidence = 0.95      # Very high confidence for ask-only signals
-volatility_threshold = 0.0001   # Very low volatility threshold for more signals
-momentum_confidence = 0.9       # Very high confidence for momentum signals
-default_confidence = 0.8        # Very high default confidence
 
 # Order Book Simulation (for backtesting)
 bid_price_offset = 0.9999       # Bid price offset from trade price
 ask_price_offset = 1.0001       # Ask price offset from trade price
 order_book_size_multiplier = 10.0 # Multiplier for simulated order book size
-
-# Position Management
-inventory_ratio_threshold = 0.9  # Higher inventory ratio threshold
-price_competitiveness_bid = 0.9998 # More competitive bid pricing
-price_competitiveness_ask = 1.0002 # More competitive ask pricing
 
 # Volatility Calculation
 volatility_alpha = 0.1           # Alpha for exponential volatility calculation
@@ -51,8 +18,3 @@ volume_profile_beta = 0.1        # Beta for volume profile calculation
 
 # Momentum Parameters
 momentum_threshold = 0.00005     # Very low momentum threshold for maximum signals
-
-# Performance Tracking
-track_spread_capture = true      # Track spread capture metrics
-track_inventory_cost = true      # Track inventory holding costs
-track_market_impact = true       # Track market impact costs

@@ -9,13 +9,4 @@ scale = 2.0                   # Very high scaling factor for strong signals
 signal_threshold = 0.1        # Very low threshold for maximum signals
 
 # Momentum Parameters
-momentum_threshold = 0.0001   # Very low momentum threshold for more signals
-
-# Signal Generation
-buy_signal = "oversold"       # Buy when RSI crosses below oversold
-sell_signal = "overbought"    # Sell when RSI crosses above overbought
-
-# Risk Management
-stop_loss_pct = 0.02          # 2% stop loss
-take_profit_pct = 0.04        # 4% take profit
-max_position_size = 0.1       # Maximum 10% of portfolio per trade 
+momentum_threshold = 0.0001   # Very low momentum threshold for more signals 
