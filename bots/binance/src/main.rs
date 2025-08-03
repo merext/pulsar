@@ -117,9 +117,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // use strategies::zscore_strategy::ZScoreStrategy;
     // let strategy = ZScoreStrategy::new();
 
-    // Kalman Filter Strategy (Currently active - Optimized)
-    use strategies::kalman_filter_strategy::KalmanFilterStrategy;
-    let strategy = KalmanFilterStrategy::new();
+    // Kalman Filter Strategy
+    // use strategies::kalman_filter_strategy::KalmanFilterStrategy;
+    // let strategy = KalmanFilterStrategy::new();
+
+    // RSI Strategy
+    // use strategies::rsi_strategy::RsiStrategy;
+    // let strategy = RsiStrategy::new();
+
+    // HFT Market Maker Strategy
+    // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
+    // let strategy = HftMarketMakerStrategy::new();
+
+    // Z-Score Strategy (Currently active - Optimizing)
+    use strategies::zscore_strategy::ZScoreStrategy;
+    let strategy = ZScoreStrategy::new();
 
     // Advanced Strategies (Medium-term trading)
     // Adaptive Multi-Factor Strategy

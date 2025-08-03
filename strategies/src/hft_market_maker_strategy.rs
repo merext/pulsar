@@ -50,6 +50,11 @@ pub struct HftMarketMakerStrategy {
     volume_profile: [f64; 24], // Hourly volume profile
     current_hour: u8,
     
+    // Momentum tracking (for trade data optimization)
+    last_price: f64,
+    price_momentum: f64,
+    momentum_threshold: f64,
+    
     // Configuration parameters (loaded from config file)
     hedge_threshold: f64,
     _inventory_cost_weight: f64,
@@ -125,6 +130,9 @@ impl HftMarketMakerStrategy {
         // Volume Profile
         let volume_profile_alpha = config.get_or("volume_profile_alpha", 0.9);
         let volume_profile_beta = config.get_or("volume_profile_beta", 0.1);
+        
+        // Momentum tracking
+        let momentum_threshold = config.get_or("momentum_threshold", 0.0001);
 
         Self {
             best_bid: 0.0,
@@ -173,6 +181,9 @@ impl HftMarketMakerStrategy {
             volatility_alpha,
             volume_profile_alpha,
             volume_profile_beta,
+            last_price: 0.0,
+            price_momentum: 0.0,
+            momentum_threshold,
         }
     }
 
@@ -308,49 +319,23 @@ impl HftMarketMakerStrategy {
 
     #[inline]
     fn generate_market_making_signal(&self) -> (Signal, f64) {
-        // Market making signal generation
+        // Pure momentum strategy like HFT Ultra Fast (simplified market making)
         
-        // Check if we should place orders
-        let place_bid = self.should_place_bid();
-        let place_ask = self.should_place_ask();
+        // Ultra-aggressive momentum approach
+        let momentum_factor = if self.price_momentum.abs() > self.momentum_threshold { 2.5 } else { 1.0 };
         
-        // Check if we need to hedge
-        let need_hedge = self.should_hedge();
-        
-        // Generate signal based on market making logic
-        let result = if need_hedge {
-            // Hedge signal
-            if self.current_inventory > 0.0 {
-                (Signal::Sell, self.hedge_confidence) // Sell to reduce long inventory
-            } else {
-                (Signal::Buy, self.hedge_confidence)  // Buy to reduce short inventory
-            }
-        } else if place_bid && place_ask {
-            // Both sides of the book - alternate between buy and sell for backtesting
-            if self.trades_made % 2 == 0 {
-                (Signal::Buy, self.bid_ask_confidence) // Buy on even trades
-            } else {
-                (Signal::Sell, self.bid_ask_confidence) // Sell on odd trades
-            }
-        } else if place_bid {
-            // Only bid side
-            (Signal::Buy, self.bid_only_confidence) // Stronger buy signal for backtesting
-        } else if place_ask {
-            // Only ask side
-            (Signal::Sell, self.ask_only_confidence) // Stronger sell signal for backtesting
+        // Simple momentum-based signal generation (like successful strategies)
+        let result = if self.price_momentum > self.momentum_threshold {
+            // Any positive momentum - buy (like HFT Ultra Fast)
+            let momentum_strength = (self.price_momentum * 3000.0).min(1.0);
+            (Signal::Buy, momentum_strength * momentum_factor)
+        } else if self.price_momentum < -self.momentum_threshold {
+            // Any negative momentum - sell (like HFT Ultra Fast)
+            let momentum_strength = (self.price_momentum.abs() * 3000.0).min(1.0);
+            (Signal::Sell, momentum_strength * momentum_factor)
         } else {
-            // No orders - try to generate signals based on price movement
-            if self.volatility > self.volatility_threshold {
-                // High volatility - try to capture momentum
-                if self.current_inventory < 0.0 {
-                    (Signal::Buy, self.momentum_confidence) // Buy to cover short position
-                } else {
-                    (Signal::Sell, self.momentum_confidence) // Sell to reduce long position
-                }
-            } else {
-                // Default to buy signals when no other conditions are met
-                (Signal::Buy, self.default_confidence)
-            }
+            // No momentum - hold
+            (Signal::Hold, 0.0)
         };
         
         // Apply signal threshold filter
@@ -378,6 +363,11 @@ impl Strategy for HftMarketMakerStrategy {
         let price = trade.price;
         let volume = trade.qty;
         let is_buyer_maker = trade.is_buyer_maker;
+        
+        // Update price momentum
+        if self.last_price > 0.0 {
+            self.price_momentum = (price - self.last_price) / self.last_price;
+        }
         
         // For backtesting, simulate order book updates based on trade data
         // In real implementation, you'd have actual order book data
@@ -428,6 +418,9 @@ impl Strategy for HftMarketMakerStrategy {
         
         // Update trade count
         self.trades_made += 1;
+        
+        // Update last price for momentum calculation
+        self.last_price = price;
     }
 
     fn get_signal(

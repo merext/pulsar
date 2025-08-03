@@ -28,6 +28,7 @@ pub struct ZScoreStrategy {
     signal_threshold: f64,
     zscore_threshold: f64,
     mean_reversion_strength: f64,
+    momentum_threshold: f64,
     // Performance tracking
     last_price: f64,
     price_momentum: f64,
@@ -46,9 +47,10 @@ impl ZScoreStrategy {
         let buy_threshold = config.get_or("buy_threshold", -0.000005);
         let sell_threshold = config.get_or("sell_threshold", 0.000005);
         let scale = config.get_or("scale", 1.2);
-        let signal_threshold = config.get_or("signal_threshold", 0.3);
-        let zscore_threshold = config.get_or("zscore_threshold", 1.5);
-        let mean_reversion_strength = config.get_or("mean_reversion_strength", 0.6);
+        let signal_threshold = config.get_or("signal_threshold", 0.1);
+        let zscore_threshold = config.get_or("zscore_threshold", 0.5);
+        let mean_reversion_strength = config.get_or("mean_reversion_strength", 1.0);
+        let momentum_threshold = config.get_or("momentum_threshold", 0.00005);
 
         Self {
             period,
@@ -59,6 +61,7 @@ impl ZScoreStrategy {
             signal_threshold,
             zscore_threshold,
             mean_reversion_strength,
+            momentum_threshold,
             last_price: 0.0,
             price_momentum: 0.0,
         }
@@ -120,24 +123,25 @@ impl Strategy for ZScoreStrategy {
 
         let z_score = (current_price - mean) / std_dev;
 
-        // Check if Z-score exceeds threshold
-        if z_score.abs() < self.zscore_threshold {
-            return (Signal::Hold, 0.0);
-        }
-
-        // Calculate momentum-adjusted signal
-        let momentum_factor = if self.price_momentum.abs() > 0.001 { 1.2 } else { 1.0 };
+        // Pure momentum approach like HFT Ultra Fast (ignore Z-score direction)
+        let momentum_factor = if self.price_momentum.abs() > self.momentum_threshold { 2.5 } else { 1.0 };
 
         let signal: Signal;
         let confidence: f64;
 
-        if z_score > self.zscore_threshold {
-            signal = Signal::Sell;
-            confidence = (z_score.abs() * self.mean_reversion_strength * momentum_factor).min(1.0);
-        } else if z_score < -self.zscore_threshold {
+        // Simple momentum-based signal generation (like successful strategies)
+        if self.price_momentum > self.momentum_threshold {
+            // Any positive momentum - buy (like HFT Ultra Fast)
+            let momentum_strength = (self.price_momentum * 3000.0).min(1.0);
             signal = Signal::Buy;
-            confidence = (z_score.abs() * self.mean_reversion_strength * momentum_factor).min(1.0);
+            confidence = momentum_strength * momentum_factor * self.scale;
+        } else if self.price_momentum < -self.momentum_threshold {
+            // Any negative momentum - sell (like HFT Ultra Fast)
+            let momentum_strength = (self.price_momentum.abs() * 3000.0).min(1.0);
+            signal = Signal::Sell;
+            confidence = momentum_strength * momentum_factor * self.scale;
         } else {
+            // No momentum - hold
             signal = Signal::Hold;
             confidence = 0.0;
         }
@@ -148,7 +152,5 @@ impl Strategy for ZScoreStrategy {
         } else {
             return (signal, confidence);
         }
-
-        (signal, confidence)
     }
 }

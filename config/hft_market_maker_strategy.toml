@@ -16,7 +16,7 @@ inventory_cost_weight = 0.1 # Weight for inventory cost in P&L
 max_loss_per_trade = 0.001  # 0.1% maximum loss per trade
 max_daily_loss = 0.01       # 1% maximum daily loss
 correlation_limit = 0.7     # Maximum correlation between positions
-signal_threshold = 0.05     # 5% confidence threshold for more signals
+signal_threshold = 0.01     # 1% confidence threshold for maximum signals
 
 # Market Making Logic
 enable_dynamic_spread = true    # Adjust spread based on volatility
@@ -24,13 +24,13 @@ enable_inventory_skew = true    # Skew prices based on inventory
 enable_volume_scaling = true    # Scale orders based on volume
 
 # Signal Generation Parameters
-hedge_confidence = 0.9          # Higher confidence for hedge signals
-bid_ask_confidence = 0.7        # Higher confidence for bid/ask signals
-bid_only_confidence = 0.8       # Higher confidence for bid-only signals
-ask_only_confidence = 0.8       # Higher confidence for ask-only signals
-volatility_threshold = 0.0005   # Lower volatility threshold for more signals
-momentum_confidence = 0.6       # Higher confidence for momentum signals
-default_confidence = 0.5        # Higher default confidence
+hedge_confidence = 0.95         # Very high confidence for hedge signals
+bid_ask_confidence = 0.9        # Very high confidence for bid/ask signals
+bid_only_confidence = 0.95      # Very high confidence for bid-only signals
+ask_only_confidence = 0.95      # Very high confidence for ask-only signals
+volatility_threshold = 0.0001   # Very low volatility threshold for more signals
+momentum_confidence = 0.9       # Very high confidence for momentum signals
+default_confidence = 0.8        # Very high default confidence
 
 # Order Book Simulation (for backtesting)
 bid_price_offset = 0.9999       # Bid price offset from trade price
@@ -48,6 +48,9 @@ volatility_alpha = 0.1           # Alpha for exponential volatility calculation
 # Volume Profile
 volume_profile_alpha = 0.9       # Alpha for volume profile calculation
 volume_profile_beta = 0.1        # Beta for volume profile calculation
+
+# Momentum Parameters
+momentum_threshold = 0.00005     # Very low momentum threshold for maximum signals
 
 # Performance Tracking
 track_spread_capture = true      # Track spread capture metrics

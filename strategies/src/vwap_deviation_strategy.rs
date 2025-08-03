@@ -18,6 +18,7 @@ use toml;
 pub struct VwapDeviationStrategy {
     period: usize,
     deviation_threshold: f64,
+    signal_threshold: f64,
     trades: Vec<TradeData>,
     total_volume: f64,
     total_price_volume: f64,

@@ -2,15 +2,18 @@
 # Best for: Statistical arbitrage, mean reversion
 
 # Core Parameters
-period = 30                   # Shorter period for faster signals
+period = 10                   # Very short period for ultra-fast signals
 buy_threshold = -0.000005     # Lower buy threshold for more signals
 sell_threshold = 0.000005     # Lower sell threshold for more signals
-scale = 1.2                  # Higher signal scaling factor
+scale = 2.0                   # Very high scaling factor for strong signals
+signal_threshold = 0.1        # Very low threshold for maximum signals
 
 # Z-Score Logic
-zscore_threshold = 1.5        # Lower Z-score threshold for more signals
-mean_reversion_strength = 0.6 # Higher expected mean reversion strength
-signal_threshold = 0.3        # Lower confidence threshold for more signals
+zscore_threshold = 0.5        # Very low Z-score threshold for more signals
+mean_reversion_strength = 1.0 # Very high strength for strong signals
+
+# Momentum Parameters
+momentum_threshold = 0.00005  # Very low momentum threshold for more signals
 
 # Risk Management
 stop_loss_pct = 0.02          # 2% stop loss

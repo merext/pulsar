@@ -8,8 +8,7 @@
 //! Conversely, a buy signal is generated when the RSI falls below a defined oversold threshold (e.g., 30),
 //! suggesting the asset may be undervalued and due for a price rebound.
 
-use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
-use crate::config::{StrategyConfig, DefaultConfig};
+use crate::config::StrategyConfig;
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
@@ -24,6 +23,14 @@ pub struct RsiStrategy {
     oversold: f64,
     scale: f64,
     prices: VecDeque<f64>,
+    // Configuration parameters
+    signal_threshold: f64,
+    momentum_threshold: f64,
+    // Performance tracking
+    last_price: f64,
+    price_momentum: f64,
+    last_rsi: f64,
+    rsi_momentum: f64,
 }
 
 impl RsiStrategy {
@@ -35,10 +42,12 @@ impl RsiStrategy {
                 StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
             });
 
-        let period = config.get_or("period", DefaultConfig::rsi_period());
-        let overbought = config.get_or("overbought", DefaultConfig::rsi_overbought());
-        let oversold = config.get_or("oversold", DefaultConfig::rsi_oversold());
-        let scale = config.get_or("scale", DefaultConfig::rsi_scale());
+        let period = config.get_or("period", 10);
+        let overbought = config.get_or("overbought", 75.0);
+        let oversold = config.get_or("oversold", 25.0);
+        let scale = config.get_or("scale", 1.2);
+        let signal_threshold = config.get_or("signal_threshold", 0.3);
+        let momentum_threshold = config.get_or("momentum_threshold", 0.001);
 
         Self {
             period,
@@ -46,6 +55,12 @@ impl RsiStrategy {
             oversold,
             scale,
             prices: VecDeque::new(),
+            signal_threshold,
+            momentum_threshold,
+            last_price: 0.0,
+            price_momentum: 0.0,
+            last_rsi: 50.0,
+            rsi_momentum: 0.0,
         }
     }
 
@@ -89,10 +104,25 @@ impl Strategy for RsiStrategy {
 
     async fn on_trade(&mut self, trade: TradeData) {
         let trade_price = trade.price;
+        
+        // Update price momentum
+        if self.last_price > 0.0 {
+            self.price_momentum = (trade_price - self.last_price) / self.last_price;
+        }
+        
         self.prices.push_back(trade_price);
         if self.prices.len() > self.period + 1 {
             self.prices.pop_front();
         }
+        
+        // Update RSI momentum
+        let current_rsi = self.calculate_rsi();
+        if self.last_rsi > 0.0 {
+            self.rsi_momentum = current_rsi - self.last_rsi;
+        }
+        self.last_rsi = current_rsi;
+        
+        self.last_price = trade_price;
     }
 
     fn get_signal(
@@ -103,19 +133,36 @@ impl Strategy for RsiStrategy {
     ) -> (Signal, f64) {
         let rsi = self.calculate_rsi();
 
+        // Pure momentum approach - ignore traditional RSI levels
+        let momentum_factor = if self.price_momentum.abs() > self.momentum_threshold { 2.5 } else { 1.0 };
+        let rsi_momentum_factor = if self.rsi_momentum.abs() > 1.0 { 1.8 } else { 1.0 };
+        
         let signal: Signal;
         let confidence: f64;
 
-        if rsi > self.overbought {
-            signal = Signal::Sell;
-            confidence = scale_from_threshold(rsi, self.overbought, self.scale);
-        } else if rsi < self.oversold {
+        // Pure momentum strategy - RSI just confirms momentum direction
+        if self.price_momentum > 0.00005 {
+            // Any positive momentum - buy (like HFT Ultra Fast)
             signal = Signal::Buy;
-            confidence = scale_from_threshold_inverse(rsi, self.oversold, self.scale);
+            let momentum_strength = (self.price_momentum * 2000.0).min(1.0);
+            let rsi_confirmation = if rsi > 50.0 { 1.2 } else { 0.8 }; // RSI confirms trend
+            confidence = momentum_strength * rsi_confirmation * momentum_factor * rsi_momentum_factor * self.scale;
+        } else if self.price_momentum < -0.00005 {
+            // Any negative momentum - sell (like HFT Ultra Fast)
+            signal = Signal::Sell;
+            let momentum_strength = (self.price_momentum.abs() * 2000.0).min(1.0);
+            let rsi_confirmation = if rsi < 50.0 { 1.2 } else { 0.8 }; // RSI confirms trend
+            confidence = momentum_strength * rsi_confirmation * momentum_factor * rsi_momentum_factor * self.scale;
         } else {
             signal = Signal::Hold;
             confidence = 0.0;
         }
-        (signal, confidence)
+
+        // Apply signal threshold filter
+        if confidence < self.signal_threshold {
+            return (Signal::Hold, 0.0);
+        } else {
+            return (signal, confidence);
+        }
     }
 }
