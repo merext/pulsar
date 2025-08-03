@@ -38,6 +38,10 @@ impl MeanReversionStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for MeanReversionStrategy {
+    fn get_info(&self) -> String {
+        format!("Mean Reversion Strategy (window_size: {}, max_trade_window: {})", self.window_size, self.max_trade_window)
+    }
+
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
         self.prices.push_back(price);

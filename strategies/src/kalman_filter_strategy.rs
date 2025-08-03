@@ -98,6 +98,10 @@ impl KalmanFilterStrategy {
 
 #[async_trait]
 impl Strategy for KalmanFilterStrategy {
+    fn get_info(&self) -> String {
+        format!("Kalman Filter Strategy (signal_threshold: {})", self.signal_threshold)
+    }
+
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
         self.predict();

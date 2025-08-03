@@ -59,6 +59,10 @@ impl OrderBookImbalance {
 
 #[async_trait::async_trait]
 impl Strategy for OrderBookImbalance {
+    fn get_info(&self) -> String {
+        format!("Order Book Imbalance Strategy (period: {}, buy_threshold: {}, sell_threshold: {})", self.period, self.buy_threshold, self.sell_threshold)
+    }
+
     async fn on_trade(&mut self, trade: TradeData) {
         self.trades.push_back(trade);
         if self.trades.len() > self.period {

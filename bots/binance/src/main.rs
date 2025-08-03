@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
 use tracing::info;
+use strategies::strategy::Strategy;
 
 mod backtest;
 mod trade;
@@ -56,10 +57,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = MeanReversionStrategy::new(window_size, max_trade_window);
 
     // Momentum Scalping Strategy
-    use strategies::momentum_scalping::MomentumScalping;
-    let trade_window_size = 5; // Example window size
-    let price_change_threshold = 0.00001; // Example threshold
-    let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
+    // use strategies::momentum_scalping::MomentumScalping;
+    // let trade_window_size = 5; // Example window size
+    // let price_change_threshold = 0.00001; // Example threshold
+    // let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
+
+    // Fractal Approximation Strategy
+    use strategies::fractal_approximation_strategy::FractalApproximationStrategy;
+    let period = 25; // Example period, needs tuning
+    let strategy = FractalApproximationStrategy::new(period);
+
+    info!("Using strategy: {}", strategy.get_info());
 
     // Order Book Imbalance Strategy
     // use strategies::order_book_imbalance::OrderBookImbalance;

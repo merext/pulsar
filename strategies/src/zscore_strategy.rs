@@ -51,7 +51,9 @@ impl ZScoreStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for ZScoreStrategy {
-    
+    fn get_info(&self) -> String {
+        format!("Z-Score Strategy (period: {}, buy_threshold: {}, sell_threshold: {})", self.period, self.buy_threshold, self.sell_threshold)
+    }
 
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;

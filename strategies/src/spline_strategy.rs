@@ -72,6 +72,10 @@ impl SplineStrategy {
 
 #[async_trait]
 impl Strategy for SplineStrategy {
+    fn get_info(&self) -> String {
+        format!("Spline Strategy (window_size: {}, derivative_buy_threshold: {}, derivative_sell_threshold: {})", self.window_size, self.derivative_buy_threshold, self.derivative_sell_threshold)
+    }
+
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
         let timestamp = trade.time as f64;

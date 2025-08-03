@@ -37,6 +37,10 @@ impl VwapDeviationStrategy {
 
 #[async_trait]
 impl Strategy for VwapDeviationStrategy {
+    fn get_info(&self) -> String {
+        format!("VWAP Deviation Strategy (period: {}, deviation_threshold: {})", self.period, self.deviation_threshold)
+    }
+
     async fn on_trade(&mut self, trade: TradeData) {
         self.total_volume += trade.qty;
         self.total_price_volume += trade.price * trade.qty;

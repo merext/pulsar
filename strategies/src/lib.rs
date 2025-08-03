@@ -6,6 +6,7 @@ pub mod rsi_strategy;
 pub mod spline_strategy;
 pub mod vwap_deviation_strategy;
 pub mod zscore_strategy;
+pub mod fractal_approximation_strategy;
 
 pub mod models;
 pub mod position;
@@ -20,3 +21,4 @@ pub use rsi_strategy::RsiStrategy;
 pub use spline_strategy::SplineStrategy;
 pub use vwap_deviation_strategy::VwapDeviationStrategy;
 pub use zscore_strategy::ZScoreStrategy;
+pub use fractal_approximation_strategy::FractalApproximationStrategy;

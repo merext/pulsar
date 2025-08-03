@@ -41,6 +41,10 @@ fn std_dev(prices: &VecDeque<f64>) -> f64 {
 
 #[async_trait]
 impl Strategy for MomentumScalping {
+    fn get_info(&self) -> String {
+        format!("Momentum Scalping Strategy (trade_window_size: {}, price_change_threshold: {})", self.trade_window_size, self.price_change_threshold)
+    }
+
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
         self.recent_prices.push_back(price);

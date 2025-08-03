@@ -66,7 +66,9 @@ impl RsiStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for RsiStrategy {
-    
+    fn get_info(&self) -> String {
+        format!("RSI Strategy (period: {}, overbought: {}, oversold: {})", self.period, self.overbought, self.oversold)
+    }
 
     async fn on_trade(&mut self, trade: TradeData) {
         let trade_price = trade.price;
