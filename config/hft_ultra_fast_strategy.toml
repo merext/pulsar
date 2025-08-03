@@ -2,23 +2,38 @@
 # Best for: Ultra-low latency directional trading, momentum capture
 
 # Core Parameters (optimized for speed)
-buffer_size = 64              # Fixed buffer size for minimal allocations
-fast_ema_alpha = 0.1          # Fast EMA smoothing (10-period equivalent)
-slow_ema_alpha = 0.05         # Slow EMA smoothing (20-period equivalent)
-volatility_window = 10        # Short volatility calculation window
+buffer_size = 64           # Fixed buffer size for minimal allocations
+fast_ema_alpha = 0.1       # Fast EMA smoothing (10-period equivalent)
+slow_ema_alpha = 0.05      # Slow EMA smoothing (20-period equivalent)
+volatility_window = 10     # Short volatility calculation window
 
 # Signal Thresholds (microsecond-level)
-buy_threshold = 0.0005        # 0.05% price change threshold
-sell_threshold = -0.0005      # -0.05% price change threshold
-volume_threshold = 1.2        # 20% above average volume
-signal_threshold = 0.6        # 60% confidence threshold
+buy_threshold = 0.0005     # 0.05% price change threshold
+sell_threshold = -0.0005   # -0.05% price change threshold
+volume_threshold = 1.2     # 20% above average volume
+signal_threshold = 0.6     # 60% confidence threshold
 
 # Risk Management (tight for HFT)
-stop_loss_pct = 0.002         # 0.2% stop loss
-take_profit_pct = 0.002       # 0.2% take profit
-max_position_size = 0.05      # 5% max position size
+stop_loss_pct = 0.002      # 0.2% stop loss
+take_profit_pct = 0.002    # 0.2% take profit
+max_position_size = 0.05   # 5% max position size
+
+# Signal Generation Parameters
+min_buffer_size = 10       # Minimum buffer size before generating signals
+volatility_threshold = 0.01 # Volatility threshold for signal adjustment
+volatility_factor_high = 0.5 # Volatility factor when volatility is high
+volatility_factor_low = 1.0  # Volatility factor when volatility is low
+
+# Signal Weights
+price_momentum_weight = 0.4 # Weight for price momentum in signal calculation
+ema_signal_weight = 0.4     # Weight for EMA crossover in signal calculation
+volume_signal_weight = 0.2  # Weight for volume confirmation in signal calculation
+
+# Volume Analysis
+volume_alpha = 0.9          # Alpha for volume exponential moving average
+volume_beta = 0.1           # Beta for volume exponential moving average
 
 # Performance Optimization
-enable_inline = true          # Enable inline functions
-use_fixed_arrays = true       # Use fixed arrays instead of VecDeque
-minimal_branching = true      # Minimize conditional branching 
+enable_inline = true        # Enable inline functions
+use_fixed_arrays = true     # Use fixed arrays instead of VecDeque
+minimal_branching = true    # Minimize conditional branching

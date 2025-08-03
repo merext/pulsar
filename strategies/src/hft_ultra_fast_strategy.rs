@@ -52,6 +52,25 @@ pub struct HftUltraFastStrategy {
     // Performance tracking (minimal)
     trades_won: u32,
     trades_total: u32,
+    
+    // Configuration parameters (loaded from config file)
+    fast_ema_alpha: f64,
+    slow_ema_alpha: f64,
+    _volatility_window: usize,
+    _buy_threshold: f64,
+    _sell_threshold: f64,
+    _stop_loss_pct: f64,
+    _take_profit_pct: f64,
+    _max_position_size: f64,
+    min_buffer_size: usize,
+    volatility_threshold: f64,
+    volatility_factor_high: f64,
+    volatility_factor_low: f64,
+    price_momentum_weight: f64,
+    ema_signal_weight: f64,
+    volume_signal_weight: f64,
+    volume_alpha: f64,
+    volume_beta: f64,
 }
 
 impl HftUltraFastStrategy {
@@ -63,9 +82,37 @@ impl HftUltraFastStrategy {
                 StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
             });
 
+        // Core Parameters
         let _buffer_size = config.get_or("buffer_size", 64);
+        let fast_ema_alpha = config.get_or("fast_ema_alpha", 0.1);
+        let slow_ema_alpha = config.get_or("slow_ema_alpha", 0.05);
+        let _volatility_window = config.get_or("volatility_window", 10);
+
+        // Signal Thresholds
+        let _buy_threshold = config.get_or("buy_threshold", 0.0005);
+        let _sell_threshold = config.get_or("sell_threshold", -0.0005);
         let volume_threshold = config.get_or("volume_threshold", 1.2);
         let signal_threshold = config.get_or("signal_threshold", DefaultConfig::hft_signal_threshold());
+
+        // Risk Management
+        let _stop_loss_pct = config.get_or("stop_loss_pct", 0.002);
+        let _take_profit_pct = config.get_or("take_profit_pct", 0.002);
+        let _max_position_size = config.get_or("max_position_size", 0.05);
+
+        // Signal Generation Parameters
+        let min_buffer_size = config.get_or("min_buffer_size", 10);
+        let volatility_threshold = config.get_or("volatility_threshold", 0.01);
+        let volatility_factor_high = config.get_or("volatility_factor_high", 0.5);
+        let volatility_factor_low = config.get_or("volatility_factor_low", 1.0);
+
+        // Signal Weights
+        let price_momentum_weight = config.get_or("price_momentum_weight", 0.4);
+        let ema_signal_weight = config.get_or("ema_signal_weight", 0.4);
+        let volume_signal_weight = config.get_or("volume_signal_weight", 0.2);
+
+        // Volume Analysis
+        let volume_alpha = config.get_or("volume_alpha", 0.9);
+        let volume_beta = config.get_or("volume_beta", 0.1);
 
         Self {
             price_buffer: [0.0; 64],
@@ -87,6 +134,24 @@ impl HftUltraFastStrategy {
             signal_threshold,
             trades_won: 0,
             trades_total: 0,
+            // Store all config parameters
+            fast_ema_alpha,
+            slow_ema_alpha,
+            _volatility_window,
+            _buy_threshold,
+            _sell_threshold,
+            _stop_loss_pct,
+            _take_profit_pct,
+            _max_position_size,
+            min_buffer_size,
+            volatility_threshold,
+            volatility_factor_high,
+            volatility_factor_low,
+            price_momentum_weight,
+            ema_signal_weight,
+            volume_signal_weight,
+            volume_alpha,
+            volume_beta,
         }
     }
 
@@ -131,7 +196,7 @@ impl HftUltraFastStrategy {
         self.volatility_sum += price_change;
         self.volatility_sum_sq += price_change * price_change;
         
-        if self.buffer_size > 10 {
+        if self.buffer_size > self.min_buffer_size {
             let mean = self.volatility_sum / self.buffer_size as f64;
             let variance = (self.volatility_sum_sq / self.buffer_size as f64) - (mean * mean);
             self.volatility = variance.sqrt();
@@ -144,7 +209,7 @@ impl HftUltraFastStrategy {
         if self.avg_volume == 0.0 {
             self.avg_volume = volume;
         } else {
-            self.avg_volume = 0.9 * self.avg_volume + 0.1 * volume;
+            self.avg_volume = self.volume_alpha * self.avg_volume + self.volume_beta * volume;
         }
         self.volume_ratio = volume / self.avg_volume;
     }
@@ -154,7 +219,7 @@ impl HftUltraFastStrategy {
         // Ultra-fast signal generation with minimal branching
         
         // Check if we have enough data
-        if self.buffer_size < 10 {
+        if self.buffer_size < self.min_buffer_size {
             return (Signal::Hold, 0.0);
         }
 
@@ -169,11 +234,19 @@ impl HftUltraFastStrategy {
         let volume_signal = if self.volume_ratio > self.volume_threshold { 1.0 } else { 0.0 };
         
         // Volatility adjustment
-        let volatility_factor = if self.volatility > 0.01 { 0.5 } else { 1.0 };
+        let volatility_factor = if self.volatility > self.volatility_threshold { 
+            self.volatility_factor_high 
+        } else { 
+            self.volatility_factor_low 
+        };
         
         // Combine signals (simple weighted sum)
-        let buy_score = (price_momentum * 0.4 + ema_signal * 0.4 + volume_signal * 0.2) * volatility_factor;
-        let sell_score = (-price_momentum * 0.4 - ema_signal * 0.4 + volume_signal * 0.2) * volatility_factor;
+        let buy_score = (price_momentum * self.price_momentum_weight + 
+                        ema_signal * self.ema_signal_weight + 
+                        volume_signal * self.volume_signal_weight) * volatility_factor;
+        let sell_score = (-price_momentum * self.price_momentum_weight - 
+                         ema_signal * self.ema_signal_weight + 
+                         volume_signal * self.volume_signal_weight) * volatility_factor;
         
         // Generate signal with confidence
         if buy_score > self.signal_threshold {
@@ -226,8 +299,8 @@ impl Strategy for HftUltraFastStrategy {
         self.update_volume_buffer(volume);
         
         // Update indicators (fast calculations)
-        self.calculate_fast_ema(price, 0.1);  // Fast EMA (10-period equivalent)
-        self.calculate_slow_ema(price, 0.05); // Slow EMA (20-period equivalent)
+        self.calculate_fast_ema(price, self.fast_ema_alpha);  // Fast EMA (10-period equivalent)
+        self.calculate_slow_ema(price, self.slow_ema_alpha); // Slow EMA (20-period equivalent)
         self.update_volatility(self.price_change);
         self.update_volume_analysis(volume);
         

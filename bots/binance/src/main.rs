@@ -3,9 +3,8 @@ use ::trade::trader::Trader;
 use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
-use tracing::info;
 use strategies::strategy::Strategy;
-
+use tracing::info;
 
 mod backtest;
 mod trade;
@@ -28,8 +27,6 @@ enum Commands {
         path: Option<String>,
     },
 }
-
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -59,10 +56,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // use strategies::momentum_scalping::MomentumScalping;
     // let strategy = MomentumScalping::new(); // Loads config from config/momentum_scalping_strategy.toml
 
-    // HFT Market Maker Strategy
-    use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
-    let strategy = HftMarketMakerStrategy::new(); // Loads config from config/hft_market_maker_strategy.toml
-
     // Order Book Imbalance Strategy
     // use strategies::order_book_imbalance::OrderBookImbalance;
     // let strategy = OrderBookImbalance::new(); // Loads config from config/order_book_imbalance_strategy.toml
@@ -81,8 +74,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // HFT Strategies (Ultra-low latency optimized)
     // HFT Ultra-Fast Strategy (Currently active)
-    // use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
-    // let strategy = HftUltraFastStrategy::new();
+    use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
+    let strategy = HftUltraFastStrategy::new();
 
     // HFT Market Maker Strategy
     // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
