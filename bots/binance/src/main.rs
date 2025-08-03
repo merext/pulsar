@@ -73,13 +73,53 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = ZScoreStrategy::new(); // Loads config from config/zscore_strategy.toml
 
     // HFT Strategies (Ultra-low latency optimized)
-    // HFT Ultra-Fast Strategy (Currently active)
-    use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
-    let strategy = HftUltraFastStrategy::new();
+    // HFT Ultra-Fast Strategy
+    // use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
+    // let strategy = HftUltraFastStrategy::new();
 
     // HFT Market Maker Strategy
     // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
     // let strategy = HftMarketMakerStrategy::new(); // Loads config from config/hft_market_maker_strategy.toml
+
+    // RSI Strategy
+    // use strategies::rsi_strategy::RsiStrategy;
+    // let strategy = RsiStrategy::new(); // Loads config from config/rsi_strategy.toml
+
+    // Mean Reversion Strategy
+    // use strategies::mean_reversion::MeanReversionStrategy;
+    // let strategy = MeanReversionStrategy::new(); // Loads config from config/mean_reversion_strategy.toml
+
+    // Momentum Scalping Strategy
+    // use strategies::momentum_scalping::MomentumScalpingStrategy;
+    // let strategy = MomentumScalpingStrategy::new(); // Loads config from config/momentum_scalping_strategy.toml
+
+    // HFT Ultra Fast Strategy
+    // use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
+    // let strategy = HftUltraFastStrategy::new();
+
+    // Adaptive Multi-Factor Strategy
+    // use strategies::adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
+    // let strategy = AdaptiveMultiFactorStrategy::new();
+
+    // Z-Score Strategy
+    // use strategies::zscore_strategy::ZScoreStrategy;
+    // let strategy = ZScoreStrategy::new();
+
+    // Momentum Scalping Strategy
+    // use strategies::momentum_scalping::MomentumScalping;
+    // let strategy = MomentumScalping::new();
+
+    // Mean Reversion Strategy
+    // use strategies::mean_reversion::MeanReversionStrategy;
+    // let strategy = MeanReversionStrategy::new();
+
+    // Z-Score Strategy
+    // use strategies::zscore_strategy::ZScoreStrategy;
+    // let strategy = ZScoreStrategy::new();
+
+    // Kalman Filter Strategy (Currently active - Optimized)
+    use strategies::kalman_filter_strategy::KalmanFilterStrategy;
+    let strategy = KalmanFilterStrategy::new();
 
     // Advanced Strategies (Medium-term trading)
     // Adaptive Multi-Factor Strategy

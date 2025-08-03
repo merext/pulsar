@@ -6,11 +6,13 @@
 //! The strategy generates a buy signal if the price falls significantly below VWAP (indicating undervaluation)
 //! and a sell signal if the price rises significantly above VWAP (indicating overvaluation).
 
+use crate::config::StrategyConfig;
 use async_trait::async_trait;
 use trade::models::TradeData;
 use trade::signal::Signal;
 use trade::trader::Position;
 use crate::strategy::Strategy;
+use toml;
 
 #[derive(Clone)]
 pub struct VwapDeviationStrategy {
@@ -23,10 +25,22 @@ pub struct VwapDeviationStrategy {
 }
 
 impl VwapDeviationStrategy {
-    pub fn new(period: usize, deviation_threshold: f64) -> Self {
+    pub fn new() -> Self {
+        // Load configuration from file
+        let config = StrategyConfig::load_strategy_config("vwap_deviation_strategy")
+            .unwrap_or_else(|_| {
+                // Use defaults if config file not found
+                StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
+            });
+
+        let period = config.get_or("period", 20);
+        let deviation_threshold = config.get_or("deviation_threshold", 0.001);
+        let signal_threshold = config.get_or("signal_threshold", 0.3);
+
         Self {
             period,
             deviation_threshold,
+            signal_threshold,
             trades: Vec::with_capacity(period),
             total_volume: 0.0,
             total_price_volume: 0.0,
@@ -70,9 +84,19 @@ impl Strategy for VwapDeviationStrategy {
         let deviation = (current_price - self.vwap) / self.vwap;
 
         if deviation < -self.deviation_threshold {
-            (Signal::Buy, deviation.abs())
+            let confidence = deviation.abs().min(1.0);
+            if confidence < self.signal_threshold {
+                (Signal::Hold, 0.0)
+            } else {
+                (Signal::Buy, confidence)
+            }
         } else if deviation > self.deviation_threshold {
-            (Signal::Sell, deviation.abs())
+            let confidence = deviation.abs().min(1.0);
+            if confidence < self.signal_threshold {
+                (Signal::Hold, 0.0)
+            } else {
+                (Signal::Sell, confidence)
+            }
         } else {
             (Signal::Hold, 0.0)
         }

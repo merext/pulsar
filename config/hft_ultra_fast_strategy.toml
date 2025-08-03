@@ -3,15 +3,15 @@
 
 # Core Parameters (optimized for speed)
 buffer_size = 64           # Fixed buffer size for minimal allocations
-fast_ema_alpha = 0.1       # Fast EMA smoothing (10-period equivalent)
-slow_ema_alpha = 0.05      # Slow EMA smoothing (20-period equivalent)
+fast_ema_alpha = 0.4       # Extremely responsive fast EMA (2.5-period equivalent)
+slow_ema_alpha = 0.2       # Very responsive slow EMA (5-period equivalent)
 volatility_window = 10     # Short volatility calculation window
 
 # Signal Thresholds (microsecond-level)
-buy_threshold = 0.0005     # 0.05% price change threshold
-sell_threshold = -0.0005   # -0.05% price change threshold
-volume_threshold = 1.2     # 20% above average volume
-signal_threshold = 0.6     # 60% confidence threshold
+buy_threshold = 0.00005    # Extremely low buy threshold for maximum signals
+sell_threshold = -0.00005  # Extremely low sell threshold for maximum signals
+volume_threshold = 0.9     # Below average volume threshold for maximum signals
+signal_threshold = 0.1     # Extremely low confidence threshold for maximum signals
 
 # Risk Management (tight for HFT)
 stop_loss_pct = 0.002      # 0.2% stop loss
@@ -19,19 +19,19 @@ take_profit_pct = 0.002    # 0.2% take profit
 max_position_size = 0.05   # 5% max position size
 
 # Signal Generation Parameters
-min_buffer_size = 10       # Minimum buffer size before generating signals
-volatility_threshold = 0.01 # Volatility threshold for signal adjustment
-volatility_factor_high = 0.5 # Volatility factor when volatility is high
-volatility_factor_low = 1.0  # Volatility factor when volatility is low
+min_buffer_size = 3        # Very small buffer size for immediate signals
+volatility_threshold = 0.003 # Very low volatility threshold for maximum signals
+volatility_factor_high = 1.0 # No reduction in high volatility
+volatility_factor_low = 1.5  # Boost signals in low volatility
 
 # Signal Weights
-price_momentum_weight = 0.4 # Weight for price momentum in signal calculation
-ema_signal_weight = 0.4     # Weight for EMA crossover in signal calculation
-volume_signal_weight = 0.2  # Weight for volume confirmation in signal calculation
+price_momentum_weight = 0.6 # Higher weight for price momentum
+ema_signal_weight = 0.3     # Keep EMA crossover weight
+volume_signal_weight = 0.1  # Reduced volume confirmation weight
 
 # Volume Analysis
-volume_alpha = 0.9          # Alpha for volume exponential moving average
-volume_beta = 0.1           # Beta for volume exponential moving average
+volume_alpha = 0.8          # More responsive volume EMA
+volume_beta = 0.2           # Higher weight for new volume data
 
 # Performance Optimization
 enable_inline = true        # Enable inline functions

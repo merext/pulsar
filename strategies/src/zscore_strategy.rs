@@ -9,12 +9,13 @@
 //! Conversely, a sell signal is generated when the Z-score rises above a positive threshold (e.g., +2),
 //! indicating that the price is significantly overbought and likely to revert downwards.
 
-use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
+use crate::config::StrategyConfig;
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
 use std::collections::VecDeque;
+use toml;
 
 #[derive(Clone)]
 pub struct ZScoreStrategy {
@@ -23,16 +24,43 @@ pub struct ZScoreStrategy {
     sell_threshold: f64,
     scale: f64,
     prices: VecDeque<f64>,
+    // Configuration parameters
+    signal_threshold: f64,
+    zscore_threshold: f64,
+    mean_reversion_strength: f64,
+    // Performance tracking
+    last_price: f64,
+    price_momentum: f64,
 }
 
 impl ZScoreStrategy {
-    pub fn new(period: usize, buy_threshold: f64, sell_threshold: f64, scale: f64) -> Self {
+    pub fn new() -> Self {
+        // Load configuration from file
+        let config = StrategyConfig::load_strategy_config("zscore_strategy")
+            .unwrap_or_else(|_| {
+                // Use defaults if config file not found
+                StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
+            });
+
+        let period = config.get_or("period", 30);
+        let buy_threshold = config.get_or("buy_threshold", -0.000005);
+        let sell_threshold = config.get_or("sell_threshold", 0.000005);
+        let scale = config.get_or("scale", 1.2);
+        let signal_threshold = config.get_or("signal_threshold", 0.3);
+        let zscore_threshold = config.get_or("zscore_threshold", 1.5);
+        let mean_reversion_strength = config.get_or("mean_reversion_strength", 0.6);
+
         Self {
             period,
             buy_threshold,
             sell_threshold,
             scale,
             prices: VecDeque::new(),
+            signal_threshold,
+            zscore_threshold,
+            mean_reversion_strength,
+            last_price: 0.0,
+            price_momentum: 0.0,
         }
     }
 
@@ -60,10 +88,18 @@ impl Strategy for ZScoreStrategy {
 
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
+        
+        // Update price momentum
+        if self.last_price > 0.0 {
+            self.price_momentum = (price - self.last_price) / self.last_price;
+        }
+        
         self.prices.push_back(price);
         if self.prices.len() > self.period {
             self.prices.pop_front();
         }
+        
+        self.last_price = price;
     }
 
     fn get_signal(
@@ -84,18 +120,33 @@ impl Strategy for ZScoreStrategy {
 
         let z_score = (current_price - mean) / std_dev;
 
+        // Check if Z-score exceeds threshold
+        if z_score.abs() < self.zscore_threshold {
+            return (Signal::Hold, 0.0);
+        }
+
+        // Calculate momentum-adjusted signal
+        let momentum_factor = if self.price_momentum.abs() > 0.001 { 1.2 } else { 1.0 };
+
         let signal: Signal;
         let confidence: f64;
 
-        if z_score > self.sell_threshold {
+        if z_score > self.zscore_threshold {
             signal = Signal::Sell;
-            confidence = scale_from_threshold(z_score, self.sell_threshold, self.scale);
-        } else if z_score < self.buy_threshold {
+            confidence = (z_score.abs() * self.mean_reversion_strength * momentum_factor).min(1.0);
+        } else if z_score < -self.zscore_threshold {
             signal = Signal::Buy;
-            confidence = scale_from_threshold_inverse(z_score, self.buy_threshold, self.scale);
+            confidence = (z_score.abs() * self.mean_reversion_strength * momentum_factor).min(1.0);
         } else {
             signal = Signal::Hold;
-            confidence = 0.0; // No confidence for Hold signal
+            confidence = 0.0;
+        }
+
+        // Apply signal threshold filter
+        if confidence < self.signal_threshold {
+            return (Signal::Hold, 0.0);
+        } else {
+            return (signal, confidence);
         }
 
         (signal, confidence)

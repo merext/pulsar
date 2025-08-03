@@ -2,14 +2,14 @@
 # Best for: Range-bound markets, mean reversion opportunities
 
 # Core Parameters
-window_size = 20              # Moving average window size
-max_trade_window = 10         # Maximum trade holding period
-scale = 1.0                  # Signal scaling factor
+window_size = 15              # Shorter window size for faster signals
+max_trade_window = 8          # Shorter trade holding period
+scale = 1.2                  # Higher signal scaling factor
 
 # Mean Reversion Logic
-deviation_threshold = 0.02    # 2% deviation from mean
-reversion_strength = 0.5      # Expected reversion strength
-signal_threshold = 0.6        # 60% confidence threshold
+deviation_threshold = 0.015   # Lower deviation threshold for more signals
+reversion_strength = 0.6      # Higher expected reversion strength
+signal_threshold = 0.3        # Lower confidence threshold for more signals
 
 # Risk Management
 stop_loss_pct = 0.02          # 2% stop loss

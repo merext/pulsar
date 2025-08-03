@@ -2,14 +2,18 @@
 # Best for: Short-term momentum, scalping opportunities
 
 # Core Parameters
-trade_window_size = 5         # Trade window size
-price_change_threshold = 0.00001  # Price change threshold
-scale = 1.0                  # Signal scaling factor
+trade_window_size = 2         # Very short trade window for immediate signals
+price_change_threshold = 0.000001  # Extremely low price change threshold
+scale = 1.5                  # Higher signal scaling factor
 
 # Scalping Logic
-momentum_threshold = 0.001    # 0.1% momentum threshold
-volume_threshold = 1.2        # 20% above average volume
-signal_threshold = 0.6        # 60% confidence threshold
+momentum_threshold = 0.0001   # Very low momentum threshold for maximum signals
+volume_threshold = 0.9        # Below average volume threshold for more signals
+signal_threshold = 0.1        # Extremely low confidence threshold for maximum signals
+
+# Volume Analysis
+volume_alpha = 0.8            # More responsive volume EMA
+volume_beta = 0.2             # Higher weight for new volume data
 
 # Risk Management
 stop_loss_pct = 0.01          # 1% stop loss (tight for scalping)

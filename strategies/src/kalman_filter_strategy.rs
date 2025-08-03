@@ -7,13 +7,14 @@
 //! A positive deviation exceeding a defined threshold suggests a potential sell opportunity (price is overvalued relative to its estimated true value),
 //! while a negative deviation below a threshold suggests a potential buy opportunity (price is undervalued).
 
-use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
+use crate::config::StrategyConfig;
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
 use async_trait::async_trait;
 use nalgebra::{Matrix2, Vector2};
+use toml;
 
 #[derive(Clone)]
 pub struct KalmanFilterStrategy {
@@ -32,10 +33,27 @@ pub struct KalmanFilterStrategy {
     // Threshold for generating signals
     signal_threshold: f64,
     scale: f64,
+    // Configuration parameters
+    confidence_threshold: f64,
+    deviation_threshold: f64,
+    // Performance tracking
+    last_price: f64,
+    price_momentum: f64,
 }
 
 impl KalmanFilterStrategy {
-    pub fn new(signal_threshold: f64, scale: f64) -> Self {
+    pub fn new() -> Self {
+        // Load configuration from file
+        let config = StrategyConfig::load_strategy_config("kalman_filter_strategy")
+            .unwrap_or_else(|_| {
+                // Use defaults if config file not found
+                StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
+            });
+
+        let signal_threshold = config.get_or("signal_threshold", 0.3);
+        let scale = config.get_or("scale", 1.2);
+        let confidence_threshold = config.get_or("confidence_threshold", 0.3);
+        let deviation_threshold = config.get_or("deviation_threshold", 0.001);
         let dt = 1.0; // Time step (e.g., 1 for each new kline/trade)
 
         // Initial state (price, velocity)
@@ -78,6 +96,10 @@ impl KalmanFilterStrategy {
             measurement_noise_covariance,
             signal_threshold,
             scale,
+            confidence_threshold,
+            deviation_threshold,
+            last_price: 0.0,
+            price_momentum: 0.0,
         }
     }
 
@@ -107,8 +129,16 @@ impl Strategy for KalmanFilterStrategy {
 
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
+        
+        // Update price momentum
+        if self.last_price > 0.0 {
+            self.price_momentum = (price - self.last_price) / self.last_price;
+        }
+        
         self.predict();
         self.update(price);
+        
+        self.last_price = price;
     }
 
     fn get_signal(
@@ -118,21 +148,35 @@ impl Strategy for KalmanFilterStrategy {
         _current_position: Position,
     ) -> (Signal, f64) {
         let estimated_price = self.state_estimate[0];
-        let deviation = current_price - estimated_price;
-
+        let deviation = (current_price - estimated_price) / estimated_price; // Normalized deviation
+        
+        // Check if deviation exceeds threshold
+        if deviation.abs() < self.deviation_threshold {
+            return (Signal::Hold, 0.0);
+        }
+        
+        // Calculate momentum-adjusted signal
+        let momentum_factor = if self.price_momentum.abs() > 0.001 { 1.2 } else { 1.0 };
+        
         let signal: Signal;
         let confidence: f64;
 
-        if deviation > self.signal_threshold {
-            signal = Signal::Buy; // Current price is significantly above estimated price
-            confidence = scale_from_threshold(deviation, self.signal_threshold, self.scale);
-        } else if deviation < -self.signal_threshold {
-            signal = Signal::Sell; // Current price is significantly below estimated price
-            confidence = scale_from_threshold_inverse(deviation, -self.signal_threshold, self.scale);
+        if deviation > self.deviation_threshold {
+            signal = Signal::Sell; // Price is above estimated, sell
+            confidence = (deviation.abs() * momentum_factor).min(1.0);
+        } else if deviation < -self.deviation_threshold {
+            signal = Signal::Buy; // Price is below estimated, buy
+            confidence = (deviation.abs() * momentum_factor).min(1.0);
         } else {
             signal = Signal::Hold;
             confidence = 0.0;
         }
-        (signal, confidence)
+
+        // Apply confidence threshold filter
+        if confidence < self.confidence_threshold {
+            (Signal::Hold, 0.0)
+        } else {
+            (signal, confidence)
+        }
     }
 }

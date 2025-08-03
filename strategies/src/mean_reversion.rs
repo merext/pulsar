@@ -7,14 +7,13 @@
 //! anticipating a bounce back towards the mean. Conversely, it generates a sell signal when the price rises above its SMA,
 //! expecting a pull back.
 
-use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
+use crate::config::StrategyConfig;
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
-
-
 use std::collections::VecDeque;
+use toml;
 
 #[derive(Clone)]
 pub struct MeanReversionStrategy {
@@ -24,10 +23,31 @@ pub struct MeanReversionStrategy {
     pub recent_trades: VecDeque<f64>,
     pub max_trade_window: usize,
     pub scale: f64,
+    // Configuration parameters
+    signal_threshold: f64,
+    deviation_threshold: f64,
+    reversion_strength: f64,
+    // Performance tracking
+    last_price: f64,
+    price_momentum: f64,
 }
 
 impl MeanReversionStrategy {
-    pub fn new(window_size: usize, max_trade_window: usize, scale: f64) -> Self {
+    pub fn new() -> Self {
+        // Load configuration from file
+        let config = StrategyConfig::load_strategy_config("mean_reversion_strategy")
+            .unwrap_or_else(|_| {
+                // Use defaults if config file not found
+                StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
+            });
+
+        let window_size = config.get_or("window_size", 15);
+        let max_trade_window = config.get_or("max_trade_window", 8);
+        let scale = config.get_or("scale", 1.2);
+        let signal_threshold = config.get_or("signal_threshold", 0.3);
+        let deviation_threshold = config.get_or("deviation_threshold", 0.015);
+        let reversion_strength = config.get_or("reversion_strength", 0.6);
+
         Self {
             window_size,
             prices: VecDeque::with_capacity(window_size),
@@ -35,6 +55,11 @@ impl MeanReversionStrategy {
             recent_trades: VecDeque::with_capacity(max_trade_window),
             max_trade_window,
             scale,
+            signal_threshold,
+            deviation_threshold,
+            reversion_strength,
+            last_price: 0.0,
+            price_momentum: 0.0,
         }
     }
 }
@@ -47,6 +72,12 @@ impl Strategy for MeanReversionStrategy {
 
     async fn on_trade(&mut self, trade: TradeData) {
         let price = trade.price;
+        
+        // Update price momentum
+        if self.last_price > 0.0 {
+            self.price_momentum = (price - self.last_price) / self.last_price;
+        }
+        
         self.prices.push_back(price);
         if self.prices.len() > self.window_size {
             self.prices.pop_front();
@@ -62,6 +93,8 @@ impl Strategy for MeanReversionStrategy {
             let sum: f64 = self.prices.iter().sum();
             self.last_sma = Some(sum / self.window_size as f64);
         }
+        
+        self.last_price = price;
     }
 
     fn get_signal(
@@ -71,22 +104,36 @@ impl Strategy for MeanReversionStrategy {
         _current_position: Position,
     ) -> (Signal, f64) {
         if let Some(sma) = self.last_sma {
-            let deviation = current_price - sma;
+            let deviation = (current_price - sma) / sma; // Normalized deviation
+            
+            // Check if deviation exceeds threshold
+            if deviation.abs() < self.deviation_threshold {
+                return (Signal::Hold, 0.0);
+            }
+            
+            // Calculate momentum-adjusted signal
+            let momentum_factor = if self.price_momentum.abs() > 0.001 { 1.2 } else { 1.0 };
+            
             let signal: Signal;
             let confidence: f64;
-            let confidence_scale = sma * self.scale;
 
-            if deviation < 0.0 { // Price is below SMA, potential buy
+            if deviation < -self.deviation_threshold { // Price is below SMA, potential buy
                 signal = Signal::Buy;
-                confidence = scale_from_threshold_inverse(current_price, sma, confidence_scale);
-            } else if deviation > 0.0 { // Price is above SMA, potential sell
+                confidence = (deviation.abs() * self.reversion_strength * momentum_factor).min(1.0);
+            } else if deviation > self.deviation_threshold { // Price is above SMA, potential sell
                 signal = Signal::Sell;
-                confidence = scale_from_threshold(current_price, sma, confidence_scale);
+                confidence = (deviation.abs() * self.reversion_strength * momentum_factor).min(1.0);
             } else {
                 signal = Signal::Hold;
                 confidence = 0.0;
             }
-            (signal, confidence)
+            
+            // Apply signal threshold filter
+            if confidence < self.signal_threshold {
+                (Signal::Hold, 0.0)
+            } else {
+                (signal, confidence)
+            }
         } else {
             (Signal::Hold, 0.0)
         }

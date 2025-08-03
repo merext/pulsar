@@ -2,15 +2,15 @@
 # Best for: Mean reversion, overbought/oversold conditions
 
 # Core Parameters
-period = 14                   # RSI calculation period
-overbought = 70.0            # Overbought threshold
-oversold = 30.0              # Oversold threshold
-scale = 1.0                  # Signal scaling factor
+period = 10                   # Shorter RSI period for faster signals
+overbought = 75.0            # More aggressive overbought threshold
+oversold = 25.0              # More aggressive oversold threshold
+scale = 1.2                  # Higher signal scaling factor
 
 # Signal Generation
 buy_signal = "oversold"       # Buy when RSI crosses below oversold
 sell_signal = "overbought"    # Sell when RSI crosses above overbought
-signal_threshold = 0.6        # 60% confidence threshold
+signal_threshold = 0.3        # Lower confidence threshold for more signals
 
 # Risk Management
 stop_loss_pct = 0.02          # 2% stop loss

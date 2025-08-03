@@ -2,10 +2,12 @@
 # Best for: Noise filtering, trend following
 
 # Core Parameters
-signal_threshold = 0.00001    # Signal threshold for Kalman filter
-scale = 1.0                  # Signal scaling factor
+signal_threshold = 0.3        # Lower signal threshold for more signals
+scale = 1.2                  # Higher signal scaling factor
 
 # Kalman Filter Parameters
+confidence_threshold = 0.2    # Lower confidence threshold for more signals
+deviation_threshold = 0.0005  # Lower deviation threshold for more signals
 process_noise = 0.001         # Process noise covariance
 measurement_noise = 0.01      # Measurement noise covariance
 initial_uncertainty = 1.0     # Initial state uncertainty
