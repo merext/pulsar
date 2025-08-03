@@ -1,11 +1,16 @@
 # Neural Market Microstructure Strategy Configuration
-# Best for: Volatile markets, short-term trading, high-frequency opportunities
+# Optimized for profitability using momentum-based approach
 
-# Core Parameters
-short_window = 5         # Short-term EMA window (3-10 recommended)
-medium_window = 20       # Medium-term EMA window (15-30 recommended)
-long_window = 100        # Long-term EMA window (50-200 recommended)
-micro_window = 10        # Microstructure analysis window (5-20 recommended)
+# Core parameters
+input_window = 20
+hidden_size = 32
+learning_rate = 0.001
+momentum_threshold = 0.01
+volume_threshold = 1.2
+volatility_threshold = 0.01
+
+# Signal filtering - Made more aggressive for trade generation
+signal_threshold = 0.01
 
 # Neural Network Parameters
 hidden_layer_size = 8    # Number of hidden neurons

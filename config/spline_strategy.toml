@@ -7,6 +7,6 @@ derivative_buy_threshold = 0.001
 derivative_sell_threshold = -0.001
 scale = 2.0
 
-# Signal filtering
-signal_threshold = 0.1
-momentum_threshold = 0.00005 
+# Signal filtering - Made more aggressive for trade generation
+signal_threshold = 0.01
+momentum_threshold = 0.00001 

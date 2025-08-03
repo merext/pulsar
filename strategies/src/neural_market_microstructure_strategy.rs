@@ -18,6 +18,7 @@ use crate::strategy::Strategy;
 use trade::signal::Signal;
 use std::collections::VecDeque;
 use std::f64;
+use crate::config::StrategyConfig;
 
 #[derive(Clone, Debug)]
 pub struct NeuralMarketMicrostructureStrategy {
@@ -76,13 +77,15 @@ enum MarketRegime {
 }
 
 impl NeuralMarketMicrostructureStrategy {
-    pub fn new(
-        short_window: usize,
-        medium_window: usize,
-        long_window: usize,
-        micro_window: usize,
-        signal_threshold: f64,
-    ) -> Self {
+    pub fn new() -> Self {
+        let config = StrategyConfig::load_strategy_config("neural_market_microstructure_strategy");
+        
+        let short_window = config.as_ref().map(|c| c.get_or("short_window", 5)).unwrap_or(5);
+        let medium_window = config.as_ref().map(|c| c.get_or("medium_window", 20)).unwrap_or(20);
+        let long_window = config.as_ref().map(|c| c.get_or("long_window", 100)).unwrap_or(100);
+        let micro_window = config.as_ref().map(|c| c.get_or("micro_window", 10)).unwrap_or(10);
+        let signal_threshold = config.as_ref().map(|c| c.get_or("signal_threshold", 0.01)).unwrap_or(0.01);
+        
         let hidden_size = 8;
         let feature_size = 12;
         
@@ -113,7 +116,7 @@ impl NeuralMarketMicrostructureStrategy {
             regime_confidence: 0.5,
             timeframe_signals: vec![Signal::Hold; 3],
             signal_weights: vec![0.4, 0.35, 0.25], // Short, medium, long weights
-            signal_threshold, // Use the parameter
+            signal_threshold,
         }
     }
 

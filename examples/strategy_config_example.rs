@@ -7,21 +7,19 @@
 //! `config/advanced_strategies_config.toml`
 
 use strategies::{
-    config::{StrategyConfig, DefaultConfig},
-    strategy::Strategy,
+    mean_reversion_strategy::MeanReversionStrategy,
+    momentum_scalping_strategy::MomentumScalping,
     rsi_strategy::RsiStrategy,
-    mean_reversion::MeanReversionStrategy,
-    momentum_scalping::MomentumScalping,
-    kalman_filter_strategy::KalmanFilterStrategy,
-    order_book_imbalance::OrderBookImbalance,
-    spline_strategy::{Interpolation, SplineStrategy},
-    vwap_deviation_strategy::VwapDeviationStrategy,
+    order_book_imbalance_strategy::OrderBookImbalance,
     zscore_strategy::ZScoreStrategy,
+    kalman_filter_strategy::KalmanFilterStrategy,
+    vwap_deviation_strategy::VwapDeviationStrategy,
+    spline_strategy::SplineStrategy,
     fractal_approximation_strategy::FractalApproximationStrategy,
-    hft_ultra_fast_strategy::HftUltraFastStrategy,
-    hft_market_maker_strategy::HftMarketMakerStrategy,
     adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy,
     neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy,
+    hft_ultra_fast_strategy::HftUltraFastStrategy,
+    hft_market_maker_strategy::HftMarketMakerStrategy,
 };
 use trade::models::TradeData;
 use trade::signal::Signal;

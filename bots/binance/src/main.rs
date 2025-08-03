@@ -78,8 +78,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = HftUltraFastStrategy::new();
 
     // Mean Reversion Strategy (Currently active - Optimizing)
-    use strategies::mean_reversion::MeanReversionStrategy;
-    let strategy = MeanReversionStrategy::new();
+    // use strategies::mean_reversion_strategy::MeanReversionStrategy;
+    // let strategy = MeanReversionStrategy::new();
 
     // HFT Market Maker Strategy
     // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
@@ -90,16 +90,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = RsiStrategy::new(); // Loads config from config/rsi_strategy.toml
 
     // Mean Reversion Strategy
-    // use strategies::mean_reversion::MeanReversionStrategy;
+    // use strategies::mean_reversion_strategy::MeanReversionStrategy;
     // let strategy = MeanReversionStrategy::new(); // Loads config from config/mean_reversion_strategy.toml
 
     // Momentum Scalping Strategy
-    // use strategies::momentum_scalping::MomentumScalpingStrategy;
-    // let strategy = MomentumScalpingStrategy::new(); // Loads config from config/momentum_scalping_strategy.toml
-
-    // HFT Ultra Fast Strategy
-    // use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
-    // let strategy = HftUltraFastStrategy::new();
+    // use strategies::momentum_scalping_strategy::MomentumScalping;
+    // let strategy = MomentumScalping::new();
 
     // Adaptive Multi-Factor Strategy
     // use strategies::adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
@@ -110,12 +106,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = ZScoreStrategy::new();
 
     // Momentum Scalping Strategy
-    // use strategies::momentum_scalping::MomentumScalping;
+    // use strategies::momentum_scalping_strategy::MomentumScalping;
     // let strategy = MomentumScalping::new();
 
     // Mean Reversion Strategy
-    // use strategies::mean_reversion::MeanReversionStrategy;
-    // let strategy = MeanReversionStrategy::new();
+    use strategies::mean_reversion_strategy::MeanReversionStrategy;
+    let strategy = MeanReversionStrategy::new();
 
     // Z-Score Strategy
     // use strategies::zscore_strategy::ZScoreStrategy;
@@ -130,8 +126,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = RsiStrategy::new();
 
     // HFT Market Maker Strategy
-    // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
-    // let strategy = HftMarketMakerStrategy::new();
+    use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
+    let strategy = HftMarketMakerStrategy::new();
 
     // Z-Score Strategy (Currently active - Optimizing)
     // use strategies::zscore_strategy::ZScoreStrategy;
@@ -145,6 +141,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Neural Market Microstructure Strategy
     // use strategies::neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
     // let strategy = NeuralMarketMicrostructureStrategy::new(); // Loads config from config/neural_market_microstructure_strategy.toml
+
+    // RSI Strategy
+    // use strategies::rsi_strategy::RsiStrategy;
+    // let strategy = RsiStrategy::new();
+
+    // Spline Strategy
+    // use strategies::spline_strategy::SplineStrategy;
+    // let strategy = SplineStrategy::new();
+
+    // Order Book Imbalance Strategy
+    // use strategies::order_book_imbalance_strategy::OrderBookImbalance;
+    // let strategy = OrderBookImbalance::new();
+
+    // Fractal Approximation Strategy
+    // use strategies::fractal_approximation_strategy::FractalApproximationStrategy;
+    // let strategy = FractalApproximationStrategy::new();
+
+    // VWAP Deviation Strategy
+    use strategies::vwap_deviation_strategy::VwapDeviationStrategy;
+    let strategy = VwapDeviationStrategy::new();
+
+    // Kalman Filter Strategy
+    // use strategies::kalman_filter_strategy::KalmanFilterStrategy;
+    // let strategy = KalmanFilterStrategy::new();
+
+    // Adaptive Multi-Factor Strategy
+    // use strategies::adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
+    // let strategy = AdaptiveMultiFactorStrategy::new();
+
+    // Neural Market Microstructure Strategy
+    // use strategies::neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
+    // let strategy = NeuralMarketMicrostructureStrategy::new();
 
     // Initialize trader with API credentials
     let trading_symbol = "DOGEUSDT";

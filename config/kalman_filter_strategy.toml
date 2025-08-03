@@ -1,13 +1,15 @@
 # Kalman Filter Strategy Configuration
-# Best for: Noise filtering, trend following
+# Optimized for profitability using momentum-based approach
 
-# Core Parameters
-signal_threshold = 0.3        # Lower signal threshold for more signals
-scale = 1.2                  # Higher signal scaling factor
+# Core parameters
+scale = 1.2
+confidence_threshold = 0.2
+deviation_threshold = 0.0005
+
+# Signal filtering - Made more aggressive for trade generation
+signal_threshold = 0.01
 
 # Kalman Filter Parameters
-confidence_threshold = 0.2    # Lower confidence threshold for more signals
-deviation_threshold = 0.0005  # Lower deviation threshold for more signals
 process_noise = 0.001         # Process noise covariance
 measurement_noise = 0.01      # Measurement noise covariance
 initial_uncertainty = 1.0     # Initial state uncertainty

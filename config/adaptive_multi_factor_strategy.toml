@@ -1,22 +1,22 @@
 # Adaptive Multi-Factor Strategy Configuration
-# Best for: Trending markets, medium-term trading, balanced risk/reward
+# Optimized for profitability using momentum-based approach
 
-# Core Parameters
-short_window = 8         # Shorter short-term SMA window for faster signals
-long_window = 30         # Shorter long-term SMA window for faster signals
-volatility_window = 15   # Shorter volatility calculation window
-volume_window = 20       # Shorter VWAP calculation window
+# Core parameters
+short_window = 8
+long_window = 30
+volatility_window = 15
+volume_window = 20
+volatility_multiplier = 1.5
+momentum_threshold = 0.01
+volume_threshold = 1.2
+
+# Signal filtering - Made more aggressive for trade generation
+signal_threshold = 0.01
 
 # Risk Management
 max_position_size = 0.1  # Maximum 10% of portfolio per trade
 stop_loss_pct = 0.02     # 2% stop loss
 take_profit_pct = 0.04   # 4% take profit
-
-# Adaptive Parameters
-volatility_multiplier = 1.5      # Lower multiplier for more signals
-momentum_threshold = 0.01        # Lower price change threshold for more signals
-volume_threshold = 1.2           # Lower volume threshold for more signals
-signal_threshold = 0.3           # Lower confidence threshold for more signals
 
 # Market Regime Adjustments
 [low_volatility]
