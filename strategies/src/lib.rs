@@ -7,6 +7,10 @@ pub mod spline_strategy;
 pub mod vwap_deviation_strategy;
 pub mod zscore_strategy;
 pub mod fractal_approximation_strategy;
+pub mod adaptive_multi_factor_strategy;
+pub mod neural_market_microstructure_strategy;
+pub mod hft_ultra_fast_strategy;
+pub mod hft_market_maker_strategy;
 
 pub mod models;
 pub mod position;
@@ -22,3 +26,7 @@ pub use spline_strategy::SplineStrategy;
 pub use vwap_deviation_strategy::VwapDeviationStrategy;
 pub use zscore_strategy::ZScoreStrategy;
 pub use fractal_approximation_strategy::FractalApproximationStrategy;
+pub use adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
+pub use neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
+pub use hft_ultra_fast_strategy::HftUltraFastStrategy;
+pub use hft_market_maker_strategy::HftMarketMakerStrategy;

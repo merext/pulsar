@@ -62,10 +62,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let price_change_threshold = 0.00001; // Example threshold
     // let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
 
-    // Fractal Approximation Strategy
-    use strategies::fractal_approximation_strategy::FractalApproximationStrategy;
-    let period = 25; // Example period, needs tuning
-    let strategy = FractalApproximationStrategy::new(period);
+    // HFT Ultra-Fast Strategy
+    use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
+    let strategy = HftUltraFastStrategy::new();
 
     info!("Using strategy: {}", strategy.get_info());
 
@@ -102,12 +101,49 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let sell_threshold = 0.00001; // Example sell threshold
     // let strategy = ZScoreStrategy::new(period, buy_threshold, sell_threshold);
 
+    // HFT Strategies (Ultra-low latency optimized)
+    // HFT Ultra-Fast Strategy (Currently active)
+    // use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
+    // let strategy = HftUltraFastStrategy::new();
+
+    // HFT Market Maker Strategy
+    // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
+    // let strategy = HftMarketMakerStrategy::new();
+
+    // Advanced Strategies (Medium-term trading)
+    // Adaptive Multi-Factor Strategy
+    // use strategies::adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
+    // let short_window = 10;
+    // let long_window = 50;
+    // let volatility_window = 20;
+    // let volume_window = 30;
+    // let strategy = AdaptiveMultiFactorStrategy::new(short_window, long_window, volatility_window, volume_window);
+
+    // Neural Market Microstructure Strategy
+    // use strategies::neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
+    // let short_window = 5;
+    // let medium_window = 20;
+    // let long_window = 100;
+    // let micro_window = 10;
+    // let strategy = NeuralMarketMicrostructureStrategy::new(short_window, medium_window, long_window, micro_window);
+
     // Initialize trader with API credentials
     let trading_symbol = "DOGEUSDT";
     // IMPORTANT: Replace with your actual Binance API Key and Secret
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set in the environment");
     let api_secret =
         env::var("BINANCE_API_SECRET").expect("API_SECRET must be set in the environment");
+
+    // HFT-specific configuration
+    info!("HFT Ultra-Fast Strategy Configuration:");
+    info!("  - Latency target: < 1 microsecond");
+    info!("  - Buffer size: 64 ticks");
+    info!("  - Fast EMA alpha: 0.1 (10-period equivalent)");
+    info!("  - Slow EMA alpha: 0.05 (20-period equivalent)");
+    info!("  - Buy threshold: 0.05% price change");
+    info!("  - Stop loss: 0.2%");
+    info!("  - Take profit: 0.2%");
+    info!("  - Config file: ../../config/advanced_strategies_config.toml");
 
     let trade_mode = match cli.command {
         Commands::Trade => TradeMode::Real,

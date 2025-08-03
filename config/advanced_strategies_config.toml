@@ -1,0 +1,315 @@
+# Advanced Trading Strategies Configuration
+# This file contains optimized parameters for the new sophisticated strategies
+
+[adaptive_multi_factor]
+# Adaptive Multi-Factor Strategy Configuration
+# Best for: Trending markets, medium-term trading, balanced risk/reward
+
+# Core Parameters
+short_window = 10        # Short-term SMA window (5-15 recommended)
+long_window = 50         # Long-term SMA window (30-100 recommended)
+volatility_window = 20   # Volatility calculation window (15-30 recommended)
+volume_window = 30       # VWAP calculation window (20-50 recommended)
+
+# Risk Management
+max_position_size = 0.1  # Maximum 10% of portfolio per trade
+stop_loss_pct = 0.02     # 2% stop loss
+take_profit_pct = 0.04   # 4% take profit
+
+# Adaptive Parameters
+volatility_multiplier = 2.0      # Multiplier for volatility bands
+momentum_threshold = 0.02        # 2% price change threshold
+volume_threshold = 1.5           # 50% above average volume
+
+# Market Regime Adjustments
+[adaptive_multi_factor.low_volatility]
+momentum_threshold = 0.015
+volatility_multiplier = 1.5
+
+[adaptive_multi_factor.high_volatility]
+momentum_threshold = 0.025
+volatility_multiplier = 2.5
+
+[adaptive_multi_factor.extreme_volatility]
+momentum_threshold = 0.03
+volatility_multiplier = 3.0
+
+[neural_market_microstructure]
+# Neural Market Microstructure Strategy Configuration
+# Best for: Volatile markets, short-term trading, high-frequency opportunities
+
+# Core Parameters
+short_window = 5         # Short-term EMA window (3-10 recommended)
+medium_window = 20       # Medium-term EMA window (15-30 recommended)
+long_window = 100        # Long-term EMA window (50-200 recommended)
+micro_window = 10        # Microstructure analysis window (5-20 recommended)
+
+# Neural Network Parameters
+hidden_layer_size = 8    # Number of hidden neurons
+learning_rate = 0.01     # Learning rate for weight updates
+momentum_factor = 0.9    # Momentum for gradient descent
+
+# Risk Management
+volatility_filter = 0.02     # Minimum volatility threshold
+correlation_threshold = 0.7   # Signal correlation threshold
+max_drawdown = 0.05          # Maximum 5% drawdown
+
+# Multi-timeframe Weights
+short_weight = 0.4        # Weight for short-term signals
+medium_weight = 0.35      # Weight for medium-term signals
+long_weight = 0.25        # Weight for long-term signals
+
+# Market Regime Detection
+[neural_market_microstructure.regime_thresholds]
+trending_threshold = 0.02     # Trend strength threshold
+volatility_low = 0.15         # Low volatility threshold
+volatility_medium = 0.30      # Medium volatility threshold
+volatility_high = 0.50        # High volatility threshold
+
+# Strategy Combination
+[strategy_ensemble]
+# Ensemble Strategy Configuration
+# Combines multiple strategies for better performance
+
+# Strategy Weights (must sum to 1.0)
+adaptive_weight = 0.4     # Weight for Adaptive Multi-Factor
+neural_weight = 0.4       # Weight for Neural Market Microstructure
+legacy_weight = 0.2       # Weight for legacy strategies
+
+# Ensemble Parameters
+min_confidence = 0.6      # Minimum confidence for ensemble signal
+correlation_threshold = 0.8  # Maximum correlation between strategies
+rebalance_frequency = 30  # Days between rebalancing
+
+# Risk Management
+[risk_management]
+# Global Risk Management Settings
+
+# Position Sizing
+max_portfolio_risk = 0.02     # Maximum 2% portfolio risk per trade
+max_correlation = 0.7         # Maximum correlation between positions
+max_positions = 5             # Maximum concurrent positions
+
+# Stop Loss and Take Profit
+default_stop_loss = 0.02      # Default 2% stop loss
+default_take_profit = 0.04    # Default 4% take profit
+trailing_stop = true          # Enable trailing stop
+trailing_distance = 0.01      # 1% trailing distance
+
+# Volatility Adjustments
+volatility_scaling = true     # Scale position size by volatility
+min_volatility = 0.1          # Minimum volatility for scaling
+max_volatility = 0.8          # Maximum volatility for scaling
+
+# Market Hours
+[trading_hours]
+# Trading Session Configuration
+
+# Active trading hours (UTC)
+start_hour = 0                # 00:00 UTC
+end_hour = 24                 # 24:00 UTC (24/7 trading)
+
+# High activity periods (higher position sizes)
+high_activity_start = 13      # 13:00 UTC (US market open)
+high_activity_end = 21        # 21:00 UTC (US market close)
+
+# Low activity periods (lower position sizes)
+low_activity_multiplier = 0.5 # 50% position size during low activity
+
+# Performance Monitoring
+[performance_monitoring]
+# Performance tracking and optimization
+
+# Metrics to track
+track_win_rate = true
+track_sharpe_ratio = true
+track_max_drawdown = true
+track_profit_factor = true
+
+# Optimization frequency
+rebalance_frequency = 30      # Days between rebalancing
+parameter_optimization = 90   # Days between parameter optimization
+performance_review = 7        # Days between performance reviews
+
+# Alert thresholds
+min_win_rate = 0.4            # Alert if win rate drops below 40%
+max_drawdown_alert = 0.1      # Alert if drawdown exceeds 10%
+min_profit_factor = 1.2       # Alert if profit factor drops below 1.2
+
+# Backtesting Configuration
+[backtesting]
+# Backtesting parameters for strategy validation
+
+# Data requirements
+min_data_points = 1000        # Minimum data points for backtesting
+lookback_period = 365         # Days of historical data to use
+
+# Performance metrics
+calculate_sharpe = true
+calculate_sortino = true
+calculate_calmar = true
+calculate_max_drawdown = true
+
+# Transaction costs
+commission_rate = 0.001       # 0.1% commission per trade
+slippage = 0.0005             # 0.05% slippage per trade
+
+# Market Impact
+market_impact_model = "linear"  # Linear market impact model
+impact_coefficient = 0.0001     # Market impact coefficient
+
+# HFT Strategies Configuration
+[hft_ultra_fast]
+# HFT Ultra-Fast Strategy Configuration
+# Best for: Ultra-low latency directional trading, momentum capture
+
+# Core Parameters (optimized for speed)
+buffer_size = 64              # Fixed buffer size for minimal allocations
+fast_ema_alpha = 0.1          # Fast EMA smoothing (10-period equivalent)
+slow_ema_alpha = 0.05         # Slow EMA smoothing (20-period equivalent)
+volatility_window = 10        # Short volatility calculation window
+
+# Signal Thresholds (microsecond-level)
+buy_threshold = 0.0005        # 0.05% price change threshold
+sell_threshold = -0.0005      # -0.05% price change threshold
+volume_threshold = 1.2        # 20% above average volume
+
+# Risk Management (tight for HFT)
+stop_loss_pct = 0.002         # 0.2% stop loss
+take_profit_pct = 0.002       # 0.2% take profit
+max_position_size = 0.05      # 5% max position size
+
+# Performance Optimization
+enable_inline = true          # Enable inline functions
+use_fixed_arrays = true       # Use fixed arrays instead of VecDeque
+minimal_branching = true      # Minimize conditional branching
+
+[hft_market_maker]
+# HFT Market Maker Strategy Configuration
+# Best for: Spread capture, order book analysis, inventory management
+
+# Order Book Parameters
+spread_multiplier = 1.5       # Multiplier for optimal spread calculation
+min_spread = 0.0001           # 0.01% minimum spread
+max_position = 1000.0         # Maximum position size
+inventory_target = 0.0        # Target inventory (0 = neutral)
+
+# Inventory Management
+max_inventory = 5000.0        # Maximum inventory before hedging
+hedge_threshold = 0.8         # Hedge when inventory > 80% of max
+inventory_cost_weight = 0.1   # Weight for inventory cost in P&L
+
+# Risk Controls
+max_loss_per_trade = 0.001    # 0.1% maximum loss per trade
+max_daily_loss = 0.01         # 1% maximum daily loss
+correlation_limit = 0.7       # Maximum correlation between positions
+
+# Market Making Logic
+enable_dynamic_spread = true  # Adjust spread based on volatility
+enable_inventory_skew = true  # Skew prices based on inventory
+enable_volume_scaling = true  # Scale orders based on volume
+
+# Performance Tracking
+track_spread_capture = true   # Track spread capture metrics
+track_inventory_cost = true   # Track inventory holding costs
+track_market_impact = true    # Track market impact costs
+
+# Binance-specific HFT settings
+[binance_hft]
+# Binance-specific HFT settings
+
+# Trading Pairs
+primary_symbol = "DOGEUSDT"   # Primary trading pair
+backup_symbols = ["BTCUSDT", "ETHUSDT"] # Backup pairs
+
+# Order Types
+enable_market_orders = true   # Enable market orders for immediate execution
+enable_limit_orders = true    # Enable limit orders for price improvement
+enable_stop_orders = true     # Enable stop orders for risk management
+
+# Rate Limits
+max_orders_per_second = 10    # Binance rate limit
+max_requests_per_minute = 1200 # Binance rate limit
+order_timeout_ms = 5000       # 5 second timeout
+
+# WebSocket Settings
+websocket_url = "wss://stream.binance.com:9443/ws/"
+reconnect_interval_ms = 1000  # 1 second reconnect interval
+heartbeat_interval_ms = 30000 # 30 second heartbeat
+
+# Cryptocurrency-specific HFT settings
+[crypto_hft]
+# Cryptocurrency-specific HFT settings
+
+# Volatility Handling
+volatility_multiplier = 2.0   # Higher volatility multiplier for crypto
+dynamic_thresholds = true     # Adjust thresholds based on volatility
+volatility_lookback = 100     # 100 ticks for volatility calculation
+
+# 24/7 Trading
+enable_24_7_trading = true    # Trade 24/7 (crypto markets)
+timezone_handling = "UTC"     # Use UTC for all timestamps
+weekend_trading = true        # Enable weekend trading
+
+# Crypto-specific Risks
+flash_crash_protection = true # Protection against flash crashes
+whale_detection = true        # Detect large whale movements
+news_sentiment_impact = false # Disable news sentiment (HFT focus)
+
+# Network Optimization
+use_binance_testnet = false   # Use mainnet for production
+enable_futures_trading = false # Disable futures (spot only)
+enable_margin_trading = false # Disable margin trading
+
+# Example Usage Scenarios
+[scenarios]
+
+[scenarios.conservative]
+# Conservative trading profile
+description = "Low risk, steady returns"
+max_position_size = 0.05      # 5% max position size
+stop_loss_pct = 0.015         # 1.5% stop loss
+take_profit_pct = 0.03        # 3% take profit
+adaptive_weight = 0.6         # Favor adaptive strategy
+neural_weight = 0.3           # Moderate neural strategy
+legacy_weight = 0.1           # Minimal legacy strategy
+
+[scenarios.aggressive]
+# Aggressive trading profile
+description = "High risk, high potential returns"
+max_position_size = 0.15      # 15% max position size
+stop_loss_pct = 0.03          # 3% stop loss
+take_profit_pct = 0.06        # 6% take profit
+adaptive_weight = 0.3         # Moderate adaptive strategy
+neural_weight = 0.6           # Favor neural strategy
+legacy_weight = 0.1           # Minimal legacy strategy
+
+[scenarios.balanced]
+# Balanced trading profile
+description = "Moderate risk, balanced returns"
+max_position_size = 0.1       # 10% max position size
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+adaptive_weight = 0.4         # Equal weight adaptive strategy
+neural_weight = 0.4           # Equal weight neural strategy
+legacy_weight = 0.2           # Moderate legacy strategy
+
+[scenarios.hft_ultra_fast]
+# HFT Ultra-Fast trading profile
+description = "Ultra-low latency, high-frequency trading"
+max_position_size = 0.05      # 5% max position size (small for HFT)
+stop_loss_pct = 0.002         # 0.2% stop loss (tight for HFT)
+take_profit_pct = 0.002       # 0.2% take profit (tight for HFT)
+hft_weight = 1.0              # Use only HFT strategy
+adaptive_weight = 0.0         # No adaptive strategy
+neural_weight = 0.0           # No neural strategy
+
+[scenarios.hft_market_maker]
+# HFT Market Maker trading profile
+description = "Spread capture, market making"
+max_position_size = 0.1       # 10% max position size
+stop_loss_pct = 0.001         # 0.1% stop loss (very tight)
+take_profit_pct = 0.001       # 0.1% take profit (very tight)
+hft_mm_weight = 1.0           # Use only HFT market maker
+adaptive_weight = 0.0         # No adaptive strategy
+neural_weight = 0.0           # No neural strategy 
