@@ -59,11 +59,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // use strategies::momentum_scalping::MomentumScalping;
     // let strategy = MomentumScalping::new(); // Loads config from config/momentum_scalping_strategy.toml
 
-    // HFT Ultra-Fast Strategy
-    use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
-    let strategy = HftUltraFastStrategy::new(); // Loads config from config/hft_ultra_fast_strategy.toml
-
-    info!("Using strategy: {}", strategy.get_info());
+    // HFT Market Maker Strategy
+    use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
+    let strategy = HftMarketMakerStrategy::new(); // Loads config from config/hft_market_maker_strategy.toml
 
     // Order Book Imbalance Strategy
     // use strategies::order_book_imbalance::OrderBookImbalance;
@@ -106,17 +104,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let api_secret =
         env::var("BINANCE_API_SECRET").expect("API_SECRET must be set in the environment");
 
-    // HFT-specific configuration
-    info!("HFT Ultra-Fast Strategy Configuration:");
+    // HFT Market Maker configuration
+    info!("HFT Market Maker Strategy Configuration:");
     info!("  - Latency target: < 1 microsecond");
-    info!("  - Buffer size: 64 ticks");
-    info!("  - Fast EMA alpha: 0.1 (10-period equivalent)");
-    info!("  - Slow EMA alpha: 0.05 (20-period equivalent)");
-    info!("  - Buy threshold: 0.05% price change");
-    info!("  - Stop loss: 0.2%");
-    info!("  - Take profit: 0.2%");
-    info!("  - Config file: ../../config/hft_ultra_fast_strategy.toml");
+    info!("  - Spread capture: Dynamic spread calculation");
+    info!("  - Inventory management: Real-time position tracking");
+    info!("  - Risk controls: Max inventory and loss limits");
+    info!("  - Order book analysis: Bid/ask placement");
+    info!("  - Config file: ../../config/hft_market_maker_strategy.toml");
     info!("  - Each strategy has its own config file");
+
+    info!("Using strategy: {}", strategy.get_info());
 
     let trade_mode = match cli.command {
         Commands::Trade => TradeMode::Real,

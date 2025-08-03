@@ -2,28 +2,54 @@
 # Best for: Spread capture, order book analysis, inventory management
 
 # Order Book Parameters
-spread_multiplier = 1.5       # Multiplier for optimal spread calculation
-min_spread = 0.0001           # 0.01% minimum spread
-max_position = 1000.0         # Maximum position size
-inventory_target = 0.0        # Target inventory (0 = neutral)
+spread_multiplier = 1.5     # Multiplier for optimal spread calculation
+min_spread = 0.0001         # 0.01% minimum spread
+max_position = 1000.0       # Maximum position size
+inventory_target = 0.0      # Target inventory (0 = neutral)
 
 # Inventory Management
-max_inventory = 5000.0        # Maximum inventory before hedging
-hedge_threshold = 0.8         # Hedge when inventory > 80% of max
-inventory_cost_weight = 0.1   # Weight for inventory cost in P&L
+max_inventory = 5000.0      # Maximum inventory before hedging
+hedge_threshold = 0.8       # Hedge when inventory > 80% of max
+inventory_cost_weight = 0.1 # Weight for inventory cost in P&L
 
 # Risk Controls
-max_loss_per_trade = 0.001    # 0.1% maximum loss per trade
-max_daily_loss = 0.01         # 1% maximum daily loss
-correlation_limit = 0.7       # Maximum correlation between positions
-signal_threshold = 0.6        # 60% confidence threshold
+max_loss_per_trade = 0.001  # 0.1% maximum loss per trade
+max_daily_loss = 0.01       # 1% maximum daily loss
+correlation_limit = 0.7     # Maximum correlation between positions
+signal_threshold = 0.1      # 10% confidence threshold for backtesting
 
 # Market Making Logic
-enable_dynamic_spread = true  # Adjust spread based on volatility
-enable_inventory_skew = true  # Skew prices based on inventory
-enable_volume_scaling = true  # Scale orders based on volume
+enable_dynamic_spread = true    # Adjust spread based on volatility
+enable_inventory_skew = true    # Skew prices based on inventory
+enable_volume_scaling = true    # Scale orders based on volume
+
+# Signal Generation Parameters
+hedge_confidence = 0.8          # Confidence for hedge signals
+bid_ask_confidence = 0.5        # Confidence for bid/ask signals
+bid_only_confidence = 0.6       # Confidence for bid-only signals
+ask_only_confidence = 0.6       # Confidence for ask-only signals
+volatility_threshold = 0.001    # Volatility threshold for momentum signals
+momentum_confidence = 0.3       # Confidence for momentum signals
+default_confidence = 0.2        # Default confidence when no other conditions met
+
+# Order Book Simulation (for backtesting)
+bid_price_offset = 0.9999       # Bid price offset from trade price
+ask_price_offset = 1.0001       # Ask price offset from trade price
+order_book_size_multiplier = 10.0 # Multiplier for simulated order book size
+
+# Position Management
+inventory_ratio_threshold = 0.8  # Inventory ratio threshold for position management
+price_competitiveness_bid = 0.9995 # Bid price competitiveness factor
+price_competitiveness_ask = 1.0005 # Ask price competitiveness factor
+
+# Volatility Calculation
+volatility_alpha = 0.1           # Alpha for exponential volatility calculation
+
+# Volume Profile
+volume_profile_alpha = 0.9       # Alpha for volume profile calculation
+volume_profile_beta = 0.1        # Beta for volume profile calculation
 
 # Performance Tracking
-track_spread_capture = true   # Track spread capture metrics
-track_inventory_cost = true   # Track inventory holding costs
-track_market_impact = true    # Track market impact costs 
+track_spread_capture = true      # Track spread capture metrics
+track_inventory_cost = true      # Track inventory holding costs
+track_market_impact = true       # Track market impact costs
