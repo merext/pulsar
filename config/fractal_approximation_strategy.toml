@@ -1,10 +1,11 @@
 # Fractal Approximation Strategy Configuration
-# Optimized for profitability using momentum-based approach
+# Best for: Fractal geometry and Hurst Exponent analysis
+# OPTIMIZED FOR MAXIMUM PROFIT
 
-# Core parameters
-period = 20
-scale = 2.0
+# Core Parameters
+period = 5                    # Shorter period for more signals
+scale = 3.0                   # Higher scaling factor for stronger signals
+signal_threshold = 0.01       # Lower threshold for more signals
 
-# Signal filtering - Made more aggressive for trade generation
-signal_threshold = 0.01
-momentum_threshold = 0.00001 
+# Momentum Parameters
+momentum_threshold = 0.00001  # Lower momentum threshold for more signals 

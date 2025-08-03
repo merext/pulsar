@@ -60,10 +60,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {
                 info!("Starting backtest with data from: {}", data_path);
-                backtest::run_backtest(&data_path, strategy, trading_symbol).await?;
+                backtest::run_backtest(strategy, data_path).await?;
             } else if let Some(ws_url) = url {
                 info!("Starting backtest with WebSocket data from: {}", ws_url);
-                backtest::run_backtest(&ws_url, strategy, trading_symbol).await?;
+                backtest::run_backtest(strategy, ws_url).await?;
             } else {
                 return Err("No data source specified for backtest".into());
             }

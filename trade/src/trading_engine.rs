@@ -135,9 +135,12 @@ impl PerformanceMetrics {
             self.peak_equity = new_equity;
         }
         
-        let drawdown = (self.peak_equity - new_equity) / self.peak_equity;
-        if drawdown > self.max_drawdown {
-            self.max_drawdown = drawdown;
+        // Prevent division by zero when peak_equity is 0
+        if self.peak_equity > 0.0 {
+            let drawdown = (self.peak_equity - new_equity) / self.peak_equity;
+            if drawdown > self.max_drawdown {
+                self.max_drawdown = drawdown;
+            }
         }
     }
 

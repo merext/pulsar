@@ -1,0 +1,15 @@
+# Refined RSI Strategy Configuration
+# Minimal enhancements to the original RSI strategy
+
+# Core parameters (optimized from original)
+period = 4                    # Ultra-short period for immediate signals
+overbought = 68.0             # Lower overbought threshold for more signals
+oversold = 32.0               # Higher oversold threshold for more signals
+scale = 3.5                   # High scaling factor for strong signals
+signal_threshold = 0.1        # Low threshold for maximum signals
+momentum_threshold = 0.00003  # Very low momentum threshold for more signals
+
+# Minimal enhancements
+volume_period = 8             # Volume analysis window
+volume_threshold = 1.0        # Volume spike threshold
+trend_period = 12             # Trend calculation period 

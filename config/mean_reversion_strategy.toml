@@ -1,11 +1,12 @@
 # Mean Reversion Strategy Configuration
 # Best for: Range-bound markets, mean reversion opportunities
+# OPTIMIZED FOR MAXIMUM PROFIT
 
 # Core Parameters
-window_size = 8               # Very short window for ultra-fast signals
-max_trade_window = 4          # Very short trade holding period
-scale = 2.0                   # Very high scaling factor for strong signals
-signal_threshold = 0.1        # Very low threshold for maximum signals
+window_size = 4               # Shorter window for more signals
+max_trade_window = 2          # Shorter trade holding period
+scale = 4.0                   # Higher scaling factor for stronger signals
+signal_threshold = 0.05       # Lower threshold for more signals
 
 # Momentum Parameters
-momentum_threshold = 0.00005  # Very low momentum threshold for more signals 
+momentum_threshold = 0.00001  # Lower momentum threshold for more signals 

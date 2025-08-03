@@ -1,0 +1,23 @@
+# Trend-Following Volume-Weighted Strategy Configuration
+# Specifically designed for trending markets like DOGEUSDT
+
+# Trend parameters
+trend_period = 8              # Shorter trend calculation period
+trend_threshold = 0.0001      # Much lower trend detection threshold
+
+# Volume parameters
+volume_period = 5             # Shorter volume analysis window
+volume_threshold = 1.0        # Lower volume spike threshold
+
+# Momentum parameters
+momentum_period = 3           # Shorter momentum calculation period
+momentum_threshold = 0.00001  # Much lower momentum threshold
+
+# Signal parameters
+signal_threshold = 0.1        # Much lower signal confidence threshold
+min_trend_strength = 0.1      # Much lower minimum trend strength
+
+# Risk management
+max_position_size = 1000.0    # Maximum position size
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit 

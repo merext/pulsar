@@ -12,6 +12,10 @@ pub mod adaptive_multi_factor_strategy;
 pub mod neural_market_microstructure_strategy;
 pub mod ultra_fast_strategy;
 pub mod market_maker_strategy;
+pub mod advanced_momentum_strategy;
+pub mod trend_volume_strategy;
+pub mod enhanced_rsi_strategy;
+pub mod refined_rsi_strategy;
 
 pub mod models;
 pub mod strategy;

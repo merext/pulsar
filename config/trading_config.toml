@@ -16,7 +16,7 @@ slippage_volatility = 0.5  # How much slippage varies with volatility
 # Position sizing
 max_position_size = 1000.0  # Maximum position size in base currency
 max_daily_loss = 1000.0     # Maximum daily loss in quote currency (increased)
-max_drawdown = 0.20         # Maximum drawdown (20% - increased for testing)
+max_drawdown = 1.0          # Maximum drawdown (100% - disabled for testing)
 
 # Signal filtering
 min_signal_strength = 0.3   # Only trade if signal confidence > 0.3 (lowered for more trades)

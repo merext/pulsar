@@ -1,12 +1,13 @@
 # Z-Score Strategy Configuration
 # Best for: Statistical arbitrage, mean reversion
+# CONSERVATIVE FOR BETTER WIN RATE
 
 # Core Parameters
-period = 10                   # Very short period for ultra-fast signals
-buy_threshold = -0.000005     # Lower buy threshold for more signals
-sell_threshold = 0.000005     # Lower sell threshold for more signals
-scale = 2.0                   # Very high scaling factor for strong signals
-signal_threshold = 0.1        # Very low threshold for maximum signals
+period = 8                    # Medium period for balanced signals
+buy_threshold = -0.0005       # Higher buy threshold for better signals
+sell_threshold = 0.0005       # Higher sell threshold for better signals
+scale = 2.0                   # Moderate scaling factor
+signal_threshold = 0.3        # Higher threshold for quality signals
 
 # Momentum Parameters
-momentum_threshold = 0.00005  # Very low momentum threshold for more signals 
+momentum_threshold = 0.0001   # Higher momentum threshold for quality signals 

@@ -1,0 +1,35 @@
+# Enhanced RSI Strategy Configuration
+# Advanced features: Multi-timeframe, Volume confirmation, Adaptive thresholds
+# OPTIMIZED FOR MAXIMUM PROFIT
+
+# Multi-timeframe RSI parameters
+short_period = 3              # Ultra-short for immediate signals
+medium_period = 6             # Medium for trend confirmation
+long_period = 12              # Long for overall direction
+
+# Volume analysis
+volume_period = 8             # Shorter volume analysis window
+volume_threshold = 1.0        # Lower volume spike threshold
+
+# RSI thresholds (optimized for trending markets)
+overbought_short = 65.0       # Much lower overbought for more signals
+oversold_short = 35.0         # Much higher oversold for more signals
+overbought_medium = 68.0      # Lower overbought for more signals
+oversold_medium = 32.0        # Higher oversold for more signals
+overbought_long = 70.0        # Lower overbought for trend confirmation
+oversold_long = 30.0          # Higher oversold for trend confirmation
+
+# Signal parameters
+signal_threshold = 0.05       # Much lower base signal threshold
+momentum_threshold = 0.00001  # Much lower momentum threshold
+trend_threshold = 0.0001      # Lower trend detection threshold
+
+# Adaptive parameters
+volatility_period = 10        # Shorter volatility calculation period
+adaptive_factor = 0.3         # Lower adaptive threshold factor
+
+# Risk management
+max_position_size = 1000.0    # Maximum position size
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+max_drawdown_pct = 0.10       # 10% max drawdown 
