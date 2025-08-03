@@ -20,6 +20,7 @@ take_profit_pct = 0.04   # 4% take profit
 volatility_multiplier = 2.0      # Multiplier for volatility bands
 momentum_threshold = 0.02        # 2% price change threshold
 volume_threshold = 1.5           # 50% above average volume
+signal_threshold = 0.6           # Minimum confidence for signal
 
 # Market Regime Adjustments
 [adaptive_multi_factor.low_volatility]

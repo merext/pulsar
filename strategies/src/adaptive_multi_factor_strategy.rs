@@ -25,6 +25,7 @@ pub struct AdaptiveMultiFactorStrategy {
     long_window: usize,
     volatility_window: usize,
     volume_window: usize,
+    signal_threshold: f64,
     
     // Price data
     prices: VecDeque<f64>,
@@ -72,12 +73,14 @@ impl AdaptiveMultiFactorStrategy {
         long_window: usize,
         volatility_window: usize,
         volume_window: usize,
+        signal_threshold: f64,
     ) -> Self {
         Self {
             short_window,
             long_window,
             volatility_window,
             volume_window,
+            signal_threshold,
             prices: VecDeque::with_capacity(long_window.max(volatility_window)),
             volumes: VecDeque::with_capacity(volume_window),
             timestamps: VecDeque::with_capacity(long_window),
@@ -348,14 +351,12 @@ impl AdaptiveMultiFactorStrategy {
         // Normalize scores
         let normalized_buy = if total_weight > 0.0 { buy_score / total_weight } else { 0.0 };
         let normalized_sell = if total_weight > 0.0 { sell_score / total_weight } else { 0.0 };
-        
+
         // Generate final signal
-        let signal_threshold = 0.6; // Require 60% confidence
-        
-        if normalized_buy > signal_threshold && normalized_buy > normalized_sell {
+        if normalized_buy > self.signal_threshold && normalized_buy > normalized_sell {
             let confidence = self.calculate_risk_adjusted_confidence(normalized_buy);
             (Signal::Buy, confidence)
-        } else if normalized_sell > signal_threshold && normalized_sell > normalized_buy {
+        } else if normalized_sell > self.signal_threshold && normalized_sell > normalized_buy {
             let confidence = self.calculate_risk_adjusted_confidence(normalized_sell);
             (Signal::Sell, confidence)
         } else {

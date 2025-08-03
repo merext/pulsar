@@ -9,6 +9,7 @@
 //! Conversely, a sell signal is generated when the Z-score rises above a positive threshold (e.g., +2),
 //! indicating that the price is significantly overbought and likely to revert downwards.
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
@@ -20,15 +21,17 @@ pub struct ZScoreStrategy {
     period: usize,
     buy_threshold: f64,
     sell_threshold: f64,
+    scale: f64,
     prices: VecDeque<f64>,
 }
 
 impl ZScoreStrategy {
-    pub fn new(period: usize, buy_threshold: f64, sell_threshold: f64) -> Self {
+    pub fn new(period: usize, buy_threshold: f64, sell_threshold: f64, scale: f64) -> Self {
         Self {
             period,
             buy_threshold,
             sell_threshold,
+            scale,
             prices: VecDeque::new(),
         }
     }
@@ -52,7 +55,7 @@ impl ZScoreStrategy {
 #[async_trait::async_trait]
 impl Strategy for ZScoreStrategy {
     fn get_info(&self) -> String {
-        format!("Z-Score Strategy (period: {}, buy_threshold: {}, sell_threshold: {})", self.period, self.buy_threshold, self.sell_threshold)
+        format!("Z-Score Strategy (period: {}, buy_threshold: {}, sell_threshold: {}, scale: {})", self.period, self.buy_threshold, self.sell_threshold, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -86,14 +89,10 @@ impl Strategy for ZScoreStrategy {
 
         if z_score > self.sell_threshold {
             signal = Signal::Sell;
-            // Calculate confidence for Sell signal
-            // The further z_score is above sell_threshold, the higher the confidence
-            confidence = ((z_score - self.sell_threshold) / 1.0).min(1.0); // Assuming 1.0 is a reasonable scaling factor for deviation
+            confidence = scale_from_threshold(z_score, self.sell_threshold, self.scale);
         } else if z_score < self.buy_threshold {
             signal = Signal::Buy;
-            // Calculate confidence for Buy signal
-            // The further z_score is below buy_threshold, the higher the confidence
-            confidence = ((self.buy_threshold - z_score) / 1.0).min(1.0); // Assuming 1.0 is a reasonable scaling factor for deviation
+            confidence = scale_from_threshold_inverse(z_score, self.buy_threshold, self.scale);
         } else {
             signal = Signal::Hold;
             confidence = 0.0; // No confidence for Hold signal

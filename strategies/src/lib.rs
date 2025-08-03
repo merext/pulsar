@@ -16,6 +16,7 @@ pub mod models;
 pub mod position;
 pub mod strategy;
 pub mod trader;
+pub mod confidence;
 
 pub use kalman_filter_strategy::KalmanFilterStrategy;
 pub use mean_reversion::MeanReversionStrategy;

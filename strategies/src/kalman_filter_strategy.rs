@@ -7,6 +7,7 @@
 //! A positive deviation exceeding a defined threshold suggests a potential sell opportunity (price is overvalued relative to its estimated true value),
 //! while a negative deviation below a threshold suggests a potential buy opportunity (price is undervalued).
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
@@ -30,10 +31,11 @@ pub struct KalmanFilterStrategy {
     measurement_noise_covariance: Matrix2<f64>,
     // Threshold for generating signals
     signal_threshold: f64,
+    scale: f64,
 }
 
 impl KalmanFilterStrategy {
-    pub fn new(signal_threshold: f64) -> Self {
+    pub fn new(signal_threshold: f64, scale: f64) -> Self {
         let dt = 1.0; // Time step (e.g., 1 for each new kline/trade)
 
         // Initial state (price, velocity)
@@ -75,6 +77,7 @@ impl KalmanFilterStrategy {
             process_noise_covariance,
             measurement_noise_covariance,
             signal_threshold,
+            scale,
         }
     }
 
@@ -99,7 +102,7 @@ impl KalmanFilterStrategy {
 #[async_trait]
 impl Strategy for KalmanFilterStrategy {
     fn get_info(&self) -> String {
-        format!("Kalman Filter Strategy (signal_threshold: {})", self.signal_threshold)
+        format!("Kalman Filter Strategy (signal_threshold: {}, scale: {})", self.signal_threshold, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -122,10 +125,10 @@ impl Strategy for KalmanFilterStrategy {
 
         if deviation > self.signal_threshold {
             signal = Signal::Buy; // Current price is significantly above estimated price
-            confidence = (deviation / (self.signal_threshold * 2.0)).min(1.0); // Example confidence calculation
+            confidence = scale_from_threshold(deviation, self.signal_threshold, self.scale);
         } else if deviation < -self.signal_threshold {
             signal = Signal::Sell; // Current price is significantly below estimated price
-            confidence = (deviation.abs() / (self.signal_threshold * 2.0)).min(1.0); // Example confidence calculation
+            confidence = scale_from_threshold_inverse(deviation, -self.signal_threshold, self.scale);
         } else {
             signal = Signal::Hold;
             confidence = 0.0;

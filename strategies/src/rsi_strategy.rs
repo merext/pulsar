@@ -8,6 +8,7 @@
 //! Conversely, a buy signal is generated when the RSI falls below a defined oversold threshold (e.g., 30),
 //! suggesting the asset may be undervalued and due for a price rebound.
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
@@ -19,15 +20,17 @@ pub struct RsiStrategy {
     period: usize,
     overbought: f64,
     oversold: f64,
+    scale: f64,
     prices: VecDeque<f64>,
 }
 
 impl RsiStrategy {
-    pub fn new(period: usize, overbought: f64, oversold: f64) -> Self {
+    pub fn new(period: usize, overbought: f64, oversold: f64, scale: f64) -> Self {
         Self {
             period,
             overbought,
             oversold,
+            scale,
             prices: VecDeque::new(),
         }
     }
@@ -67,7 +70,7 @@ impl RsiStrategy {
 #[async_trait::async_trait]
 impl Strategy for RsiStrategy {
     fn get_info(&self) -> String {
-        format!("RSI Strategy (period: {}, overbought: {}, oversold: {})", self.period, self.overbought, self.oversold)
+        format!("RSI Strategy (period: {}, overbought: {}, oversold: {}, scale: {})", self.period, self.overbought, self.oversold, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -91,12 +94,10 @@ impl Strategy for RsiStrategy {
 
         if rsi > self.overbought {
             signal = Signal::Sell;
-            // Confidence increases as RSI goes further above overbought
-            confidence = ((rsi - self.overbought) / (100.0 - self.overbought)).min(1.0);
+            confidence = scale_from_threshold(rsi, self.overbought, self.scale);
         } else if rsi < self.oversold {
             signal = Signal::Buy;
-            // Confidence increases as RSI goes further below oversold
-            confidence = ((self.oversold - rsi) / self.oversold).min(1.0);
+            confidence = scale_from_threshold_inverse(rsi, self.oversold, self.scale);
         } else {
             signal = Signal::Hold;
             confidence = 0.0;

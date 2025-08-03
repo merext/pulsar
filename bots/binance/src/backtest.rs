@@ -29,7 +29,7 @@ pub async fn run_backtest(
         let (signal, confidence) =
             strategy.get_signal(trade_price, trade_time, binance_trader.position());
 
-        let min_notional = 1.0 + 4.0 * confidence;
+        let min_notional = 1.0 + 3.0 * confidence;
         let raw_quantity = min_notional / trade_price;
         let quantity_step = 1.0; // get this from exchangeInfo or hardcode per symbol
         let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;

@@ -8,6 +8,7 @@
 //! indicating upward momentum. Conversely, a sell signal is generated if the price change falls below a negative threshold,
 //! indicating downward momentum.
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use crate::strategy::Strategy;
 use async_trait::async_trait;
 use std::collections::VecDeque;
@@ -20,14 +21,16 @@ use trade::trader::Position;
 pub struct MomentumScalping {
     trade_window_size: usize,
     price_change_threshold: f64,
+    scale: f64,
     recent_prices: VecDeque<f64>,
 }
 
 impl MomentumScalping {
-    pub fn new(trade_window_size: usize, price_change_threshold: f64) -> Self {
+    pub fn new(trade_window_size: usize, price_change_threshold: f64, scale: f64) -> Self {
         Self {
             trade_window_size,
             price_change_threshold,
+            scale,
             recent_prices: VecDeque::new(),
         }
     }
@@ -42,7 +45,7 @@ fn std_dev(prices: &VecDeque<f64>) -> f64 {
 #[async_trait]
 impl Strategy for MomentumScalping {
     fn get_info(&self) -> String {
-        format!("Momentum Scalping Strategy (trade_window_size: {}, price_change_threshold: {})", self.trade_window_size, self.price_change_threshold)
+        format!("Momentum Scalping Strategy (trade_window_size: {}, price_change_threshold: {}, scale: {})", self.trade_window_size, self.price_change_threshold, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -76,12 +79,15 @@ impl Strategy for MomentumScalping {
             return (Signal::Hold, 0.0);
         }
 
-        if price_change > self.price_change_threshold {
+        let normalized_price_change = price_change / std;
+        let normalized_threshold = self.price_change_threshold / std;
+
+        if normalized_price_change > normalized_threshold {
             signal = Signal::Buy;
-            confidence = ((price_change / std) - 1.0).max(0.0).min(1.0);
-        } else if price_change < -self.price_change_threshold {
+            confidence = scale_from_threshold(normalized_price_change, normalized_threshold, self.scale);
+        } else if normalized_price_change < -normalized_threshold {
             signal = Signal::Sell;
-            confidence = ((price_change.abs() / std) - 1.0).max(0.0).min(1.0);
+            confidence = scale_from_threshold_inverse(normalized_price_change, -normalized_threshold, self.scale);
         } else {
             signal = Signal::Hold;
             confidence = 0.0;

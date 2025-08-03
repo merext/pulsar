@@ -7,6 +7,7 @@
 //! anticipating a bounce back towards the mean. Conversely, it generates a sell signal when the price rises above its SMA,
 //! expecting a pull back.
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
@@ -22,16 +23,18 @@ pub struct MeanReversionStrategy {
     pub last_sma: Option<f64>,
     pub recent_trades: VecDeque<f64>,
     pub max_trade_window: usize,
+    pub scale: f64,
 }
 
 impl MeanReversionStrategy {
-    pub fn new(window_size: usize, max_trade_window: usize) -> Self {
+    pub fn new(window_size: usize, max_trade_window: usize, scale: f64) -> Self {
         Self {
             window_size,
             prices: VecDeque::with_capacity(window_size),
             last_sma: None,
             recent_trades: VecDeque::with_capacity(max_trade_window),
             max_trade_window,
+            scale,
         }
     }
 }
@@ -39,7 +42,7 @@ impl MeanReversionStrategy {
 #[async_trait::async_trait]
 impl Strategy for MeanReversionStrategy {
     fn get_info(&self) -> String {
-        format!("Mean Reversion Strategy (window_size: {}, max_trade_window: {})", self.window_size, self.max_trade_window)
+        format!("Mean Reversion Strategy (window_size: {}, max_trade_window: {}, scale: {})", self.window_size, self.max_trade_window, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -71,17 +74,14 @@ impl Strategy for MeanReversionStrategy {
             let deviation = current_price - sma;
             let signal: Signal;
             let confidence: f64;
+            let confidence_scale = sma * self.scale;
 
-            // A simple confidence calculation: larger deviation means higher confidence
-            // Normalize deviation to a 0-1 range. You might need to tune the divisor.
-            let max_deviation_for_confidence = sma * 0.01; // Example: 1% of SMA as max deviation for 100% confidence
-
-            if deviation < 0.0 && current_price < sma { // Price is below SMA, potential buy
+            if deviation < 0.0 { // Price is below SMA, potential buy
                 signal = Signal::Buy;
-                confidence = (deviation.abs() / max_deviation_for_confidence).min(1.0);
-            } else if deviation > 0.0 && current_price > sma { // Price is above SMA, potential sell
+                confidence = scale_from_threshold_inverse(current_price, sma, confidence_scale);
+            } else if deviation > 0.0 { // Price is above SMA, potential sell
                 signal = Signal::Sell;
-                confidence = (deviation.abs() / max_deviation_for_confidence).min(1.0);
+                confidence = scale_from_threshold(current_price, sma, confidence_scale);
             } else {
                 signal = Signal::Hold;
                 confidence = 0.0;

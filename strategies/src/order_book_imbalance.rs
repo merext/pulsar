@@ -7,6 +7,7 @@
 //! A buy signal is generated if the OBI exceeds a positive threshold, indicating strong buying pressure.
 //! Conversely, a sell signal is generated if the OBI falls below a negative threshold, indicating strong selling pressure.
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use crate::strategy::Strategy;
 use std::collections::VecDeque;
 use trade::models::TradeData;
@@ -18,15 +19,17 @@ pub struct OrderBookImbalance {
     period: usize,
     buy_threshold: f64,
     sell_threshold: f64,
+    scale: f64,
     trades: VecDeque<TradeData>,
 }
 
 impl OrderBookImbalance {
-    pub fn new(period: usize, buy_threshold: f64, sell_threshold: f64) -> Self {
+    pub fn new(period: usize, buy_threshold: f64, sell_threshold: f64, scale: f64) -> Self {
         Self {
             period,
             buy_threshold,
             sell_threshold,
+            scale,
             trades: VecDeque::new(),
         }
     }
@@ -60,7 +63,7 @@ impl OrderBookImbalance {
 #[async_trait::async_trait]
 impl Strategy for OrderBookImbalance {
     fn get_info(&self) -> String {
-        format!("Order Book Imbalance Strategy (period: {}, buy_threshold: {}, sell_threshold: {})", self.period, self.buy_threshold, self.sell_threshold)
+        format!("Order Book Imbalance Strategy (period: {}, buy_threshold: {}, sell_threshold: {}, scale: {})", self.period, self.buy_threshold, self.sell_threshold, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -83,12 +86,10 @@ impl Strategy for OrderBookImbalance {
 
         if obi > self.buy_threshold {
             signal = Signal::Buy;
-            // Confidence increases as OBI goes further above buy_threshold
-            confidence = ((obi - self.buy_threshold) / (1.0 - self.buy_threshold)).min(1.0);
+            confidence = scale_from_threshold(obi, self.buy_threshold, self.scale);
         } else if obi < self.sell_threshold {
             signal = Signal::Sell;
-            // Confidence increases as OBI goes further below sell_threshold
-            confidence = ((self.sell_threshold - obi) / (self.sell_threshold - (-1.0))).min(1.0);
+            confidence = scale_from_threshold_inverse(obi, self.sell_threshold, self.scale);
         } else {
             signal = Signal::Hold;
             confidence = 0.0;

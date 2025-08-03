@@ -9,6 +9,7 @@
 //! a threshold indicates upward momentum (buy signal), while a negative derivative below a threshold
 //! indicates downward momentum (sell signal).
 
+use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
@@ -27,6 +28,7 @@ pub struct SplineStrategy {
     pub interpolation: Interpolation<f64, f64>,
     pub derivative_buy_threshold: f64,
     pub derivative_sell_threshold: f64,
+    pub scale: f64,
 }
 
 impl SplineStrategy {
@@ -35,6 +37,7 @@ impl SplineStrategy {
         interpolation: Interpolation<f64, f64>,
         derivative_buy_threshold: f64,
         derivative_sell_threshold: f64,
+        scale: f64,
     ) -> Self {
         Self {
             window_size,
@@ -44,6 +47,7 @@ impl SplineStrategy {
             interpolation,
             derivative_buy_threshold,
             derivative_sell_threshold,
+            scale,
         }
     }
 
@@ -73,7 +77,7 @@ impl SplineStrategy {
 #[async_trait]
 impl Strategy for SplineStrategy {
     fn get_info(&self) -> String {
-        format!("Spline Strategy (window_size: {}, derivative_buy_threshold: {}, derivative_sell_threshold: {})", self.window_size, self.derivative_buy_threshold, self.derivative_sell_threshold)
+        format!("Spline Strategy (window_size: {}, derivative_buy_threshold: {}, derivative_sell_threshold: {}, scale: {})", self.window_size, self.derivative_buy_threshold, self.derivative_sell_threshold, self.scale)
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
@@ -140,8 +144,7 @@ impl Strategy for SplineStrategy {
                 "Signal: Buy"
             );
             signal = Signal::Buy;
-            // Confidence based on how much the derivative exceeds the threshold
-            confidence = ((derivative - self.derivative_buy_threshold) / (self.derivative_buy_threshold * 10.0)).min(1.0);
+            confidence = scale_from_threshold(derivative, self.derivative_buy_threshold, self.scale);
         } else if derivative < self.derivative_sell_threshold {
             debug!(
                 signal = "Sell",
@@ -150,8 +153,7 @@ impl Strategy for SplineStrategy {
                 "Signal: Sell"
             );
             signal = Signal::Sell;
-            // Confidence based on how much the derivative is below the threshold
-            confidence = ((self.derivative_sell_threshold - derivative) / (self.derivative_sell_threshold.abs() * 10.0)).min(1.0);
+            confidence = scale_from_threshold_inverse(derivative, self.derivative_sell_threshold, self.scale);
         } else {
             debug!(
                 signal = "Hold",
