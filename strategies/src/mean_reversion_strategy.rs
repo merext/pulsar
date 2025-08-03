@@ -25,8 +25,6 @@ pub struct MeanReversionStrategy {
     pub scale: f64,
     // Configuration parameters
     signal_threshold: f64,
-    deviation_threshold: f64,
-    reversion_strength: f64,
     momentum_threshold: f64,
     // Performance tracking
     last_price: f64,
@@ -46,8 +44,7 @@ impl MeanReversionStrategy {
         let max_trade_window = config.get_or("max_trade_window", 8);
         let scale = config.get_or("scale", 1.2);
         let signal_threshold = config.get_or("signal_threshold", 0.1);
-        let deviation_threshold = config.get_or("deviation_threshold", 0.005);
-        let reversion_strength = config.get_or("reversion_strength", 1.0);
+
         let momentum_threshold = config.get_or("momentum_threshold", 0.00005);
 
         Self {
@@ -58,8 +55,7 @@ impl MeanReversionStrategy {
             max_trade_window,
             scale,
             signal_threshold,
-            deviation_threshold,
-            reversion_strength,
+
             momentum_threshold,
             last_price: 0.0,
             price_momentum: 0.0,
@@ -102,7 +98,7 @@ impl Strategy for MeanReversionStrategy {
 
     fn get_signal(
         &self,
-        current_price: f64,
+        _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {

@@ -17,7 +17,7 @@ use trade::signal::Signal;
 use toml;
 
 #[derive(Clone, Debug)]
-pub struct HftMarketMakerStrategy {
+pub struct MarketMakerStrategy {
     // Order book state (simplified for speed)
     best_bid: f64,
     best_ask: f64,
@@ -26,9 +26,7 @@ pub struct HftMarketMakerStrategy {
     spread: f64,
     mid_price: f64,
     
-    // Market making parameters
-    spread_multiplier: f64,
-    min_spread: f64,
+
     signal_threshold: f64,
     
     // Current inventory and position
@@ -37,8 +35,7 @@ pub struct HftMarketMakerStrategy {
     avg_buy_price: f64,
     avg_sell_price: f64,
     
-    // Risk management
-    max_inventory: f64,
+
     total_pnl: f64,
     
     // Performance tracking
@@ -56,63 +53,27 @@ pub struct HftMarketMakerStrategy {
     momentum_threshold: f64,
     
     // Configuration parameters (loaded from config file)
-    hedge_threshold: f64,
-    _inventory_cost_weight: f64,
-    _max_loss_per_trade: f64,
-    _max_daily_loss: f64,
-    _correlation_limit: f64,
-    hedge_confidence: f64,
-    bid_ask_confidence: f64,
-    bid_only_confidence: f64,
-    ask_only_confidence: f64,
-    volatility_threshold: f64,
-    momentum_confidence: f64,
-    default_confidence: f64,
     bid_price_offset: f64,
     ask_price_offset: f64,
     order_book_size_multiplier: f64,
-    inventory_ratio_threshold: f64,
-    price_competitiveness_bid: f64,
-    price_competitiveness_ask: f64,
     volatility_alpha: f64,
     volume_profile_alpha: f64,
     volume_profile_beta: f64,
 }
 
-impl HftMarketMakerStrategy {
+impl MarketMakerStrategy {
     pub fn new() -> Self {
         // Load configuration from file
-        let config = StrategyConfig::load_strategy_config("hft_market_maker_strategy")
+        let config = StrategyConfig::load_strategy_config("market_maker_strategy")
             .unwrap_or_else(|_| {
                 // Use defaults if config file not found
                 StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
             });
 
-        // Order Book Parameters
-        let spread_multiplier = config.get_or("spread_multiplier", 1.5);
-        let min_spread = config.get_or("min_spread", 0.0001);
-        let _max_position = config.get_or("max_position", 1000.0);
-        let _inventory_target = config.get_or("inventory_target", 0.0);
 
-        // Inventory Management
-        let max_inventory = config.get_or("max_inventory", 5000.0);
-        let hedge_threshold = config.get_or("hedge_threshold", 0.8);
-        let _inventory_cost_weight = config.get_or("inventory_cost_weight", 0.1);
-
-        // Risk Controls
-        let _max_loss_per_trade = config.get_or("max_loss_per_trade", 0.001);
-        let _max_daily_loss = config.get_or("max_daily_loss", 0.01);
-        let _correlation_limit = config.get_or("correlation_limit", 0.7);
         let signal_threshold = config.get_or("signal_threshold", DefaultConfig::hft_mm_signal_threshold());
 
-        // Signal Generation Parameters
-        let hedge_confidence = config.get_or("hedge_confidence", 0.8);
-        let bid_ask_confidence = config.get_or("bid_ask_confidence", 0.5);
-        let bid_only_confidence = config.get_or("bid_only_confidence", 0.6);
-        let ask_only_confidence = config.get_or("ask_only_confidence", 0.6);
-        let volatility_threshold = config.get_or("volatility_threshold", 0.001);
-        let momentum_confidence = config.get_or("momentum_confidence", 0.3);
-        let default_confidence = config.get_or("default_confidence", 0.2);
+
 
         // Order Book Simulation (for backtesting)
         let bid_price_offset = config.get_or("bid_price_offset", 0.9999);
@@ -120,9 +81,7 @@ impl HftMarketMakerStrategy {
         let order_book_size_multiplier = config.get_or("order_book_size_multiplier", 10.0);
 
         // Position Management
-        let inventory_ratio_threshold = config.get_or("inventory_ratio_threshold", 0.8);
-        let price_competitiveness_bid = config.get_or("price_competitiveness_bid", 0.9995);
-        let price_competitiveness_ask = config.get_or("price_competitiveness_ask", 1.0005);
+
 
         // Volatility Calculation
         let volatility_alpha = config.get_or("volatility_alpha", 0.1);
@@ -141,8 +100,7 @@ impl HftMarketMakerStrategy {
             ask_size: 0.0,
             spread: 0.0,
             mid_price: 0.0,
-            spread_multiplier,
-            min_spread,
+
             signal_threshold,
             current_inventory: 0.0,
             current_position: Position {
@@ -152,7 +110,7 @@ impl HftMarketMakerStrategy {
             },
             avg_buy_price: 0.0,
             avg_sell_price: 0.0,
-            max_inventory,
+
             total_pnl: 0.0,
             trades_made: 0,
             spread_captured: 0.0,
@@ -160,24 +118,13 @@ impl HftMarketMakerStrategy {
             volume_profile: [1.0; 24],
             current_hour: 0,
             // Store all config parameters
-            hedge_threshold,
-            _inventory_cost_weight,
-            _max_loss_per_trade,
-            _max_daily_loss,
-            _correlation_limit,
-            hedge_confidence,
-            bid_ask_confidence,
-            bid_only_confidence,
-            ask_only_confidence,
-            volatility_threshold,
-            momentum_confidence,
-            default_confidence,
+
+
+
             bid_price_offset,
             ask_price_offset,
             order_book_size_multiplier,
-            inventory_ratio_threshold,
-            price_competitiveness_bid,
-            price_competitiveness_ask,
+
             volatility_alpha,
             volume_profile_alpha,
             volume_profile_beta,
@@ -197,52 +144,7 @@ impl HftMarketMakerStrategy {
         self.mid_price = (bid + ask) / 2.0;
     }
 
-    #[inline]
-    fn calculate_optimal_spread(&self) -> f64 {
-        // Dynamic spread calculation based on volatility and inventory
-        let base_spread = self.spread.max(self.min_spread);
-        let volatility_adjustment = self.volatility * 2.0;
-        let inventory_adjustment = (self.current_inventory / self.max_inventory).abs() * 0.5;
-        
-        base_spread * self.spread_multiplier + volatility_adjustment + inventory_adjustment
-    }
 
-    #[inline]
-    fn calculate_bid_ask_prices(&self) -> (f64, f64) {
-        let optimal_spread = self.calculate_optimal_spread();
-        let half_spread = optimal_spread / 2.0;
-        
-        let bid_price = self.mid_price - half_spread;
-        let ask_price = self.mid_price + half_spread;
-        
-        (bid_price, ask_price)
-    }
-
-    #[inline]
-    fn should_place_bid(&self) -> bool {
-        // Check if we should place a bid
-        let (our_bid, _) = self.calculate_bid_ask_prices();
-        
-        // For backtesting, be more aggressive with bid placement
-        let price_competitive = our_bid > self.best_bid * self.price_competitiveness_bid;
-        let inventory_ok = self.current_inventory < self.max_inventory * self.inventory_ratio_threshold;
-        let spread_wide_enough = self.spread > self.min_spread;
-        
-        price_competitive && inventory_ok && spread_wide_enough
-    }
-
-    #[inline]
-    fn should_place_ask(&self) -> bool {
-        // Check if we should place an ask
-        let (_, our_ask) = self.calculate_bid_ask_prices();
-        
-        // For backtesting, be more aggressive with ask placement
-        let price_competitive = our_ask < self.best_ask * self.price_competitiveness_ask;
-        let inventory_ok = self.current_inventory > -self.max_inventory * self.inventory_ratio_threshold;
-        let spread_wide_enough = self.spread > self.min_spread;
-        
-        price_competitive && inventory_ok && spread_wide_enough
-    }
 
     #[inline]
     fn update_inventory(&mut self, trade_price: f64, trade_size: f64, is_buy: bool) {
@@ -310,12 +212,7 @@ impl HftMarketMakerStrategy {
 
 
 
-    #[inline]
-    fn should_hedge(&self) -> bool {
-        // Check if we need to hedge our inventory
-        let inventory_ratio = self.current_inventory.abs() / self.max_inventory;
-        inventory_ratio > self.hedge_threshold // Hedge when inventory > threshold
-    }
+
 
     #[inline]
     fn generate_market_making_signal(&self) -> (Signal, f64) {
@@ -349,7 +246,7 @@ impl HftMarketMakerStrategy {
 }
 
 #[async_trait::async_trait]
-impl Strategy for HftMarketMakerStrategy {
+impl Strategy for MarketMakerStrategy {
     fn get_info(&self) -> String {
         format!(
             "HFT Market Maker Strategy (trades: {}, pnl: {:.4}, inventory: {:.2})",

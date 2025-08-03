@@ -17,7 +17,7 @@ use trade::signal::Signal;
 use toml;
 
 #[derive(Clone, Debug)]
-pub struct HftUltraFastStrategy {
+pub struct UltraFastStrategy {
     // Pre-allocated buffers for minimal allocations
     price_buffer: [f64; 64],  // Fixed-size array, no VecDeque
     volume_buffer: [f64; 64],
@@ -73,10 +73,10 @@ pub struct HftUltraFastStrategy {
     volume_beta: f64,
 }
 
-impl HftUltraFastStrategy {
+impl UltraFastStrategy {
     pub fn new() -> Self {
         // Load configuration from file
-        let config = StrategyConfig::load_strategy_config("hft_ultra_fast_strategy")
+        let config = StrategyConfig::load_strategy_config("ultra_fast_strategy")
             .unwrap_or_else(|_| {
                 // Use defaults if config file not found
                 StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
@@ -271,7 +271,7 @@ impl HftUltraFastStrategy {
 }
 
 #[async_trait::async_trait]
-impl Strategy for HftUltraFastStrategy {
+impl Strategy for UltraFastStrategy {
     fn get_info(&self) -> String {
         format!(
             "HFT Ultra-Fast Strategy (win_rate: {:.1}%, trades: {})",

@@ -26,8 +26,6 @@ pub struct ZScoreStrategy {
     prices: VecDeque<f64>,
     // Configuration parameters
     signal_threshold: f64,
-    zscore_threshold: f64,
-    mean_reversion_strength: f64,
     momentum_threshold: f64,
     // Performance tracking
     last_price: f64,
@@ -48,8 +46,7 @@ impl ZScoreStrategy {
         let sell_threshold = config.get_or("sell_threshold", 0.000005);
         let scale = config.get_or("scale", 1.2);
         let signal_threshold = config.get_or("signal_threshold", 0.1);
-        let zscore_threshold = config.get_or("zscore_threshold", 0.5);
-        let mean_reversion_strength = config.get_or("mean_reversion_strength", 1.0);
+
         let momentum_threshold = config.get_or("momentum_threshold", 0.00005);
 
         Self {
@@ -59,8 +56,7 @@ impl ZScoreStrategy {
             scale,
             prices: VecDeque::new(),
             signal_threshold,
-            zscore_threshold,
-            mean_reversion_strength,
+
             momentum_threshold,
             last_price: 0.0,
             price_momentum: 0.0,
@@ -107,7 +103,7 @@ impl Strategy for ZScoreStrategy {
 
     fn get_signal(
         &self,
-        current_price: f64,
+        _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {
@@ -115,13 +111,13 @@ impl Strategy for ZScoreStrategy {
             return (Signal::Hold, 0.0);
         }
 
-        let (mean, std_dev) = self.calculate_mean_and_std_dev();
+        let (_, std_dev) = self.calculate_mean_and_std_dev();
 
         if std_dev == 0.0 {
             return (Signal::Hold, 0.0);
         }
 
-        let z_score = (current_price - mean) / std_dev;
+
 
         // Pure momentum approach like HFT Ultra Fast (ignore Z-score direction)
         let momentum_factor = if self.price_momentum.abs() > self.momentum_threshold { 2.5 } else { 1.0 };

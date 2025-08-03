@@ -85,11 +85,7 @@ impl MomentumScalping {
     }
 }
 
-fn std_dev(prices: &VecDeque<f64>) -> f64 {
-    let mean = prices.iter().copied().sum::<f64>() / prices.len() as f64;
-    let variance = prices.iter().map(|p| (p - mean).powi(2)).sum::<f64>() / prices.len() as f64;
-    variance.sqrt()
-}
+
 
 #[async_trait]
 impl Strategy for MomentumScalping {

@@ -110,8 +110,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = MomentumScalping::new();
 
     // Mean Reversion Strategy
-    use strategies::mean_reversion_strategy::MeanReversionStrategy;
-    let strategy = MeanReversionStrategy::new();
+    // use strategies::mean_reversion_strategy::MeanReversionStrategy;
+    // let strategy = MeanReversionStrategy::new();
 
     // Z-Score Strategy
     // use strategies::zscore_strategy::ZScoreStrategy;
@@ -126,8 +126,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = RsiStrategy::new();
 
     // HFT Market Maker Strategy
-    use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
-    let strategy = HftMarketMakerStrategy::new();
+    // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
+    // let _strategy = HftMarketMakerStrategy::new();
 
     // Z-Score Strategy (Currently active - Optimizing)
     // use strategies::zscore_strategy::ZScoreStrategy;
@@ -158,9 +158,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // use strategies::fractal_approximation_strategy::FractalApproximationStrategy;
     // let strategy = FractalApproximationStrategy::new();
 
-    // VWAP Deviation Strategy
-    use strategies::vwap_deviation_strategy::VwapDeviationStrategy;
-    let strategy = VwapDeviationStrategy::new();
+    // Market Maker Strategy (Balanced approach)
+    use strategies::market_maker_strategy::MarketMakerStrategy;
+    let strategy = MarketMakerStrategy::new();
 
     // Kalman Filter Strategy
     // use strategies::kalman_filter_strategy::KalmanFilterStrategy;
@@ -181,14 +181,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let api_secret =
         env::var("BINANCE_API_SECRET").expect("API_SECRET must be set in the environment");
 
-    // HFT Market Maker configuration
-    info!("HFT Market Maker Strategy Configuration:");
+    // Market Maker configuration
+    info!("Market Maker Strategy Configuration:");
     info!("  - Latency target: < 1 microsecond");
     info!("  - Spread capture: Dynamic spread calculation");
     info!("  - Inventory management: Real-time position tracking");
     info!("  - Risk controls: Max inventory and loss limits");
     info!("  - Order book analysis: Bid/ask placement");
-    info!("  - Config file: ../../config/hft_market_maker_strategy.toml");
+    info!("  - Config file: ../../config/market_maker_strategy.toml");
     info!("  - Each strategy has its own config file");
 
     info!("Using strategy: {}", strategy.get_info());
@@ -236,10 +236,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Backtest { url, path } => {
             if let Some(url) = url {
                 info!("Starting backtest with URL: {}", url);
-                backtest::run_backtest(&url, strategy.clone(), &mut binance_trader).await?;
+                backtest::run_backtest(&url, strategy.clone(), &trading_symbol).await?;
             } else if let Some(path) = path {
                 info!("Starting backtest with path: {}", path);
-                backtest::run_backtest(&path, strategy.clone(), &mut binance_trader).await?;
+                backtest::run_backtest(&path, strategy.clone(), &trading_symbol).await?;
             } else {
                 return Err("Either --url or --path must be provided for backtest".into());
             }

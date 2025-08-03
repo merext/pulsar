@@ -10,13 +10,11 @@ pub mod fractal_approximation_strategy;
 pub mod config;
 pub mod adaptive_multi_factor_strategy;
 pub mod neural_market_microstructure_strategy;
-pub mod hft_ultra_fast_strategy;
-pub mod hft_market_maker_strategy;
+pub mod ultra_fast_strategy;
+pub mod market_maker_strategy;
 
 pub mod models;
-pub mod position;
 pub mod strategy;
-pub mod trader;
 
 pub use kalman_filter_strategy::KalmanFilterStrategy;
 pub use mean_reversion_strategy::MeanReversionStrategy;
@@ -29,5 +27,5 @@ pub use zscore_strategy::ZScoreStrategy;
 pub use fractal_approximation_strategy::FractalApproximationStrategy;
 pub use adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
 pub use neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
-pub use hft_ultra_fast_strategy::HftUltraFastStrategy;
-pub use hft_market_maker_strategy::HftMarketMakerStrategy;
+pub use ultra_fast_strategy::UltraFastStrategy;
+pub use market_maker_strategy::MarketMakerStrategy;

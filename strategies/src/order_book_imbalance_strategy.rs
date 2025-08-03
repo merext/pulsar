@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use trade::models::TradeData;
 use trade::signal::Signal;
 use trade::trader::Position;
-use async_trait::async_trait;
+
 
 #[derive(Clone)]
 pub struct OrderBookImbalance {
@@ -53,30 +53,7 @@ impl OrderBookImbalance {
         }
     }
 
-    fn calculate_obi(&self) -> f64 {
-        if self.trades.is_empty() {
-            return 0.0;
-        }
 
-        let mut buy_volume = 0.0;
-        let mut sell_volume = 0.0;
-
-        for trade in self.trades.iter() {
-            let quantity = trade.qty;
-            if trade.is_buyer_maker {
-                buy_volume += quantity;
-            } else {
-                sell_volume += quantity;
-            }
-        }
-
-        let total_volume = buy_volume + sell_volume;
-        if total_volume == 0.0 {
-            0.0
-        } else {
-            (buy_volume - sell_volume) / total_volume
-        }
-    }
 }
 
 #[async_trait::async_trait]

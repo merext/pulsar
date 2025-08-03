@@ -8,10 +8,10 @@ slow_ema_alpha = 0.2       # Very responsive slow EMA (5-period equivalent)
 volatility_window = 10     # Short volatility calculation window
 
 # Signal Thresholds (microsecond-level)
-buy_threshold = 0.00005    # Extremely low buy threshold for maximum signals
-sell_threshold = -0.00005  # Extremely low sell threshold for maximum signals
-volume_threshold = 0.9     # Below average volume threshold for maximum signals
-signal_threshold = 0.1     # Extremely low confidence threshold for maximum signals
+buy_threshold = 0.00001    # Even lower buy threshold for maximum signals
+sell_threshold = -0.00001  # Even lower sell threshold for maximum signals
+volume_threshold = 0.5     # Lower volume threshold for more signals
+signal_threshold = 0.05    # Even lower confidence threshold for maximum signals
 
 # Risk Management (tight for HFT)
 stop_loss_pct = 0.002      # 0.2% stop loss
