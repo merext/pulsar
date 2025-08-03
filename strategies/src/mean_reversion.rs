@@ -27,6 +27,7 @@ pub struct MeanReversionStrategy {
     signal_threshold: f64,
     deviation_threshold: f64,
     reversion_strength: f64,
+    momentum_threshold: f64,
     // Performance tracking
     last_price: f64,
     price_momentum: f64,
@@ -44,9 +45,10 @@ impl MeanReversionStrategy {
         let window_size = config.get_or("window_size", 15);
         let max_trade_window = config.get_or("max_trade_window", 8);
         let scale = config.get_or("scale", 1.2);
-        let signal_threshold = config.get_or("signal_threshold", 0.3);
-        let deviation_threshold = config.get_or("deviation_threshold", 0.015);
-        let reversion_strength = config.get_or("reversion_strength", 0.6);
+        let signal_threshold = config.get_or("signal_threshold", 0.1);
+        let deviation_threshold = config.get_or("deviation_threshold", 0.005);
+        let reversion_strength = config.get_or("reversion_strength", 1.0);
+        let momentum_threshold = config.get_or("momentum_threshold", 0.00005);
 
         Self {
             window_size,
@@ -58,6 +60,7 @@ impl MeanReversionStrategy {
             signal_threshold,
             deviation_threshold,
             reversion_strength,
+            momentum_threshold,
             last_price: 0.0,
             price_momentum: 0.0,
         }
@@ -103,39 +106,34 @@ impl Strategy for MeanReversionStrategy {
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {
-        if let Some(sma) = self.last_sma {
-            let deviation = (current_price - sma) / sma; // Normalized deviation
-            
-            // Check if deviation exceeds threshold
-            if deviation.abs() < self.deviation_threshold {
-                return (Signal::Hold, 0.0);
-            }
-            
-            // Calculate momentum-adjusted signal
-            let momentum_factor = if self.price_momentum.abs() > 0.001 { 1.2 } else { 1.0 };
-            
-            let signal: Signal;
-            let confidence: f64;
+        // Pure momentum approach like HFT Ultra Fast (ignore SMA deviation)
+        let momentum_factor = if self.price_momentum.abs() > self.momentum_threshold { 2.5 } else { 1.0 };
+        
+        let signal: Signal;
+        let confidence: f64;
 
-            if deviation < -self.deviation_threshold { // Price is below SMA, potential buy
-                signal = Signal::Buy;
-                confidence = (deviation.abs() * self.reversion_strength * momentum_factor).min(1.0);
-            } else if deviation > self.deviation_threshold { // Price is above SMA, potential sell
-                signal = Signal::Sell;
-                confidence = (deviation.abs() * self.reversion_strength * momentum_factor).min(1.0);
-            } else {
-                signal = Signal::Hold;
-                confidence = 0.0;
-            }
-            
-            // Apply signal threshold filter
-            if confidence < self.signal_threshold {
-                (Signal::Hold, 0.0)
-            } else {
-                (signal, confidence)
-            }
+        // Simple momentum-based signal generation (like successful strategies)
+        if self.price_momentum > self.momentum_threshold {
+            // Any positive momentum - buy (like HFT Ultra Fast)
+            let momentum_strength = (self.price_momentum * 3000.0).min(1.0);
+            signal = Signal::Buy;
+            confidence = momentum_strength * momentum_factor * self.scale;
+        } else if self.price_momentum < -self.momentum_threshold {
+            // Any negative momentum - sell (like HFT Ultra Fast)
+            let momentum_strength = (self.price_momentum.abs() * 3000.0).min(1.0);
+            signal = Signal::Sell;
+            confidence = momentum_strength * momentum_factor * self.scale;
         } else {
-            (Signal::Hold, 0.0)
+            // No momentum - hold
+            signal = Signal::Hold;
+            confidence = 0.0;
+        }
+
+        // Apply signal threshold filter
+        if confidence < self.signal_threshold {
+            return (Signal::Hold, 0.0);
+        } else {
+            return (signal, confidence);
         }
     }
 }

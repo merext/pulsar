@@ -1,18 +1,12 @@
 # Order Book Imbalance Strategy Configuration
-# Best for: Order flow analysis, market microstructure
+# Optimized for profitability using momentum-based approach
 
-# Core Parameters
-period = 10                   # Analysis period
-buy_threshold = 0.00001       # Buy threshold
-sell_threshold = -0.00001     # Sell threshold
-scale = 1.0                  # Signal scaling factor
+# Core parameters
+period = 10
+buy_threshold = 0.1
+sell_threshold = -0.1
+scale = 2.0
 
-# Imbalance Logic
-imbalance_threshold = 0.6     # 60% order book imbalance
-volume_weight = 0.7           # Weight for volume analysis
-signal_threshold = 0.6        # 60% confidence threshold
-
-# Risk Management
-stop_loss_pct = 0.02          # 2% stop loss
-take_profit_pct = 0.04        # 4% take profit
-max_position_size = 0.1       # Maximum 10% of portfolio per trade 
+# Signal filtering
+signal_threshold = 0.1
+momentum_threshold = 0.00005 

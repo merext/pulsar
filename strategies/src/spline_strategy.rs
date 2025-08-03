@@ -9,11 +9,11 @@
 //! a threshold indicates upward momentum (buy signal), while a negative derivative below a threshold
 //! indicates downward momentum (sell signal).
 
-use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
+use crate::config::StrategyConfig;
 use async_trait::async_trait;
 use std::collections::VecDeque;
 pub use splines::{Interpolation, Key, Spline};
@@ -29,16 +29,26 @@ pub struct SplineStrategy {
     pub derivative_buy_threshold: f64,
     pub derivative_sell_threshold: f64,
     pub scale: f64,
+    // Configuration parameters
+    pub signal_threshold: f64,
+    pub momentum_threshold: f64,
+    pub last_price: f64,
+    pub price_momentum: f64,
 }
 
 impl SplineStrategy {
-    pub fn new(
-        window_size: usize,
-        interpolation: Interpolation<f64, f64>,
-        derivative_buy_threshold: f64,
-        derivative_sell_threshold: f64,
-        scale: f64,
-    ) -> Self {
+    pub fn new() -> Self {
+        let config = StrategyConfig::load_strategy_config("spline_strategy");
+        
+        let window_size = config.as_ref().map(|c| c.get_or("window_size", 20)).unwrap_or(20);
+        let derivative_buy_threshold = config.as_ref().map(|c| c.get_or("derivative_buy_threshold", 0.001)).unwrap_or(0.001);
+        let derivative_sell_threshold = config.as_ref().map(|c| c.get_or("derivative_sell_threshold", -0.001)).unwrap_or(-0.001);
+        let scale = config.as_ref().map(|c| c.get_or("scale", 1.2)).unwrap_or(1.2);
+        let signal_threshold = config.as_ref().map(|c| c.get_or("signal_threshold", 0.3)).unwrap_or(0.3);
+        let momentum_threshold = config.as_ref().map(|c| c.get_or("momentum_threshold", 0.0001)).unwrap_or(0.0001);
+        
+        let interpolation = Interpolation::Linear;
+
         Self {
             window_size,
             prices: VecDeque::with_capacity(window_size),
@@ -48,6 +58,10 @@ impl SplineStrategy {
             derivative_buy_threshold,
             derivative_sell_threshold,
             scale,
+            signal_threshold,
+            momentum_threshold,
+            last_price: 0.0,
+            price_momentum: 0.0,
         }
     }
 
@@ -84,6 +98,11 @@ impl Strategy for SplineStrategy {
         let price = trade.price;
         let timestamp = trade.time as f64;
 
+        // Update price momentum
+        if self.last_price > 0.0 {
+            self.price_momentum = (price - self.last_price) / self.last_price;
+        }
+
         self.prices.push_back(price);
         self.timestamps.push_back(timestamp);
 
@@ -92,6 +111,8 @@ impl Strategy for SplineStrategy {
             self.timestamps.pop_front();
         }
         self.update_spline();
+        
+        self.last_price = price;
     }
 
     fn get_signal(
@@ -107,64 +128,29 @@ impl Strategy for SplineStrategy {
             return (Signal::Hold, 0.0);
         }
 
-        let spline = self.last_spline.as_ref().unwrap();
-        let current_ts = *self.timestamps.back().unwrap(); // Use the latest timestamp
-
-        // Calculate the first derivative at the current timestamp
-        let epsilon = 1.0; // A small time difference for derivative calculation
-
-        let price_now = match spline.sample(current_ts) {
-            Some(p) => p,
-            None => {
-                debug!(current_ts = format!("{:.0}", current_ts), "Spline sample at current_ts returned None. Returning Hold.");
-                return (Signal::Hold, 0.0);
-            }
-        };
-
-        let price_prev = match spline.sample(current_ts - epsilon) {
-            Some(p) => p,
-            None => {
-                debug!(current_ts_minus_epsilon = format!("{:.0}", current_ts - epsilon), "Spline sample at current_ts - epsilon returned None. Returning Hold.");
-                return (Signal::Hold, 0.0);
-            }
-        };
-
-        let derivative = (price_now - price_prev) / epsilon;
-
-        info!(ts = format!("{:.0}", current_ts), derivative = format!("{:.6}", derivative), "Spline derivative calculated.");
+        // Pure momentum approach like successful strategies (ignore spline derivative)
+        let momentum_factor = if self.price_momentum.abs() > self.momentum_threshold { 2.5 } else { 1.0 };
+        let momentum_strength = (self.price_momentum * 3000.0).min(1.0);
 
         let signal: Signal;
         let confidence: f64;
 
-        if derivative > self.derivative_buy_threshold {
-            debug!(
-                signal = "Buy",
-                derivative = format!("{:.6}", derivative),
-                threshold = format!("{:.6}", self.derivative_buy_threshold),
-                "Signal: Buy"
-            );
+        if self.price_momentum > self.momentum_threshold {
             signal = Signal::Buy;
-            confidence = scale_from_threshold(derivative, self.derivative_buy_threshold, self.scale);
-        } else if derivative < self.derivative_sell_threshold {
-            debug!(
-                signal = "Sell",
-                derivative = format!("{:.6}", derivative),
-                threshold = format!("{:.6}", self.derivative_sell_threshold),
-                "Signal: Sell"
-            );
+            confidence = momentum_strength * momentum_factor * self.scale;
+        } else if self.price_momentum < -self.momentum_threshold {
             signal = Signal::Sell;
-            confidence = scale_from_threshold_inverse(derivative, self.derivative_sell_threshold, self.scale);
+            confidence = momentum_strength * momentum_factor * self.scale;
         } else {
-            debug!(
-                signal = "Hold",
-                derivative = format!("{:.6}", derivative),
-                buy_threshold = format!("{:.6}", self.derivative_buy_threshold),
-                sell_threshold = format!("{:.6}", self.derivative_sell_threshold),
-                "Signal: Hold"
-            );
             signal = Signal::Hold;
             confidence = 0.0;
         }
-        (signal, confidence)
+
+        // Apply signal threshold filter
+        if confidence < self.signal_threshold {
+            return (Signal::Hold, 0.0);
+        }
+
+        (signal, confidence.min(1.0))
     }
 }

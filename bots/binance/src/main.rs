@@ -77,6 +77,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
     // let strategy = HftUltraFastStrategy::new();
 
+    // Mean Reversion Strategy (Currently active - Optimizing)
+    use strategies::mean_reversion::MeanReversionStrategy;
+    let strategy = MeanReversionStrategy::new();
+
     // HFT Market Maker Strategy
     // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
     // let strategy = HftMarketMakerStrategy::new(); // Loads config from config/hft_market_maker_strategy.toml
@@ -130,8 +134,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // let strategy = HftMarketMakerStrategy::new();
 
     // Z-Score Strategy (Currently active - Optimizing)
-    use strategies::zscore_strategy::ZScoreStrategy;
-    let strategy = ZScoreStrategy::new();
+    // use strategies::zscore_strategy::ZScoreStrategy;
+    // let strategy = ZScoreStrategy::new();
 
     // Advanced Strategies (Medium-term trading)
     // Adaptive Multi-Factor Strategy

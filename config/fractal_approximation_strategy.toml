@@ -1,15 +1,10 @@
 # Fractal Approximation Strategy Configuration
-# Best for: Pattern recognition, fractal analysis
+# Optimized for profitability using momentum-based approach
 
-# Core Parameters
-period = 20                   # Fractal analysis period
+# Core parameters
+period = 20
+scale = 2.0
 
-# Fractal Parameters
-fractal_dimension = 1.5       # Expected fractal dimension
-pattern_threshold = 0.7       # Pattern recognition threshold
-signal_threshold = 0.6        # 60% confidence threshold
-
-# Risk Management
-stop_loss_pct = 0.02          # 2% stop loss
-take_profit_pct = 0.04        # 4% take profit
-max_position_size = 0.1       # Maximum 10% of portfolio per trade 
+# Signal filtering
+signal_threshold = 0.1
+momentum_threshold = 0.00005 
