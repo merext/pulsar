@@ -42,13 +42,10 @@ pub struct EnhancedRsiStrategy {
     
     // Adaptive parameters
     volatility_period: usize,
-    adaptive_factor: f64,
     
     // Risk management
-    max_position_size: f64,
     stop_loss_pct: f64,
     take_profit_pct: f64,
-    max_drawdown_pct: f64,
     
     // Data storage
     prices: VecDeque<f64>,
@@ -91,11 +88,8 @@ impl EnhancedRsiStrategy {
         let momentum_threshold = config.get_or("momentum_threshold", 0.00003);
         let trend_threshold = config.get_or("trend_threshold", 0.0005);
         let volatility_period = config.get_or("volatility_period", 15);
-        let adaptive_factor = config.get_or("adaptive_factor", 0.5);
-        let max_position_size = config.get_or("max_position_size", 1000.0);
         let stop_loss_pct = config.get_or("stop_loss_pct", 0.015);
         let take_profit_pct = config.get_or("take_profit_pct", 0.03);
-        let max_drawdown_pct = config.get_or("max_drawdown_pct", 0.05);
 
         Self {
             short_period,
@@ -113,11 +107,8 @@ impl EnhancedRsiStrategy {
             momentum_threshold,
             trend_threshold,
             volatility_period,
-            adaptive_factor,
-            max_position_size,
             stop_loss_pct,
             take_profit_pct,
-            max_drawdown_pct,
             prices: VecDeque::new(),
             volumes: VecDeque::new(),
             rsi_short: 50.0,

@@ -1,13 +1,13 @@
 # RSI Strategy Configuration
 # Best for: Mean reversion, overbought/oversold conditions
-# ULTRA-OPTIMIZED FOR MAXIMUM PROFIT
+# OPTIMIZED FOR REDUCED DRAWDOWN AND BETTER RISK MANAGEMENT
 
 # Core Parameters
-period = 4                    # Shorter period for more signals
-overbought = 68.0             # Lower overbought threshold for more signals
-oversold = 32.0               # Higher oversold threshold for more signals
-scale = 3.5                   # Higher scaling factor for stronger signals
-signal_threshold = 0.1        # Lower threshold for more signals
+period = 14                   # Standard RSI period for more reliable signals
+overbought = 70.0             # Standard overbought threshold
+oversold = 30.0               # Standard oversold threshold
+scale = 2.0                   # Reduced scaling factor for lower risk
+signal_threshold = 0.3        # Higher threshold for more reliable signals
 
 # Momentum Parameters
-momentum_threshold = 0.00003  # Lower momentum threshold for more signals 
+momentum_threshold = 0.0001   # Higher momentum threshold for more reliable signals 

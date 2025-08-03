@@ -27,19 +27,15 @@ pub struct AdvancedMomentumStrategy {
     volume_threshold: f64,
     
     // Momentum parameters
-    momentum_period: usize,
     momentum_threshold: f64,
     
     // Trend analysis
-    trend_period: usize,
     trend_threshold: f64,
     
     // Adaptive parameters
     volatility_period: usize,
-    adaptive_threshold: f64,
     
     // Risk management
-    max_position_size: f64,
     stop_loss_pct: f64,
     take_profit_pct: f64,
     
@@ -53,7 +49,6 @@ pub struct AdvancedMomentumStrategy {
     timestamps: VecDeque<f64>,
     
     // State tracking
-    last_signal: Signal,
     last_signal_time: f64,
     consecutive_losses: usize,
     current_trend: f64,
@@ -72,13 +67,9 @@ impl AdvancedMomentumStrategy {
         let long_period = config.get_or("long_period", 50);
         let volume_period = config.get_or("volume_period", 20);
         let volume_threshold = config.get_or("volume_threshold", 1.2);
-        let momentum_period = config.get_or("momentum_period", 10);
         let momentum_threshold = config.get_or("momentum_threshold", 0.0001);
-        let trend_period = config.get_or("trend_period", 30);
         let trend_threshold = config.get_or("trend_threshold", 0.001);
         let volatility_period = config.get_or("volatility_period", 25);
-        let adaptive_threshold = config.get_or("adaptive_threshold", 0.3);
-        let max_position_size = config.get_or("max_position_size", 1000.0);
         let stop_loss_pct = config.get_or("stop_loss_pct", 0.02);
         let take_profit_pct = config.get_or("take_profit_pct", 0.04);
         let signal_threshold = config.get_or("signal_threshold", 0.4);
@@ -90,13 +81,9 @@ impl AdvancedMomentumStrategy {
             long_period,
             volume_period,
             volume_threshold,
-            momentum_period,
             momentum_threshold,
-            trend_period,
             trend_threshold,
             volatility_period,
-            adaptive_threshold,
-            max_position_size,
             stop_loss_pct,
             take_profit_pct,
             signal_threshold,
@@ -104,7 +91,6 @@ impl AdvancedMomentumStrategy {
             prices: VecDeque::new(),
             volumes: VecDeque::new(),
             timestamps: VecDeque::new(),
-            last_signal: Signal::Hold,
             last_signal_time: 0.0,
             consecutive_losses: 0,
             current_trend: 0.0,
@@ -118,19 +104,6 @@ impl AdvancedMomentumStrategy {
         }
         let sum: f64 = self.prices.iter().rev().take(period).sum();
         sum / period as f64
-    }
-
-    fn calculate_ema(&self, period: usize) -> f64 {
-        if self.prices.len() < period {
-            return 0.0;
-        }
-        let alpha = 2.0 / (period as f64 + 1.0);
-        let mut ema = self.prices[self.prices.len() - period];
-        
-        for i in (self.prices.len() - period + 1)..self.prices.len() {
-            ema = alpha * self.prices[i] + (1.0 - alpha) * ema;
-        }
-        ema
     }
 
     fn calculate_momentum(&self, period: usize) -> f64 {

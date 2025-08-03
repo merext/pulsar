@@ -7,7 +7,7 @@ use binance_sdk::spot::websocket_api::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
-use tracing::{error, info};
+use tracing::{error, debug};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 
@@ -136,6 +136,14 @@ impl Trader for BinanceTrader {
                         .expect("Price not found in fill")
                         .parse()
                         .expect("Failed to parse entry price");
+                    
+                    debug!(
+                        action = "buy_order_executed",
+                        symbol = %symbol,
+                        price = %format!("{:.5}", price),
+                        quantity = %format!("{:.0}", self.position.quantity),
+                        entry_price = %format!("{:.5}", self.position.entry_price)
+                    );
                 }
             }
             Signal::Sell => {
@@ -163,6 +171,15 @@ impl Trader for BinanceTrader {
                         std::process::exit(1);
                     }
 
+                    debug!(
+                        action = "sell_order_executed",
+                        symbol = %symbol,
+                        price = %format!("{:.5}", price),
+                        quantity = %format!("{:.0}", self.position.quantity),
+                        pnl = %format!("{:.6}", pnl),
+                        total_pnl = %format!("{:.6}", self.realized_pnl)
+                    );
+
                     self.position.quantity = 0.0; // Assuming full sell
                     self.position.entry_price = 0.0;
                 }
@@ -180,14 +197,12 @@ impl Trader for BinanceTrader {
         match signal {
             Signal::Buy => {
                 if self.position.quantity == 0.0 {
-                    info!(
-                        exchange = "binance",
-                        mode = "emulated",
-                        action = "place_buy_order",
+                    debug!(
+                        action = "buy_order_executed_emulated",
                         symbol = %symbol,
-                        price = %format!("{:.6}", price),
-                        quantity = %format!("{:.6}", quantity.to_f64().unwrap_or_default()),
-                        profit = %format!("{:.6}", self.realized_pnl)
+                        price = %format!("{:.5}", price),
+                        quantity = %format!("{:.0}", quantity.to_f64().unwrap_or_default()),
+                        entry_price = %format!("{:.5}", price)
                     );
                     // Simulate a buy in emulated mode
                     self.position.quantity = quantity.to_f64().unwrap_or(0.0);
@@ -198,20 +213,17 @@ impl Trader for BinanceTrader {
                 if self.position.quantity > 0.0 {
                     let pnl = (price - self.position.entry_price) * self.position.quantity;
                     self.realized_pnl += pnl;
-                    info!(
-                        exchange = "binance",
-                        mode = "emulated",
-                        action = "place_sell_order",
+                    debug!(
+                        action = "sell_order_executed_emulated",
                         symbol = %symbol,
-                        price = %format!("{:.6}", price),
-                        quantity = %format!("{:.6}", self.position.quantity),
+                        price = %format!("{:.5}", price),
+                        quantity = %format!("{:.0}", self.position.quantity),
                         pnl = %format!("{:.6}", pnl),
-                        profit = %format!("{:.6}", self.realized_pnl)
+                        total_pnl = %format!("{:.6}", self.realized_pnl)
                     );
                     // Simulate a sell in emulated mode
                     self.position.quantity = 0.0;
                     self.position.entry_price = 0.0;
-                    self.realized_pnl += pnl;
                 }
             }
             Signal::Hold => {

@@ -1,5 +1,4 @@
 use ::trade::trader::TradeMode;
-use ::trade::trader::Trader;
 use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
@@ -30,7 +29,19 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    tracing_subscriber::fmt::init();
+    // Configure logging with specific levels for different modules
+    let env_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        // If RUST_LOG is set, use it but force binance_sdk to warn level
+        format!("{},binance_sdk=warn", rust_log)
+    } else {
+        // Default configuration
+        "binance_bot=info,binance_sdk=warn,binance_exchange=info".to_string()
+    };
+    
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .init();
+    
     let cli = Cli::parse();
     
     use strategies::rsi_strategy::RsiStrategy;
@@ -40,22 +51,44 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
     
-    info!("Testing strategy: {}", strategy.get_info());
-    
-    let trade_mode = match cli.command {
-        Commands::Trade => TradeMode::Real,
-        Commands::Emulate => TradeMode::Emulated,
-        Commands::Backtest { .. } => TradeMode::Emulated,
-    };
+    info!("Trading strategy: {}", strategy.get_info());
     
     match cli.command {
         Commands::Trade => {
             info!("Starting live trading...");
-            // Live trading implementation would go here
+            let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
+                trading_symbol,
+                &api_key,
+                &api_secret,
+                TradeMode::Real,
+            ).await;
+            
+            trade::run_trade(
+                trading_symbol,
+                &api_key,
+                &api_secret,
+                strategy,
+                &mut binance_trader,
+                TradeMode::Real,
+            ).await?;
         }
         Commands::Emulate => {
             info!("Starting emulated trading...");
-            // Emulated trading implementation would go here
+            let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
+                trading_symbol,
+                &api_key,
+                &api_secret,
+                TradeMode::Emulated,
+            ).await;
+            
+            trade::run_trade(
+                trading_symbol,
+                &api_key,
+                &api_secret,
+                strategy,
+                &mut binance_trader,
+                TradeMode::Emulated,
+            ).await?;
         }
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {

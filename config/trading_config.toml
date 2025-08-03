@@ -14,17 +14,17 @@ slippage_volatility = 0.5  # How much slippage varies with volatility
 
 [risk_management]
 # Position sizing
-max_position_size = 1000.0  # Maximum position size in base currency
-max_daily_loss = 1000.0     # Maximum daily loss in quote currency (increased)
-max_drawdown = 1.0          # Maximum drawdown (100% - disabled for testing)
+max_position_size = 500.0   # Reduced maximum position size for lower risk
+max_daily_loss = 500.0      # Reduced maximum daily loss
+max_drawdown = 0.15         # 15% maximum drawdown (much more conservative)
 
 # Signal filtering
-min_signal_strength = 0.3   # Only trade if signal confidence > 0.3 (lowered for more trades)
-min_edge_over_cost = 1.2    # Only trade if expected edge > 1.2x trading cost (lowered)
+min_signal_strength = 0.4   # Higher signal strength requirement for better quality
+min_edge_over_cost = 1.5    # Higher edge requirement for more profitable trades
 
 # Circuit breakers
-max_consecutive_losses = 5   # Stop trading after 5 consecutive losses
-cooldown_period = 300        # Wait 5 minutes after circuit breaker
+max_consecutive_losses = 3   # Stop trading after 3 consecutive losses (more conservative)
+cooldown_period = 600        # Wait 10 minutes after circuit breaker
 
 [order_management]
 # Order types and timing

@@ -34,7 +34,6 @@ pub struct TrendVolumeStrategy {
     min_trend_strength: f64,
     
     // Risk management
-    max_position_size: f64,
     stop_loss_pct: f64,
     take_profit_pct: f64,
     
@@ -64,7 +63,6 @@ impl TrendVolumeStrategy {
         let momentum_threshold = config.get_or("momentum_threshold", 0.0001);
         let signal_threshold = config.get_or("signal_threshold", 0.3);
         let min_trend_strength = config.get_or("min_trend_strength", 0.5);
-        let max_position_size = config.get_or("max_position_size", 1000.0);
         let stop_loss_pct = config.get_or("stop_loss_pct", 0.02);
         let take_profit_pct = config.get_or("take_profit_pct", 0.04);
 
@@ -77,7 +75,6 @@ impl TrendVolumeStrategy {
             momentum_threshold,
             signal_threshold,
             min_trend_strength,
-            max_position_size,
             stop_loss_pct,
             take_profit_pct,
             prices: VecDeque::new(),

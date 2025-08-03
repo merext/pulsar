@@ -52,7 +52,7 @@ impl BinanceClient {
             .await
             .context("Failed to subscribe to the trade stream")?;
 
-        let (tx, rx) = mpsc::channel(150);
+        let (tx, rx) = mpsc::channel(50000); // Much larger buffer for high-frequency trading
 
         ws_stream.on_message(move |msg| {
             // if msg.m.unwrap_or(false) {
@@ -72,8 +72,18 @@ impl BinanceClient {
                 is_buyer_market_maker: msg.m.unwrap_or_default(),
             };
 
+            // Use try_send with much larger buffer to handle high-frequency data
             if let Err(err) = tx.try_send(trade) {
-                error!(error = ?err, "Failed to send trade to stream.");
+                match err {
+                    tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                        // Channel is closed, this is normal during shutdown
+                        return;
+                    }
+                    tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                        // Buffer is full, log this as it indicates processing is too slow
+                        error!("Trade stream buffer is full - processing is too slow");
+                    }
+                }
             }
         });
 
