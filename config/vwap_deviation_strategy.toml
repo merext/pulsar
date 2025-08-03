@@ -1,0 +1,16 @@
+# VWAP Deviation Strategy Configuration
+# Best for: Volume-weighted analysis, institutional flow
+
+# Core Parameters
+period = 10                   # VWAP calculation period
+deviation_threshold = 0.00001 # Deviation threshold from VWAP
+
+# VWAP Logic
+volume_weight = 0.8           # Weight for volume in VWAP
+price_weight = 0.2            # Weight for price in VWAP
+signal_threshold = 0.6        # 60% confidence threshold
+
+# Risk Management
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+max_position_size = 0.1       # Maximum 10% of portfolio per trade 

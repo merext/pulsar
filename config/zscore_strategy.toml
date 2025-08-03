@@ -1,0 +1,18 @@
+# Z-Score Strategy Configuration
+# Best for: Statistical arbitrage, mean reversion
+
+# Core Parameters
+period = 50                   # Z-score calculation period
+buy_threshold = -0.00001      # Buy threshold (negative for mean reversion)
+sell_threshold = 0.00001      # Sell threshold (positive for mean reversion)
+scale = 1.0                  # Signal scaling factor
+
+# Z-Score Logic
+zscore_threshold = 2.0        # Z-score threshold for signals
+mean_reversion_strength = 0.5 # Expected mean reversion strength
+signal_threshold = 0.6        # 60% confidence threshold
+
+# Risk Management
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+max_position_size = 0.1       # Maximum 10% of portfolio per trade 

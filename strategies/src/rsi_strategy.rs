@@ -9,11 +9,13 @@
 //! suggesting the asset may be undervalued and due for a price rebound.
 
 use crate::confidence::{scale_from_threshold, scale_from_threshold_inverse};
+use crate::config::{StrategyConfig, DefaultConfig};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
 use std::collections::VecDeque;
+use toml;
 
 #[derive(Clone)]
 pub struct RsiStrategy {
@@ -25,7 +27,19 @@ pub struct RsiStrategy {
 }
 
 impl RsiStrategy {
-    pub fn new(period: usize, overbought: f64, oversold: f64, scale: f64) -> Self {
+    pub fn new() -> Self {
+        // Load configuration from file
+        let config = StrategyConfig::load_strategy_config("rsi_strategy")
+            .unwrap_or_else(|_| {
+                // Use defaults if config file not found
+                StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
+            });
+
+        let period = config.get_or("period", DefaultConfig::rsi_period());
+        let overbought = config.get_or("overbought", DefaultConfig::rsi_overbought());
+        let oversold = config.get_or("oversold", DefaultConfig::rsi_oversold());
+        let scale = config.get_or("scale", DefaultConfig::rsi_scale());
+
         Self {
             period,
             overbought,

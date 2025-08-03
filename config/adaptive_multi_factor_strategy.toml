@@ -1,0 +1,32 @@
+# Adaptive Multi-Factor Strategy Configuration
+# Best for: Trending markets, medium-term trading, balanced risk/reward
+
+# Core Parameters
+short_window = 10        # Short-term SMA window (5-15 recommended)
+long_window = 50         # Long-term SMA window (30-100 recommended)
+volatility_window = 20   # Volatility calculation window (15-30 recommended)
+volume_window = 30       # VWAP calculation window (20-50 recommended)
+
+# Risk Management
+max_position_size = 0.1  # Maximum 10% of portfolio per trade
+stop_loss_pct = 0.02     # 2% stop loss
+take_profit_pct = 0.04   # 4% take profit
+
+# Adaptive Parameters
+volatility_multiplier = 2.0      # Multiplier for volatility bands
+momentum_threshold = 0.02        # 2% price change threshold
+volume_threshold = 1.5           # 50% above average volume
+signal_threshold = 0.6           # 60% confidence threshold
+
+# Market Regime Adjustments
+[low_volatility]
+momentum_threshold = 0.015
+volatility_multiplier = 1.5
+
+[high_volatility]
+momentum_threshold = 0.025
+volatility_multiplier = 2.5
+
+[extreme_volatility]
+momentum_threshold = 0.03
+volatility_multiplier = 3.0 

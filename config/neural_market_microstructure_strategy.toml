@@ -1,0 +1,31 @@
+# Neural Market Microstructure Strategy Configuration
+# Best for: Volatile markets, short-term trading, high-frequency opportunities
+
+# Core Parameters
+short_window = 5         # Short-term EMA window (3-10 recommended)
+medium_window = 20       # Medium-term EMA window (15-30 recommended)
+long_window = 100        # Long-term EMA window (50-200 recommended)
+micro_window = 10        # Microstructure analysis window (5-20 recommended)
+
+# Neural Network Parameters
+hidden_layer_size = 8    # Number of hidden neurons
+learning_rate = 0.01     # Learning rate for weight updates
+momentum_factor = 0.9    # Momentum for gradient descent
+
+# Risk Management
+volatility_filter = 0.02     # Minimum volatility threshold
+correlation_threshold = 0.7   # Signal correlation threshold
+max_drawdown = 0.05          # Maximum 5% drawdown
+
+# Multi-timeframe Weights
+short_weight = 0.4        # Weight for short-term signals
+medium_weight = 0.35      # Weight for medium-term signals
+long_weight = 0.25        # Weight for long-term signals
+signal_threshold = 0.6    # 60% confidence threshold
+
+# Market Regime Detection
+[regime_thresholds]
+trending_threshold = 0.02     # Trend strength threshold
+volatility_low = 0.15         # Low volatility threshold
+volatility_medium = 0.30      # Medium volatility threshold
+volatility_high = 0.50        # High volatility threshold 

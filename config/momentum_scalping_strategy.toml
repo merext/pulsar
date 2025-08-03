@@ -1,0 +1,17 @@
+# Momentum Scalping Strategy Configuration
+# Best for: Short-term momentum, scalping opportunities
+
+# Core Parameters
+trade_window_size = 5         # Trade window size
+price_change_threshold = 0.00001  # Price change threshold
+scale = 1.0                  # Signal scaling factor
+
+# Scalping Logic
+momentum_threshold = 0.001    # 0.1% momentum threshold
+volume_threshold = 1.2        # 20% above average volume
+signal_threshold = 0.6        # 60% confidence threshold
+
+# Risk Management
+stop_loss_pct = 0.01          # 1% stop loss (tight for scalping)
+take_profit_pct = 0.02        # 2% take profit
+max_position_size = 0.05      # Maximum 5% of portfolio per trade 

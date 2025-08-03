@@ -1,0 +1,29 @@
+# HFT Market Maker Strategy Configuration
+# Best for: Spread capture, order book analysis, inventory management
+
+# Order Book Parameters
+spread_multiplier = 1.5       # Multiplier for optimal spread calculation
+min_spread = 0.0001           # 0.01% minimum spread
+max_position = 1000.0         # Maximum position size
+inventory_target = 0.0        # Target inventory (0 = neutral)
+
+# Inventory Management
+max_inventory = 5000.0        # Maximum inventory before hedging
+hedge_threshold = 0.8         # Hedge when inventory > 80% of max
+inventory_cost_weight = 0.1   # Weight for inventory cost in P&L
+
+# Risk Controls
+max_loss_per_trade = 0.001    # 0.1% maximum loss per trade
+max_daily_loss = 0.01         # 1% maximum daily loss
+correlation_limit = 0.7       # Maximum correlation between positions
+signal_threshold = 0.6        # 60% confidence threshold
+
+# Market Making Logic
+enable_dynamic_spread = true  # Adjust spread based on volatility
+enable_inventory_skew = true  # Skew prices based on inventory
+enable_volume_scaling = true  # Scale orders based on volume
+
+# Performance Tracking
+track_spread_capture = true   # Track spread capture metrics
+track_inventory_cost = true   # Track inventory holding costs
+track_market_impact = true    # Track market impact costs 

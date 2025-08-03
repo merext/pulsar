@@ -1,0 +1,16 @@
+# Kalman Filter Strategy Configuration
+# Best for: Noise filtering, trend following
+
+# Core Parameters
+signal_threshold = 0.00001    # Signal threshold for Kalman filter
+scale = 1.0                  # Signal scaling factor
+
+# Kalman Filter Parameters
+process_noise = 0.001         # Process noise covariance
+measurement_noise = 0.01      # Measurement noise covariance
+initial_uncertainty = 1.0     # Initial state uncertainty
+
+# Risk Management
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+max_position_size = 0.1       # Maximum 10% of portfolio per trade 

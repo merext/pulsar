@@ -9,10 +9,12 @@
 //! 
 //! Designed for HFT environments where speed is critical.
 
+use crate::config::{StrategyConfig, DefaultConfig};
 use trade::models::TradeData;
 use trade::trader::Position;
 use crate::strategy::Strategy;
 use trade::signal::Signal;
+use toml;
 
 #[derive(Clone, Debug)]
 pub struct HftUltraFastStrategy {
@@ -44,8 +46,8 @@ pub struct HftUltraFastStrategy {
     volume_ratio: f64,
     
     // Signal thresholds (pre-calculated)
-    buy_threshold: f64,
     volume_threshold: f64,
+    signal_threshold: f64,
     
     // Performance tracking (minimal)
     trades_won: u32,
@@ -54,6 +56,17 @@ pub struct HftUltraFastStrategy {
 
 impl HftUltraFastStrategy {
     pub fn new() -> Self {
+        // Load configuration from file
+        let config = StrategyConfig::load_strategy_config("hft_ultra_fast_strategy")
+            .unwrap_or_else(|_| {
+                // Use defaults if config file not found
+                StrategyConfig { config: toml::Value::Table(toml::map::Map::new()) }
+            });
+
+        let _buffer_size = config.get_or("buffer_size", 64);
+        let volume_threshold = config.get_or("volume_threshold", 1.2);
+        let signal_threshold = config.get_or("signal_threshold", DefaultConfig::hft_signal_threshold());
+
         Self {
             price_buffer: [0.0; 64],
             volume_buffer: [0.0; 64],
@@ -70,8 +83,8 @@ impl HftUltraFastStrategy {
             volatility_sum_sq: 0.0,
             avg_volume: 0.0,
             volume_ratio: 1.0,
-            buy_threshold: 0.0005,  // 0.05% price change
-            volume_threshold: 1.2,   // 20% above average volume
+            volume_threshold,
+            signal_threshold,
             trades_won: 0,
             trades_total: 0,
         }
@@ -163,9 +176,9 @@ impl HftUltraFastStrategy {
         let sell_score = (-price_momentum * 0.4 - ema_signal * 0.4 + volume_signal * 0.2) * volatility_factor;
         
         // Generate signal with confidence
-        if buy_score > self.buy_threshold {
+        if buy_score > self.signal_threshold {
             (Signal::Buy, buy_score.min(1.0))
-        } else if sell_score > self.buy_threshold {
+        } else if sell_score > self.signal_threshold {
             (Signal::Sell, sell_score.min(1.0))
         } else {
             (Signal::Hold, 0.0)

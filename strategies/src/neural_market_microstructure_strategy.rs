@@ -63,6 +63,7 @@ pub struct NeuralMarketMicrostructureStrategy {
     // Multi-timeframe analysis
     timeframe_signals: Vec<Signal>,
     signal_weights: Vec<f64>,
+    signal_threshold: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +81,7 @@ impl NeuralMarketMicrostructureStrategy {
         medium_window: usize,
         long_window: usize,
         micro_window: usize,
+        signal_threshold: f64,
     ) -> Self {
         let hidden_size = 8;
         let feature_size = 12;
@@ -111,6 +113,7 @@ impl NeuralMarketMicrostructureStrategy {
             regime_confidence: 0.5,
             timeframe_signals: vec![Signal::Hold; 3],
             signal_weights: vec![0.4, 0.35, 0.25], // Short, medium, long weights
+            signal_threshold, // Use the parameter
         }
     }
 
@@ -432,10 +435,9 @@ impl NeuralMarketMicrostructureStrategy {
             }
         }
         
-        let threshold = 0.6;
-        if buy_score > threshold && buy_score > sell_score {
+        if buy_score > self.signal_threshold && buy_score > sell_score {
             (Signal::Buy, buy_score)
-        } else if sell_score > threshold && sell_score > buy_score {
+        } else if sell_score > self.signal_threshold && sell_score > buy_score {
             (Signal::Sell, sell_score)
         } else {
             (Signal::Hold, 0.0)

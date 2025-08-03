@@ -1,0 +1,18 @@
+# Spline Strategy Configuration
+# Best for: Smooth trend following, interpolation-based signals
+
+# Core Parameters
+window_size = 5               # Window size for spline calculation
+interpolation = "linear"      # Interpolation type (linear, cubic)
+derivative_buy_threshold = 0.000001   # Buy threshold for derivative
+derivative_sell_threshold = -0.000001  # Sell threshold for derivative
+
+# Spline Parameters
+spline_degree = 3             # Degree of spline polynomial
+smoothing_factor = 0.1        # Smoothing factor
+signal_threshold = 0.6        # 60% confidence threshold
+
+# Risk Management
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+max_position_size = 0.1       # Maximum 10% of portfolio per trade 

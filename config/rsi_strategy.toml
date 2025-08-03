@@ -1,0 +1,18 @@
+# RSI Strategy Configuration
+# Best for: Mean reversion, overbought/oversold conditions
+
+# Core Parameters
+period = 14                   # RSI calculation period
+overbought = 70.0            # Overbought threshold
+oversold = 30.0              # Oversold threshold
+scale = 1.0                  # Signal scaling factor
+
+# Signal Generation
+buy_signal = "oversold"       # Buy when RSI crosses below oversold
+sell_signal = "overbought"    # Sell when RSI crosses above overbought
+signal_threshold = 0.6        # 60% confidence threshold
+
+# Risk Management
+stop_loss_pct = 0.02          # 2% stop loss
+take_profit_pct = 0.04        # 4% take profit
+max_position_size = 0.1       # Maximum 10% of portfolio per trade 

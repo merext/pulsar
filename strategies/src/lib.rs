@@ -7,6 +7,7 @@ pub mod spline_strategy;
 pub mod vwap_deviation_strategy;
 pub mod zscore_strategy;
 pub mod fractal_approximation_strategy;
+pub mod config;
 pub mod adaptive_multi_factor_strategy;
 pub mod neural_market_microstructure_strategy;
 pub mod hft_ultra_fast_strategy;

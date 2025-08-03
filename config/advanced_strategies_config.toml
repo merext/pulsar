@@ -20,7 +20,7 @@ take_profit_pct = 0.04   # 4% take profit
 volatility_multiplier = 2.0      # Multiplier for volatility bands
 momentum_threshold = 0.02        # 2% price change threshold
 volume_threshold = 1.5           # 50% above average volume
-signal_threshold = 0.6           # Minimum confidence for signal
+signal_threshold = 0.6           # 60% confidence threshold
 
 # Market Regime Adjustments
 [adaptive_multi_factor.low_volatility]
@@ -59,6 +59,7 @@ max_drawdown = 0.05          # Maximum 5% drawdown
 short_weight = 0.4        # Weight for short-term signals
 medium_weight = 0.35      # Weight for medium-term signals
 long_weight = 0.25        # Weight for long-term signals
+signal_threshold = 0.6    # 60% confidence threshold
 
 # Market Regime Detection
 [neural_market_microstructure.regime_thresholds]
@@ -174,6 +175,7 @@ volatility_window = 10        # Short volatility calculation window
 buy_threshold = 0.0005        # 0.05% price change threshold
 sell_threshold = -0.0005      # -0.05% price change threshold
 volume_threshold = 1.2        # 20% above average volume
+signal_threshold = 0.6        # 60% confidence threshold
 
 # Risk Management (tight for HFT)
 stop_loss_pct = 0.002         # 0.2% stop loss
@@ -204,6 +206,7 @@ inventory_cost_weight = 0.1   # Weight for inventory cost in P&L
 max_loss_per_trade = 0.001    # 0.1% maximum loss per trade
 max_daily_loss = 0.01         # 1% maximum daily loss
 correlation_limit = 0.7       # Maximum correlation between positions
+signal_threshold = 0.6        # 60% confidence threshold
 
 # Market Making Logic
 enable_dynamic_spread = true  # Adjust spread based on volatility
@@ -314,3 +317,130 @@ take_profit_pct = 0.001       # 0.1% take profit (very tight)
 hft_mm_weight = 1.0           # Use only HFT market maker
 adaptive_weight = 0.0         # No adaptive strategy
 neural_weight = 0.0           # No neural strategy 
+
+# Legacy Strategies Configuration
+[rsi_strategy]
+# RSI Strategy Configuration
+# Best for: Mean reversion, overbought/oversold conditions
+
+# Core Parameters
+period = 14                   # RSI calculation period
+overbought = 70.0            # Overbought threshold
+oversold = 30.0              # Oversold threshold
+scale = 1.0                  # Signal scaling factor
+
+# Signal Generation
+buy_signal = "oversold"       # Buy when RSI crosses below oversold
+sell_signal = "overbought"    # Sell when RSI crosses above overbought
+signal_threshold = 0.6        # 60% confidence threshold
+
+[mean_reversion_strategy]
+# Mean Reversion Strategy Configuration
+# Best for: Range-bound markets, mean reversion opportunities
+
+# Core Parameters
+window_size = 20              # Moving average window size
+max_trade_window = 10         # Maximum trade holding period
+scale = 1.0                  # Signal scaling factor
+
+# Mean Reversion Logic
+deviation_threshold = 0.02    # 2% deviation from mean
+reversion_strength = 0.5      # Expected reversion strength
+signal_threshold = 0.6        # 60% confidence threshold
+
+[momentum_scalping_strategy]
+# Momentum Scalping Strategy Configuration
+# Best for: Short-term momentum, scalping opportunities
+
+# Core Parameters
+trade_window_size = 5         # Trade window size
+price_change_threshold = 0.00001  # Price change threshold
+scale = 1.0                  # Signal scaling factor
+
+# Scalping Logic
+momentum_threshold = 0.001    # 0.1% momentum threshold
+volume_threshold = 1.2        # 20% above average volume
+signal_threshold = 0.6        # 60% confidence threshold
+
+[kalman_filter_strategy]
+# Kalman Filter Strategy Configuration
+# Best for: Noise filtering, trend following
+
+# Core Parameters
+signal_threshold = 0.00001    # Signal threshold for Kalman filter
+scale = 1.0                  # Signal scaling factor
+
+# Kalman Filter Parameters
+process_noise = 0.001         # Process noise covariance
+measurement_noise = 0.01      # Measurement noise covariance
+initial_uncertainty = 1.0     # Initial state uncertainty
+
+[order_book_imbalance_strategy]
+# Order Book Imbalance Strategy Configuration
+# Best for: Order flow analysis, market microstructure
+
+# Core Parameters
+period = 10                   # Analysis period
+buy_threshold = 0.00001       # Buy threshold
+sell_threshold = -0.00001     # Sell threshold
+scale = 1.0                  # Signal scaling factor
+
+# Imbalance Logic
+imbalance_threshold = 0.6     # 60% order book imbalance
+volume_weight = 0.7           # Weight for volume analysis
+signal_threshold = 0.6        # 60% confidence threshold
+
+[spline_strategy]
+# Spline Strategy Configuration
+# Best for: Smooth trend following, interpolation-based signals
+
+# Core Parameters
+window_size = 5               # Window size for spline calculation
+interpolation = "linear"      # Interpolation type (linear, cubic)
+derivative_buy_threshold = 0.000001   # Buy threshold for derivative
+derivative_sell_threshold = -0.000001  # Sell threshold for derivative
+
+# Spline Parameters
+spline_degree = 3             # Degree of spline polynomial
+smoothing_factor = 0.1        # Smoothing factor
+signal_threshold = 0.6        # 60% confidence threshold
+
+[vwap_deviation_strategy]
+# VWAP Deviation Strategy Configuration
+# Best for: Volume-weighted analysis, institutional flow
+
+# Core Parameters
+period = 10                   # VWAP calculation period
+deviation_threshold = 0.00001 # Deviation threshold from VWAP
+
+# VWAP Logic
+volume_weight = 0.8           # Weight for volume in VWAP
+price_weight = 0.2            # Weight for price in VWAP
+signal_threshold = 0.6        # 60% confidence threshold
+
+[zscore_strategy]
+# Z-Score Strategy Configuration
+# Best for: Statistical arbitrage, mean reversion
+
+# Core Parameters
+period = 50                   # Z-score calculation period
+buy_threshold = -0.00001      # Buy threshold (negative for mean reversion)
+sell_threshold = 0.00001      # Sell threshold (positive for mean reversion)
+scale = 1.0                  # Signal scaling factor
+
+# Z-Score Logic
+zscore_threshold = 2.0        # Z-score threshold for signals
+mean_reversion_strength = 0.5 # Expected mean reversion strength
+signal_threshold = 0.6        # 60% confidence threshold
+
+[fractal_approximation_strategy]
+# Fractal Approximation Strategy Configuration
+# Best for: Pattern recognition, fractal analysis
+
+# Core Parameters
+period = 20                   # Fractal analysis period
+
+# Fractal Parameters
+fractal_dimension = 1.5       # Expected fractal dimension
+pattern_threshold = 0.7       # Pattern recognition threshold
+signal_threshold = 0.6        # 60% confidence threshold

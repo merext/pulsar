@@ -27,6 +27,7 @@ pub struct HftMarketMakerStrategy {
     // Market making parameters
     spread_multiplier: f64,
     min_spread: f64,
+    signal_threshold: f64,
     
     // Current inventory and position
     current_inventory: f64,
@@ -51,7 +52,7 @@ pub struct HftMarketMakerStrategy {
 }
 
 impl HftMarketMakerStrategy {
-    pub fn new() -> Self {
+    pub fn new(signal_threshold: f64) -> Self {
         Self {
             best_bid: 0.0,
             best_ask: 0.0,
@@ -61,6 +62,7 @@ impl HftMarketMakerStrategy {
             mid_price: 0.0,
             spread_multiplier: 1.5,
             min_spread: 0.0001, // 0.01% minimum spread
+            signal_threshold, // Use the parameter
             current_inventory: 0.0,
             current_position: Position {
                 symbol: String::new(),
@@ -219,7 +221,7 @@ impl HftMarketMakerStrategy {
         let need_hedge = self.should_hedge();
         
         // Generate signal based on market making logic
-        if need_hedge {
+        let result = if need_hedge {
             // Hedge signal
             if self.current_inventory > 0.0 {
                 (Signal::Sell, 0.8) // Sell to reduce long inventory
@@ -238,6 +240,14 @@ impl HftMarketMakerStrategy {
         } else {
             // No orders
             (Signal::Hold, 0.0)
+        };
+        
+        // Apply signal threshold filter
+        let (signal, confidence) = result;
+        if confidence < self.signal_threshold {
+            (Signal::Hold, 0.0)
+        } else {
+            (signal, confidence)
         }
     }
 }

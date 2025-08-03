@@ -6,6 +6,7 @@ use std::error::Error;
 use tracing::info;
 use strategies::strategy::Strategy;
 
+
 mod backtest;
 mod trade;
 
@@ -28,6 +29,8 @@ enum Commands {
     },
 }
 
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Initialize tracing
@@ -35,71 +38,48 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
+    // Configuration is now loaded by each strategy individually
+
     // Instantiate the strategy with required state
     // Only one strategy should be uncommented at a time.
 
     // RSI Strategy
     // use strategies::rsi_strategy::RsiStrategy;
-    // let period = 14;
-    // let overbought = 70.0;
-    // let oversold = 30.0;
-    // let strategy = RsiStrategy::new(period, overbought, oversold);
+    // let strategy = RsiStrategy::new(); // Loads config from config/rsi_strategy.toml
 
     // Kalman Filter Strategy
     // use strategies::kalman_filter_strategy::KalmanFilterStrategy;
-    // let signal_threshold = 0.00001; // Example threshold, needs tuning
-    // let strategy = KalmanFilterStrategy::new(signal_threshold);
+    // let strategy = KalmanFilterStrategy::new(); // Loads config from config/kalman_filter_strategy.toml
 
     // Mean Reversion Strategy
     // use strategies::mean_reversion::MeanReversionStrategy;
-    // let window_size = 20; // Example window size
-    // let max_trade_window = 10; // Example max trade window
-    // let strategy = MeanReversionStrategy::new(window_size, max_trade_window);
+    // let strategy = MeanReversionStrategy::new(); // Loads config from config/mean_reversion_strategy.toml
 
     // Momentum Scalping Strategy
     // use strategies::momentum_scalping::MomentumScalping;
-    // let trade_window_size = 5; // Example window size
-    // let price_change_threshold = 0.00001; // Example threshold
-    // let strategy = MomentumScalping::new(trade_window_size, price_change_threshold);
+    // let strategy = MomentumScalping::new(); // Loads config from config/momentum_scalping_strategy.toml
 
     // HFT Ultra-Fast Strategy
     use strategies::hft_ultra_fast_strategy::HftUltraFastStrategy;
-    let strategy = HftUltraFastStrategy::new();
+    let strategy = HftUltraFastStrategy::new(); // Loads config from config/hft_ultra_fast_strategy.toml
 
     info!("Using strategy: {}", strategy.get_info());
 
     // Order Book Imbalance Strategy
     // use strategies::order_book_imbalance::OrderBookImbalance;
-    // let period = 10; // Example period (number of trades)
-    // let buy_threshold = 0.00001; // Example buy threshold
-    // let sell_threshold = -0.00001; // Example sell threshold
-    // let strategy = OrderBookImbalance::new(period, buy_threshold, sell_threshold);
+    // let strategy = OrderBookImbalance::new(); // Loads config from config/order_book_imbalance_strategy.toml
 
     // Spline Strategy
     // use strategies::spline_strategy::{Interpolation, SplineStrategy};
-    // let window_size = 5; // Example window size (reduced for testing)
-    // let interpolation = Interpolation::Linear; // Example interpolation type
-    // let derivative_buy_threshold = 0.000001; // Example threshold, needs tuning
-    // let derivative_sell_threshold = -0.000001; // Example threshold, needs tuning
-    // let strategy = SplineStrategy::new(
-    //     window_size,
-    //     interpolation,
-    //     derivative_buy_threshold,
-    //     derivative_sell_threshold,
-    // );
+    // let strategy = SplineStrategy::new(); // Loads config from config/spline_strategy.toml
 
     // VWAP Deviation Strategy (Placeholder - requires re-implementation)
     // use strategies::vwap_deviation_strategy::VwapDeviationStrategy;
-    // let period = 10; // Example period
-    // let deviation_threshold = 0.00001; // Example threshold
-    // let strategy = VwapDeviationStrategy::new(period, deviation_threshold);
+    // let strategy = VwapDeviationStrategy::new(); // Loads config from config/vwap_deviation_strategy.toml
 
     // Z-Score Strategy (Currently active)
     // use strategies::zscore_strategy::ZScoreStrategy;
-    // let period = 50; // Example period
-    // let buy_threshold = -0.00001; // Example buy threshold
-    // let sell_threshold = 0.00001; // Example sell threshold
-    // let strategy = ZScoreStrategy::new(period, buy_threshold, sell_threshold);
+    // let strategy = ZScoreStrategy::new(); // Loads config from config/zscore_strategy.toml
 
     // HFT Strategies (Ultra-low latency optimized)
     // HFT Ultra-Fast Strategy (Currently active)
@@ -108,24 +88,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // HFT Market Maker Strategy
     // use strategies::hft_market_maker_strategy::HftMarketMakerStrategy;
-    // let strategy = HftMarketMakerStrategy::new();
+    // let strategy = HftMarketMakerStrategy::new(); // Loads config from config/hft_market_maker_strategy.toml
 
     // Advanced Strategies (Medium-term trading)
     // Adaptive Multi-Factor Strategy
     // use strategies::adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
-    // let short_window = 10;
-    // let long_window = 50;
-    // let volatility_window = 20;
-    // let volume_window = 30;
-    // let strategy = AdaptiveMultiFactorStrategy::new(short_window, long_window, volatility_window, volume_window);
+    // let strategy = AdaptiveMultiFactorStrategy::new(); // Loads config from config/adaptive_multi_factor_strategy.toml
 
     // Neural Market Microstructure Strategy
     // use strategies::neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
-    // let short_window = 5;
-    // let medium_window = 20;
-    // let long_window = 100;
-    // let micro_window = 10;
-    // let strategy = NeuralMarketMicrostructureStrategy::new(short_window, medium_window, long_window, micro_window);
+    // let strategy = NeuralMarketMicrostructureStrategy::new(); // Loads config from config/neural_market_microstructure_strategy.toml
 
     // Initialize trader with API credentials
     let trading_symbol = "DOGEUSDT";
@@ -143,7 +115,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     info!("  - Buy threshold: 0.05% price change");
     info!("  - Stop loss: 0.2%");
     info!("  - Take profit: 0.2%");
-    info!("  - Config file: ../../config/advanced_strategies_config.toml");
+    info!("  - Config file: ../../config/hft_ultra_fast_strategy.toml");
+    info!("  - Each strategy has its own config file");
 
     let trade_mode = match cli.command {
         Commands::Trade => TradeMode::Real,
