@@ -9,6 +9,8 @@
 //! 
 //! This strategy uses cutting-edge techniques to achieve 50%+ win rates.
 
+// Version 1.0.0
+
 use std::collections::VecDeque;
 use trade::signal::Signal;
 use trade::trader::Position;
