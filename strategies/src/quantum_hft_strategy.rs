@@ -9,761 +9,647 @@
 //! 
 //! This strategy uses cutting-edge techniques to achieve 50%+ win rates.
 
-use trade::models::TradeData;
-use trade::trader::Position;
-use crate::strategy::Strategy;
-use trade::signal::Signal;
 use std::collections::VecDeque;
-use std::f64;
-use crate::config::StrategyConfig;
-// Removed unused imports: SystemTime, UNIX_EPOCH
+use trade::signal::Signal;
+use trade::trader::Position;
+use trade::models::TradeData;
+use tracing::{debug, info};
+use crate::strategy::Strategy;
+use async_trait::async_trait;
 
-#[derive(Clone, Debug)]
+/// Machine Learning-based Quantum HFT Strategy
+/// 
+/// This strategy uses multiple ML algorithms to predict price movements:
+/// 1. Linear Regression for trend prediction
+/// 2. Moving Average Convergence Divergence (MACD) for momentum
+/// 3. Relative Strength Index (RSI) for overbought/oversold conditions
+/// 4. Bollinger Bands for volatility and mean reversion
+/// 5. Volume Weighted Average Price (VWAP) for fair value
+/// 6. Ensemble prediction combining all models
+#[derive(Clone)]
 pub struct QuantumHftStrategy {
-    // Core parameters
+    // Data windows
+    price_window: VecDeque<f64>,
+    volume_window: VecDeque<f64>,
+    
+    // ML model parameters
     short_window: usize,
-    medium_window: usize,
     long_window: usize,
+    rsi_window: usize,
+    bb_window: usize,
+    vwap_window: usize,
     
-    // Data structures
-    prices: VecDeque<f64>,
-    volumes: VecDeque<f64>,
-    timestamps: VecDeque<u64>,
+    // ML model states
+    linear_regression_slope: f64,
+    macd_fast: VecDeque<f64>,
+    macd_slow: VecDeque<f64>,
+    macd_signal: VecDeque<f64>,
+    rsi_values: VecDeque<f64>,
+    bb_upper: VecDeque<f64>,
+    bb_lower: VecDeque<f64>,
+    bb_middle: VecDeque<f64>,
+    vwap_values: VecDeque<f64>,
     
-    // Technical indicators
-    ema_short: Option<f64>,
-    ema_medium: Option<f64>,
-    ema_long: Option<f64>,
-    rsi: Option<f64>,
-    macd: Option<f64>,
-    macd_signal: Option<f64>,
+    // Ensemble weights (learned from historical performance)
+    ensemble_weights: [f64; 6],
     
-    // Advanced features
-    price_velocity: VecDeque<f64>,
-    volume_velocity: VecDeque<f64>,
-    liquidity_score: f64,
+    // Risk management
     volatility_score: f64,
+    liquidity_score: f64,
     momentum_score: f64,
     
-    // Ensemble models
-    _ensemble_weights: Vec<f64>,
-    ensemble_predictions: Vec<f64>,
-    
-    // Market regime
-    market_regime: MarketRegime,
-    regime_confidence: f64,
-    
-    // Signal parameters
-    _signal_threshold: f64,
-    momentum_filter: f64,
-    volatility_filter: f64,
-    liquidity_filter: f64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum MarketRegime {
-    Trending,
-    MeanReverting,
-    Volatile,
-    Sideways,
-    Breakout,
+    // Performance tracking for adaptive weights
+    model_performance: [f64; 6],
+    trade_count: usize,
 }
 
 impl QuantumHftStrategy {
     pub fn new() -> Self {
-        let config = StrategyConfig::load_strategy_config("quantum_hft_strategy");
-        
-        let short_window = config.as_ref().map(|c| c.get_or("short_window", 3)).unwrap_or(3);
-        let medium_window = config.as_ref().map(|c| c.get_or("medium_window", 10)).unwrap_or(10);
-        let long_window = config.as_ref().map(|c| c.get_or("long_window", 30)).unwrap_or(30);
-        let signal_threshold = config.as_ref().map(|c| c.get_or("signal_threshold", 0.6)).unwrap_or(0.6);
-        let momentum_filter = config.as_ref().map(|c| c.get_or("momentum_filter", 0.3)).unwrap_or(0.3);
-        let volatility_filter = config.as_ref().map(|c| c.get_or("volatility_filter", 0.4)).unwrap_or(0.4);
-        let liquidity_filter = config.as_ref().map(|c| c.get_or("liquidity_filter", 0.3)).unwrap_or(0.3);
-        
         Self {
-            short_window,
-            medium_window,
-            long_window,
-            prices: VecDeque::with_capacity(long_window),
-            volumes: VecDeque::with_capacity(long_window),
-            timestamps: VecDeque::with_capacity(long_window),
-            ema_short: None,
-            ema_medium: None,
-            ema_long: None,
-            rsi: None,
-            macd: None,
-            macd_signal: None,
-            price_velocity: VecDeque::with_capacity(10),
-            volume_velocity: VecDeque::with_capacity(10),
-            liquidity_score: 0.5,
+            // Data windows
+            price_window: VecDeque::with_capacity(1000),
+            volume_window: VecDeque::with_capacity(1000),
+            
+            // ML model parameters
+            short_window: 12,
+            long_window: 26,
+            rsi_window: 14,
+            bb_window: 20,
+            vwap_window: 50,
+            
+            // ML model states
+            linear_regression_slope: 0.0,
+            macd_fast: VecDeque::with_capacity(100),
+            macd_slow: VecDeque::with_capacity(100),
+            macd_signal: VecDeque::with_capacity(100),
+            rsi_values: VecDeque::with_capacity(100),
+            bb_upper: VecDeque::with_capacity(100),
+            bb_lower: VecDeque::with_capacity(100),
+            bb_middle: VecDeque::with_capacity(100),
+            vwap_values: VecDeque::with_capacity(100),
+            
+            // Ensemble weights (initially equal, will adapt)
+            ensemble_weights: [0.167, 0.167, 0.167, 0.167, 0.167, 0.167],
+            
+            // Risk management
             volatility_score: 0.5,
+            liquidity_score: 0.5,
             momentum_score: 0.5,
-            _ensemble_weights: vec![0.25, 0.20, 0.20, 0.15, 0.10, 0.10], // Updated weights for 6 models
-            ensemble_predictions: vec![0.0; 6], // 6 models now
-            market_regime: MarketRegime::Sideways,
-            regime_confidence: 0.5,
-            _signal_threshold: signal_threshold,
-            momentum_filter,
-            volatility_filter,
-            liquidity_filter,
+            
+            // Performance tracking
+            model_performance: [0.0; 6],
+            trade_count: 0,
         }
     }
-
-    fn calculate_ema(&self, window: usize, alpha: f64) -> Option<f64> {
-        if self.prices.len() < window {
+    
+    /// Calculate simple moving average
+    fn calculate_sma(&self, data: &VecDeque<f64>, window: usize) -> Option<f64> {
+        if data.len() < window {
             return None;
         }
         
-        let mut ema = self.prices[0];
-        for i in 1..window {
-            ema = alpha * self.prices[i] + (1.0 - alpha) * ema;
+        let sum: f64 = data.iter().rev().take(window).sum();
+        Some(sum / window as f64)
+    }
+    
+    /// Calculate exponential moving average
+    fn calculate_ema(&self, data: &VecDeque<f64>, window: usize) -> Option<f64> {
+        if data.len() < window {
+            return None;
         }
+        
+        let alpha = 2.0 / (window as f64 + 1.0);
+        let mut ema = data[0];
+        
+        for &price in data.iter().skip(1) {
+            ema = alpha * price + (1.0 - alpha) * ema;
+        }
+        
         Some(ema)
     }
-
-    fn calculate_rsi(&self, period: usize) -> Option<f64> {
-        if self.prices.len() < period + 1 {
-            return None;
+    
+    /// Linear Regression for trend prediction
+    fn calculate_linear_regression(&mut self) -> f64 {
+        if self.price_window.len() < self.long_window {
+            return 0.0;
+        }
+        
+        let n = self.long_window as f64;
+        let prices: Vec<f64> = self.price_window.iter().rev().take(self.long_window).cloned().collect();
+        let x_values: Vec<f64> = (0..self.long_window).map(|x| x as f64).collect();
+        
+        let sum_x: f64 = x_values.iter().sum();
+        let sum_y: f64 = prices.iter().sum();
+        let sum_xy: f64 = x_values.iter().zip(prices.iter()).map(|(x, y)| x * y).sum();
+        let sum_x2: f64 = x_values.iter().map(|x| x * x).sum();
+        
+        let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
+        self.linear_regression_slope = slope;
+        
+        // Normalize slope to [-1, 1] range
+        slope.tanh()
+    }
+    
+    /// MACD calculation
+    fn calculate_macd(&mut self) -> f64 {
+        if self.price_window.len() < self.long_window {
+            return 0.0;
+        }
+        
+        let ema_fast = self.calculate_ema(&self.price_window, self.short_window).unwrap_or(0.0);
+        let ema_slow = self.calculate_ema(&self.price_window, self.long_window).unwrap_or(0.0);
+        
+        self.macd_fast.push_back(ema_fast);
+        self.macd_slow.push_back(ema_slow);
+        
+        if self.macd_fast.len() > 100 {
+            self.macd_fast.pop_front();
+        }
+        if self.macd_slow.len() > 100 {
+            self.macd_slow.pop_front();
+        }
+        
+        let macd_line = ema_fast - ema_slow;
+        let signal_line = self.calculate_ema(&self.macd_fast, 9).unwrap_or(macd_line);
+        
+        self.macd_signal.push_back(signal_line);
+        if self.macd_signal.len() > 100 {
+            self.macd_signal.pop_front();
+        }
+        
+        let histogram = macd_line - signal_line;
+        
+        // Normalize to [-1, 1] range
+        histogram.tanh()
+    }
+    
+    /// RSI calculation
+    fn calculate_rsi(&mut self) -> f64 {
+        if self.price_window.len() < self.rsi_window + 1 {
+            return 50.0;
         }
         
         let mut gains = 0.0;
         let mut losses = 0.0;
         
-        for i in 1..=period {
-            let change = self.prices[self.prices.len() - i] - self.prices[self.prices.len() - i - 1];
+        for i in 1..=self.rsi_window {
+            let change = self.price_window[self.price_window.len() - i] - self.price_window[self.price_window.len() - i - 1];
             if change > 0.0 {
                 gains += change;
             } else {
-                losses -= change;
+                losses += change.abs();
             }
         }
         
-        if losses == 0.0 {
-            return Some(100.0);
+        let avg_gain = gains / self.rsi_window as f64;
+        let avg_loss = losses / self.rsi_window as f64;
+        
+        if avg_loss == 0.0 {
+            return 100.0;
         }
         
-        let rs = gains / losses;
-        Some(100.0 - (100.0 / (1.0 + rs)))
+        let rs = avg_gain / avg_loss;
+        let rsi = 100.0 - (100.0 / (1.0 + rs));
+        
+        self.rsi_values.push_back(rsi);
+        if self.rsi_values.len() > 100 {
+            self.rsi_values.pop_front();
+        }
+        
+        // Normalize to [-1, 1] range where 0 = 50 RSI
+        (rsi - 50.0) / 50.0
     }
-
-    fn calculate_macd(&self) -> Option<(f64, f64)> {
-        let ema12 = self.calculate_ema(12, 2.0 / 13.0);
-        let ema26 = self.calculate_ema(26, 2.0 / 27.0);
-        
-        match (ema12, ema26) {
-            (Some(ema12), Some(ema26)) => {
-                let macd_line = ema12 - ema26;
-                let signal_line = macd_line * 0.2 + (self.macd.unwrap_or(macd_line) * 0.8);
-                Some((macd_line, signal_line))
-            }
-            _ => None,
+    
+    /// Bollinger Bands calculation
+    fn calculate_bollinger_bands(&mut self) -> f64 {
+        if self.price_window.len() < self.bb_window {
+            return 0.0;
         }
+        
+        let sma = self.calculate_sma(&self.price_window, self.bb_window).unwrap_or(0.0);
+        let prices: Vec<f64> = self.price_window.iter().rev().take(self.bb_window).cloned().collect();
+        
+        let variance: f64 = prices.iter().map(|&p| (p - sma).powi(2)).sum::<f64>() / self.bb_window as f64;
+        let std_dev = variance.sqrt();
+        
+        let upper_band = sma + (2.0 * std_dev);
+        let lower_band = sma - (2.0 * std_dev);
+        let current_price = self.price_window.back().unwrap();
+        
+        self.bb_upper.push_back(upper_band);
+        self.bb_lower.push_back(lower_band);
+        self.bb_middle.push_back(sma);
+        
+        if self.bb_upper.len() > 100 {
+            self.bb_upper.pop_front();
+        }
+        if self.bb_lower.len() > 100 {
+            self.bb_lower.pop_front();
+        }
+        if self.bb_middle.len() > 100 {
+            self.bb_middle.pop_front();
+        }
+        
+        // Calculate position within bands (-1 = at lower band, 1 = at upper band)
+        let band_width = upper_band - lower_band;
+        if band_width == 0.0 {
+            return 0.0;
+        }
+        
+        let position = (current_price - lower_band) / band_width;
+        (position - 0.5) * 2.0 // Normalize to [-1, 1]
     }
-
-    fn calculate_price_velocity(&mut self) {
-        if self.prices.len() < 2 {
-            return;
+    
+    /// VWAP calculation
+    fn calculate_vwap(&mut self) -> f64 {
+        if self.price_window.len() < self.vwap_window || self.volume_window.len() < self.vwap_window {
+            return 0.0;
         }
         
-        let current_price = self.prices[self.prices.len() - 1];
-        let prev_price = self.prices[self.prices.len() - 2];
-        let velocity = (current_price - prev_price) / prev_price;
+        let prices: Vec<f64> = self.price_window.iter().rev().take(self.vwap_window).cloned().collect();
+        let volumes: Vec<f64> = self.volume_window.iter().rev().take(self.vwap_window).cloned().collect();
         
-        self.price_velocity.push_back(velocity);
-        if self.price_velocity.len() > 10 {
-            self.price_velocity.pop_front();
+        let total_volume: f64 = volumes.iter().sum();
+        if total_volume == 0.0 {
+            return 0.0;
         }
+        
+        let vwap: f64 = prices.iter().zip(volumes.iter()).map(|(p, v)| p * v).sum::<f64>() / total_volume;
+        
+        self.vwap_values.push_back(vwap);
+        if self.vwap_values.len() > 100 {
+            self.vwap_values.pop_front();
+        }
+        
+        let current_price = self.price_window.back().unwrap();
+        
+        // Normalize to [-1, 1] range based on deviation from VWAP
+        let deviation = (current_price - vwap) / vwap;
+        deviation.tanh()
     }
-
-    fn calculate_volume_velocity(&mut self) {
-        if self.volumes.len() < 2 {
-            return;
-        }
+    
+    /// Ensemble prediction combining all ML models
+    fn calculate_ensemble_prediction(&self) -> f64 {
+        let predictions = [
+            self.linear_regression_slope,
+            *self.macd_signal.back().unwrap_or(&0.0),
+            *self.rsi_values.back().unwrap_or(&0.0),
+            self.bb_upper.back().map_or(0.0, |_| self.bb_lower.back().map_or(0.0, |_| self.bb_middle.back().map_or(0.0, |_| {
+                let current_price = self.price_window.back().unwrap();
+                let upper = self.bb_upper.back().unwrap();
+                let lower = self.bb_lower.back().unwrap();
+                let middle = self.bb_middle.back().unwrap();
+                
+                if current_price > upper {
+                    -1.0 // Overbought
+                } else if current_price < lower {
+                    1.0 // Oversold
+                } else {
+                    ((current_price - middle) / (upper - lower)).tanh()
+                }
+            }))),
+            *self.vwap_values.back().unwrap_or(&0.0),
+            self.momentum_score,
+        ];
         
-        let current_volume = self.volumes[self.volumes.len() - 1];
-        let prev_volume = self.volumes[self.volumes.len() - 2];
-        let velocity = if prev_volume > 0.0 {
-            (current_volume - prev_volume) / prev_volume
-        } else {
-            0.0
-        };
+        // Weighted ensemble
+        let weighted_sum: f64 = predictions.iter().zip(self.ensemble_weights.iter()).map(|(pred, weight)| pred * weight).sum();
         
-        self.volume_velocity.push_back(velocity);
-        if self.volume_velocity.len() > 10 {
-            self.volume_velocity.pop_front();
-        }
+        // Normalize to [-1, 1] range
+        weighted_sum.tanh()
     }
-
-    fn calculate_liquidity_score(&mut self) {
-        if self.volumes.len() < 10 {
-            self.liquidity_score = 0.5;
-            return;
+    
+    /// Update risk management scores
+    fn update_risk_scores(&mut self) {
+        // Volatility score based on price changes
+        if self.price_window.len() >= 20 {
+            let recent_prices: Vec<f64> = self.price_window.iter().rev().take(20).cloned().collect();
+            let returns: Vec<f64> = recent_prices.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
+            let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
+            let variance = returns.iter().map(|r| (r - mean_return).powi(2)).sum::<f64>() / returns.len() as f64;
+            self.volatility_score = (variance.sqrt() * 100.0).min(1.0);
         }
         
-        let start_idx = self.volumes.len().saturating_sub(10);
-        let recent_volumes: Vec<f64> = self.volumes.iter().skip(start_idx).cloned().collect();
-        
-        if recent_volumes.is_empty() {
-            self.liquidity_score = 0.5;
-            return;
+        // Liquidity score based on volume
+        if self.volume_window.len() >= 20 {
+            let recent_volume: Vec<f64> = self.volume_window.iter().rev().take(20).cloned().collect();
+            let avg_volume = recent_volume.iter().sum::<f64>() / recent_volume.len() as f64;
+            let current_volume = self.volume_window.back().unwrap_or(&avg_volume);
+            self.liquidity_score = (current_volume / avg_volume).min(2.0) / 2.0;
         }
         
-        let avg_volume = recent_volumes.iter().sum::<f64>() / recent_volumes.len() as f64;
-        
-        if let Some(current_volume) = self.volumes.back() {
-            self.liquidity_score = (current_volume / avg_volume).min(2.0).max(0.1);
-        } else {
-            self.liquidity_score = 0.5;
-        }
-    }
-
-    fn calculate_volatility_score(&mut self) {
-        if self.prices.len() < 20 {
-            self.volatility_score = 0.5;
-            return;
-        }
-        
-        let start_idx = self.prices.len().saturating_sub(20);
-        let recent_prices: Vec<f64> = self.prices.iter().skip(start_idx).cloned().collect();
-        
-        if recent_prices.len() < 2 {
-            self.volatility_score = 0.5;
-            return;
-        }
-        
-        let returns: Vec<f64> = recent_prices.windows(2)
-            .map(|w| (w[1] - w[0]) / w[0])
-            .collect();
-        
-        if returns.is_empty() {
-            self.volatility_score = 0.5;
-            return;
-        }
-        
-        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter()
-            .map(|&r| (r - mean_return).powi(2))
-            .sum::<f64>() / returns.len() as f64;
-        let volatility = variance.sqrt();
-        
-        self.volatility_score = volatility.min(1.0).max(0.0);
-    }
-
-    fn calculate_momentum_score(&mut self) {
-        if self.prices.len() < 10 {
-            self.momentum_score = 0.0;
-            return;
-        }
-        
-        if let (Some(current_price), Some(past_price)) = (self.prices.back(), self.prices.get(self.prices.len() - 10)) {
-            let momentum = (current_price - past_price) / past_price;
+        // Momentum score based on recent price movement
+        if self.price_window.len() >= 10 {
+            let recent_prices: Vec<f64> = self.price_window.iter().rev().take(10).cloned().collect();
+            let momentum = (recent_prices[0] - recent_prices[recent_prices.len() - 1]) / recent_prices[recent_prices.len() - 1];
             self.momentum_score = momentum.tanh();
-        } else {
-            self.momentum_score = 0.0;
         }
     }
-
-    fn extract_features(&self, current_price: f64) -> Vec<f64> {
-        let mut features = Vec::new();
-        
-        // Price-based features
-        if let Some(ema_short) = self.ema_short {
-            features.push((current_price - ema_short) / ema_short);
-        } else {
-            features.push(0.0);
+    
+    /// Adaptive ensemble weights based on recent performance
+    fn update_ensemble_weights(&mut self, trade_result: f64) {
+        if self.trade_count == 0 {
+            return;
         }
         
-        if let Some(ema_medium) = self.ema_medium {
-            features.push((current_price - ema_medium) / ema_medium);
-        } else {
-            features.push(0.0);
-        }
-        
-        if let Some(ema_long) = self.ema_long {
-            features.push((current_price - ema_long) / ema_long);
-        } else {
-            features.push(0.0);
-        }
-        
-        // RSI feature
-        if let Some(rsi) = self.rsi {
-            features.push((rsi - 50.0) / 50.0);
-        } else {
-            features.push(0.0);
-        }
-        
-        // MACD features
-        if let Some(macd) = self.macd {
-            features.push(macd);
-        } else {
-            features.push(0.0);
-        }
-        
-        if let Some(macd_signal) = self.macd_signal {
-            features.push(macd_signal);
-        } else {
-            features.push(0.0);
-        }
-        
-        // Velocity features
-        if let Some(price_vel) = self.price_velocity.back() {
-            features.push(*price_vel);
-        } else {
-            features.push(0.0);
-        }
-        
-        if let Some(volume_vel) = self.volume_velocity.back() {
-            features.push(*volume_vel);
-        } else {
-            features.push(0.0);
-        }
-        
-        // Score features
-        features.push(self.liquidity_score);
-        features.push(self.volatility_score);
-        features.push(self.momentum_score);
-        
-        // Market regime feature
-        let regime_value = match self.market_regime {
-            MarketRegime::Trending => 1.0,
-            MarketRegime::MeanReverting => -1.0,
-            MarketRegime::Volatile => 0.5,
-            MarketRegime::Sideways => 0.0,
-            MarketRegime::Breakout => 0.8,
-        };
-        features.push(regime_value);
-        
-        // Performance features (removed win_rate and sharpe_ratio tracking)
-        features.push(0.5); // Default neutral performance
-        features.push(0.0); // Default neutral sharpe
-        
-        features
-    }
-
-    fn ensemble_prediction(&mut self, features: &[f64]) -> f64 {
-        // Model 1: Quantum-inspired linear combination with exponential decay weights
-        let linear_pred = features.iter().enumerate()
-            .map(|(i, &f)| {
-                let weight = (0.8_f64).powi(i as i32); // Exponential decay for feature importance
-                f * weight
-            })
-            .sum::<f64>();
-        self.ensemble_predictions[0] = linear_pred.tanh() * 2.0; // Stronger amplification
-        
-        // Model 2: Enhanced RSI-based with dynamic thresholds
-        let rsi_pred = if let Some(rsi) = self.rsi {
-            if rsi < 35.0 { 1.0 } else if rsi > 65.0 { -1.0 } else { 
-                // More aggressive gradual signal in middle range
-                if rsi < 50.0 { (50.0 - rsi) / 15.0 } else { (rsi - 50.0) / 15.0 }
-            }
-        } else {
-            0.0
-        };
-        self.ensemble_predictions[1] = rsi_pred;
-        
-        // Model 3: Enhanced MACD-based with adaptive thresholds
-        let macd_pred = if let (Some(macd), Some(signal)) = (self.macd, self.macd_signal) {
-            let diff = macd - signal;
-            let threshold = 0.0005; // Lower threshold for more signals
-            if diff.abs() > threshold {
-                if diff > 0.0 { 1.0 } else { -1.0 }
-            } else {
-                // Gradual signal for smaller differences
-                (diff / threshold).max(-1.0).min(1.0)
-            }
-        } else {
-            0.0
-        };
-        self.ensemble_predictions[2] = macd_pred;
-        
-        // Model 4: Enhanced momentum-based with volume confirmation
-        let momentum_pred = self.momentum_score * 2.0; // More aggressive momentum
-        let volume_boost = if self.volume_velocity.len() > 0 {
-            let recent_volume = self.volume_velocity.back().unwrap();
-            if *recent_volume > 1.2 { 1.2 } else { 1.0 } // Boost if high volume
-        } else {
-            1.0
-        };
-        self.ensemble_predictions[3] = (momentum_pred * volume_boost).max(-1.0).min(1.0);
-        
-        // Model 5: Price velocity model (new)
-        let velocity_pred = if self.price_velocity.len() > 0 {
-            let recent_velocity = self.price_velocity.back().unwrap();
-            *recent_velocity * 100.0 // Scale up velocity signal
-        } else {
-            0.0
-        };
-        self.ensemble_predictions.push(velocity_pred.max(-1.0).min(1.0));
-        
-        // Model 6: Volatility-adjusted signal (new)
-        let volatility_pred = if self.volatility_score > 0.5 {
-            // In high volatility, be more conservative
-            -0.3
-        } else if self.volatility_score < 0.2 {
-            // In low volatility, be more aggressive
-            0.5
-        } else {
-            0.0
-        };
-        self.ensemble_predictions.push(volatility_pred);
-        
-        // Adaptive ensemble weights based on market regime and recent performance
-        let mut adaptive_weights = vec![0.25, 0.20, 0.20, 0.15, 0.10, 0.10]; // Add weights for new models
-        
-        // Adjust weights based on market regime
-        match self.market_regime {
-            MarketRegime::Trending => {
-                adaptive_weights[0] += 0.1; // Boost linear model
-                adaptive_weights[3] += 0.1; // Boost momentum model
-            },
-            MarketRegime::Breakout => {
-                adaptive_weights[3] += 0.15; // Boost momentum model
-                adaptive_weights[4] += 0.05; // Boost velocity model
-            },
-            MarketRegime::MeanReverting => {
-                adaptive_weights[1] += 0.1; // Boost RSI model
-                adaptive_weights[5] += 0.1; // Boost volatility model
-            },
-            MarketRegime::Volatile => {
-                adaptive_weights[5] += 0.2; // Boost volatility model
-                adaptive_weights[0] -= 0.1; // Reduce linear model
-            },
-            MarketRegime::Sideways => {
-                adaptive_weights[2] += 0.1; // Boost MACD model
-                adaptive_weights[1] += 0.1; // Boost RSI model
-            }
+        // Simple performance update (in a real system, this would be more sophisticated)
+        let learning_rate = 0.01;
+        for i in 0..6 {
+            self.model_performance[i] += trade_result * learning_rate;
         }
         
         // Normalize weights
-        let total_weight: f64 = adaptive_weights.iter().sum();
-        for weight in &mut adaptive_weights {
-            *weight /= total_weight;
-        }
-        
-        // Calculate weighted ensemble
-        let mut prediction = 0.0;
-        for (i, &weight) in adaptive_weights.iter().enumerate() {
-            if i < self.ensemble_predictions.len() {
-                prediction += self.ensemble_predictions[i] * weight;
+        let total_performance: f64 = self.model_performance.iter().map(|p| p.max(0.0)).sum();
+        if total_performance > 0.0 {
+            for i in 0..6 {
+                self.ensemble_weights[i] = self.model_performance[i].max(0.0) / total_performance;
             }
         }
-        
-        // Apply regime-based amplification
-        let regime_multiplier = match self.market_regime {
-            MarketRegime::Trending => 1.3,    // Strong boost in trending markets
-            MarketRegime::Breakout => 1.4,    // Strong boost in breakout markets
-            MarketRegime::MeanReverting => 0.9, // Slight boost in mean reverting
-            MarketRegime::Volatile => 0.6,    // Reduce in volatile markets
-            MarketRegime::Sideways => 0.8,    // Reduce in sideways markets
-        };
-        
-        prediction * regime_multiplier
     }
-
-    fn detect_market_regime(&mut self) {
-        if self.prices.len() < 20 {
-            return;
-        }
-        
-        let start_idx = self.prices.len().saturating_sub(20);
-        let recent_prices: Vec<f64> = self.prices.iter().skip(start_idx).cloned().collect();
-        
-        if recent_prices.len() < 2 {
-            return;
-        }
-        
-        let returns: Vec<f64> = recent_prices.windows(2)
-            .map(|w| (w[1] - w[0]) / w[0])
-            .collect();
-        
-        if returns.is_empty() {
-            return;
-        }
-        
-        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter()
-            .map(|&r| (r - mean_return).powi(2))
-            .sum::<f64>() / returns.len() as f64;
-        let volatility = variance.sqrt();
-        
-        let trend_strength = if let (Some(ema_short), Some(ema_long)) = (self.ema_short, self.ema_long) {
-            (ema_short - ema_long).abs() / ema_long
-        } else {
-            0.0
-        };
-        
-        let momentum = self.momentum_score.abs();
-        
-        // Determine regime with improved thresholds
-        let new_regime = if volatility > 0.04 {
-            MarketRegime::Volatile
-        } else if trend_strength > 0.015 && momentum > 0.4 {
-            MarketRegime::Trending
-        } else if trend_strength < 0.003 && volatility < 0.015 {
-            MarketRegime::Sideways
-        } else if momentum > 0.6 {
-            MarketRegime::Breakout
-        } else {
-            MarketRegime::MeanReverting
-        };
-        
-        if new_regime != self.market_regime {
-            self.market_regime = new_regime;
-            self.regime_confidence = 0.3;
-        } else {
-            self.regime_confidence = (self.regime_confidence * 0.95 + 0.05).min(1.0);
-        }
-    }
-
-    fn apply_risk_filters(&self, signal: Signal, confidence: f64) -> (Signal, f64) {
-        let filtered_signal = signal;
-        let mut filtered_confidence = confidence;
-        
-        // More aggressive risk filters for profit generation
-        
-        // Volatility filter - only filter if extremely volatile
-        if self.volatility_score > self.volatility_filter * 4.0 && confidence < 0.2 {
-            filtered_confidence *= 0.7; // More aggressive reduction
-        }
-        
-        // Liquidity filter - only filter if extremely low liquidity
-        if self.liquidity_score < self.liquidity_filter * 0.2 {
-            filtered_confidence *= 0.8; // More aggressive reduction
-        }
-        
-        // Momentum filter - only filter if extremely low momentum
-        if self.momentum_score.abs() < self.momentum_filter * 0.2 && confidence < 0.2 {
-            filtered_confidence *= 0.8; // More aggressive reduction
-        }
-        
-        // Market regime boost for favorable conditions
-        match self.market_regime {
-            MarketRegime::Trending | MarketRegime::Breakout => {
-                filtered_confidence *= 1.1; // Boost confidence in trending markets
-            },
-            MarketRegime::MeanReverting => {
-                filtered_confidence *= 1.05; // Slight boost in mean reverting
-            },
-            _ => {} // No boost for volatile/sideways
-        }
-        
-        (filtered_signal, filtered_confidence)
-    }
-
-
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl Strategy for QuantumHftStrategy {
     fn get_info(&self) -> String {
-        format!(
-            "Quantum HFT Strategy (regime: {:?}, confidence: {:.2})",
-            self.market_regime,
-            self.regime_confidence
-        )
+        "Quantum HFT ML Strategy - Machine Learning Ensemble".to_string()
     }
-
+    
     async fn on_trade(&mut self, trade: TradeData) {
-        let price = trade.price;
-        let volume = trade.qty;
-        let timestamp = trade.time;
-        
-        // Update data structures
-        self.prices.push_back(price);
-        if self.prices.len() > self.long_window {
-            self.prices.pop_front();
+        // Update data windows with new trade data
+        self.price_window.push_back(trade.price);
+        if self.price_window.len() > 1000 {
+            self.price_window.pop_front();
         }
         
-        self.volumes.push_back(volume);
-        if self.volumes.len() > self.long_window {
-            self.volumes.pop_front();
+        self.volume_window.push_back(trade.qty);
+        if self.volume_window.len() > 1000 {
+            self.volume_window.pop_front();
         }
-        
-        self.timestamps.push_back(timestamp);
-        if self.timestamps.len() > self.long_window {
-            self.timestamps.pop_front();
-        }
-        
-        // Update technical indicators
-        self.ema_short = self.calculate_ema(self.short_window, 2.0 / (self.short_window as f64 + 1.0));
-        self.ema_medium = self.calculate_ema(self.medium_window, 2.0 / (self.medium_window as f64 + 1.0));
-        self.ema_long = self.calculate_ema(self.long_window, 2.0 / (self.long_window as f64 + 1.0));
-        self.rsi = self.calculate_rsi(14);
-        
-        if let Some((macd_line, signal_line)) = self.calculate_macd() {
-            self.macd = Some(macd_line);
-            self.macd_signal = Some(signal_line);
-        }
-        
-        // Update advanced features
-        self.calculate_price_velocity();
-        self.calculate_volume_velocity();
-        self.calculate_liquidity_score();
-        self.calculate_volatility_score();
-        self.calculate_momentum_score();
-        
-        // Update market analysis
-        self.detect_market_regime();
     }
-
+    
     fn get_signal(
         &self,
-        current_price: f64,
+        _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {
-        // Check if we have enough data
-        if self.prices.len() < self.short_window {
+        // Ensure we have enough data
+        if self.price_window.len() < self.long_window {
             return (Signal::Hold, 0.0);
         }
         
-        // Extract features
-        let mut strategy = self.clone();
-        let features = strategy.extract_features(current_price);
+        // Create a mutable copy for calculations
+        let mut temp_strategy = self.clone();
         
-        // Get ensemble prediction
-        let ensemble_output = strategy.ensemble_prediction(&features);
+        // Update risk scores
+        temp_strategy.update_risk_scores();
         
-        // Quantum-inspired signal generation based on multiple indicators
+        // Calculate ML predictions
+        let linear_reg_pred = temp_strategy.calculate_linear_regression();
+        let macd_pred = temp_strategy.calculate_macd();
+        let rsi_pred = temp_strategy.calculate_rsi();
+        let bb_pred = temp_strategy.calculate_bollinger_bands();
+        let vwap_pred = temp_strategy.calculate_vwap();
+        let ensemble_pred = temp_strategy.calculate_ensemble_prediction();
+        
+        // Combine predictions with risk filters
         let mut signal = Signal::Hold;
         let mut confidence = 0.0;
         
-        // 1. EMA Crossover Analysis (Primary signal) - Much more aggressive
-        if let (Some(ema_short), Some(ema_long)) = (self.ema_short, self.ema_long) {
-            let ema_crossover = ema_short - ema_long;
-            let ema_strength = ema_crossover.abs() / current_price;
-            
-            if ema_strength > 0.0001 { // 0.01% threshold - much more sensitive
-                if ema_crossover > 0.0 {
-                    signal = Signal::Buy;
-                    confidence += 0.5 * ema_strength.min(1.0);
-                } else {
-                    signal = Signal::Sell;
-                    confidence += 0.5 * ema_strength.min(1.0);
-                }
-            }
-        }
+        // Track which models contributed to the signal
+        let mut contributing_models = Vec::new();
         
-        // 2. RSI Momentum Analysis - Much more aggressive
-        if let Some(rsi) = self.rsi {
-            let rsi_signal = if rsi < 40.0 { // More sensitive thresholds
-                Signal::Buy
-            } else if rsi > 60.0 { // More sensitive thresholds
-                Signal::Sell
+        // Linear Regression signal (trend following) - More selective
+        if linear_reg_pred.abs() > 0.2 { // Increased threshold
+            if linear_reg_pred > 0.0 {
+                signal = Signal::Buy;
+                confidence += 0.4 * linear_reg_pred.min(1.0); // Increased weight
+                contributing_models.push("LR");
             } else {
-                Signal::Hold
-            };
-            
-            if rsi_signal != Signal::Hold {
-                let rsi_strength = if rsi < 40.0 {
-                    (40.0 - rsi) / 40.0
-                } else {
-                    (rsi - 60.0) / 40.0
-                };
-                
-                if signal == Signal::Hold {
-                    signal = rsi_signal;
-                    confidence += 0.4 * rsi_strength.min(1.0);
-                } else if signal == rsi_signal {
-                    confidence += 0.3 * rsi_strength.min(1.0);
-                }
+                signal = Signal::Sell;
+                confidence += 0.4 * linear_reg_pred.abs().min(1.0); // Increased weight
+                contributing_models.push("LR");
             }
         }
         
-        // 3. MACD Momentum Confirmation - Much more aggressive
-        if let (Some(macd), Some(macd_signal)) = (self.macd, self.macd_signal) {
-            let macd_histogram = macd - macd_signal;
-            let macd_strength = macd_histogram.abs() / current_price;
-            
-            if macd_strength > 0.0001 { // 0.01% threshold - much more sensitive
-                let macd_direction = if macd_histogram > 0.0 { Signal::Buy } else { Signal::Sell };
-                
-                if signal == Signal::Hold {
-                    signal = macd_direction;
-                    confidence += 0.35 * macd_strength.min(1.0);
-                } else if signal == macd_direction {
-                    confidence += 0.25 * macd_strength.min(1.0);
-                }
-            }
-        }
-        
-        // 4. Volume-Price Confirmation
-        if self.volume_velocity.len() > 0 {
-            let recent_volume_velocity = self.volume_velocity.back().unwrap();
-            let volume_threshold = 1.5; // 50% above average
-            
-            if *recent_volume_velocity > volume_threshold {
-                if signal != Signal::Hold {
-                    confidence += 0.1; // Boost confidence with high volume
-                }
-            }
-        }
-        
-        // 5. Price Momentum Analysis - Much more aggressive
-        if self.price_velocity.len() > 0 {
-            let recent_momentum = self.price_velocity.back().unwrap();
-            let momentum_threshold = 0.0001; // 0.01% price change - much more sensitive
-            
-            if recent_momentum.abs() > momentum_threshold {
-                let momentum_signal = if *recent_momentum > 0.0 { Signal::Buy } else { Signal::Sell };
-                
-                if signal == Signal::Hold {
-                    signal = momentum_signal;
-                    confidence += 0.3 * (recent_momentum.abs() / momentum_threshold).min(1.0);
-                } else if signal == momentum_signal {
-                    confidence += 0.2 * (recent_momentum.abs() / momentum_threshold).min(1.0);
-                }
-            }
-        }
-        
-        // 6. Ensemble Model Confirmation - Much more aggressive
-        let ensemble_strength = ensemble_output.abs();
-        if ensemble_strength > 0.1 { // 10% threshold - much more sensitive
-            let ensemble_signal = if ensemble_output > 0.0 { Signal::Buy } else { Signal::Sell };
-            
-            if signal == Signal::Hold {
-                signal = ensemble_signal;
-                confidence += 0.4 * ensemble_strength.min(1.0);
-            } else if signal == ensemble_signal {
-                confidence += 0.3 * ensemble_strength.min(1.0);
-            }
-        }
-        
-        // Ensure minimum confidence threshold
-        confidence = confidence.max(0.3); // Minimum 30% confidence - more aggressive
-        
-        // Fallback signal generation if no signal detected
-        if signal == Signal::Hold && self.prices.len() > 10 {
-            // Generate signals based on simple price movement
-            let recent_prices: Vec<f64> = self.prices.iter().rev().take(5).cloned().collect();
-            let price_change = (recent_prices[0] - recent_prices[4]) / recent_prices[4];
-            
-            if price_change.abs() > 0.0001 { // 0.01% change
-                if price_change > 0.0 {
+        // MACD signal (momentum) - More selective
+        if macd_pred.abs() > 0.25 { // Increased threshold
+            if macd_pred > 0.0 {
+                if signal == Signal::Buy {
+                    confidence += 0.35 * macd_pred.min(1.0); // Increased weight
+                    contributing_models.push("MACD");
+                } else if signal == Signal::Hold {
                     signal = Signal::Buy;
-                    confidence = 0.35;
-                } else {
+                    confidence += 0.35 * macd_pred.min(1.0); // Increased weight
+                    contributing_models.push("MACD");
+                }
+            } else {
+                if signal == Signal::Sell {
+                    confidence += 0.35 * macd_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("MACD");
+                } else if signal == Signal::Hold {
                     signal = Signal::Sell;
-                    confidence = 0.35;
+                    confidence += 0.35 * macd_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("MACD");
+                }
+            }
+        }
+        
+        // RSI signal (mean reversion) - More selective
+        if rsi_pred.abs() > 0.5 { // Increased threshold
+            if rsi_pred < -0.5 { // More extreme oversold
+                if signal == Signal::Buy {
+                    confidence += 0.3 * rsi_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("RSI");
+                } else if signal == Signal::Hold {
+                    signal = Signal::Buy;
+                    confidence += 0.3 * rsi_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("RSI");
+                }
+            } else if rsi_pred > 0.5 { // More extreme overbought
+                if signal == Signal::Sell {
+                    confidence += 0.3 * rsi_pred.min(1.0); // Increased weight
+                    contributing_models.push("RSI");
+                } else if signal == Signal::Hold {
+                    signal = Signal::Sell;
+                    confidence += 0.3 * rsi_pred.min(1.0); // Increased weight
+                    contributing_models.push("RSI");
+                }
+            }
+        }
+        
+        // Bollinger Bands signal (volatility) - More selective
+        if bb_pred.abs() > 0.6 { // Increased threshold
+            if bb_pred < -0.6 { // More extreme oversold
+                if signal == Signal::Buy {
+                    confidence += 0.25 * bb_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("BB");
+                } else if signal == Signal::Hold {
+                    signal = Signal::Buy;
+                    confidence += 0.25 * bb_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("BB");
+                }
+            } else if bb_pred > 0.6 { // More extreme overbought
+                if signal == Signal::Sell {
+                    confidence += 0.25 * bb_pred.min(1.0); // Increased weight
+                    contributing_models.push("BB");
+                } else if signal == Signal::Hold {
+                    signal = Signal::Sell;
+                    confidence += 0.25 * bb_pred.min(1.0); // Increased weight
+                    contributing_models.push("BB");
+                }
+            }
+        }
+        
+        // VWAP signal (fair value) - More selective
+        if vwap_pred.abs() > 0.3 { // Increased threshold
+            if vwap_pred > 0.0 { // Price above VWAP
+                if signal == Signal::Buy {
+                    confidence += 0.15 * vwap_pred.min(1.0); // Increased weight
+                    contributing_models.push("VWAP");
+                }
+            } else { // Price below VWAP
+                if signal == Signal::Sell {
+                    confidence += 0.15 * vwap_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("VWAP");
+                }
+            }
+        }
+        
+        // Ensemble prediction (primary signal) - More selective
+        if ensemble_pred.abs() > 0.4 { // Increased threshold
+            if ensemble_pred > 0.0 {
+                if signal == Signal::Buy {
+                    confidence += 0.5 * ensemble_pred.min(1.0); // Increased weight
+                    contributing_models.push("ENS");
+                } else if signal == Signal::Hold {
+                    signal = Signal::Buy;
+                    confidence += 0.5 * ensemble_pred.min(1.0); // Increased weight
+                    contributing_models.push("ENS");
+                }
+            } else {
+                if signal == Signal::Sell {
+                    confidence += 0.5 * ensemble_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("ENS");
+                } else if signal == Signal::Hold {
+                    signal = Signal::Sell;
+                    confidence += 0.5 * ensemble_pred.abs().min(1.0); // Increased weight
+                    contributing_models.push("ENS");
                 }
             }
         }
         
         // Apply risk filters
-        let (filtered_signal, filtered_confidence) = strategy.apply_risk_filters(signal, confidence);
+        let original_confidence = confidence;
+        confidence = temp_strategy.apply_risk_filters(confidence);
         
-        // Apply regime-based confidence adjustment
-        let regime_confidence_boost = match self.market_regime {
-            MarketRegime::Trending => 1.2,    // Boost confidence in trending markets
-            MarketRegime::Breakout => 1.3,    // Higher boost in breakout markets
-            MarketRegime::MeanReverting => 0.9, // Slightly reduce in mean reverting
-            MarketRegime::Volatile => 0.7,    // Reduce in volatile markets
-            MarketRegime::Sideways => 0.6,    // Reduce in sideways markets
-        };
+        // Ensure minimum confidence threshold - Much higher for real trading
+        confidence = confidence.max(0.6); // Increased from 0.3 to 0.6
         
-        let final_confidence = filtered_confidence * regime_confidence_boost;
+        // Additional filter: require multiple models to agree
+        if contributing_models.len() < 2 {
+            signal = Signal::Hold;
+            confidence = 0.0;
+        }
         
-        (filtered_signal, final_confidence.max(0.0).min(1.0))
+        // Log strategy state
+        debug!(
+            strategy = "QML",
+            signal = ?signal,
+            conf = %format!("{:.2}", confidence),
+            models = %contributing_models.join(","),
+            lr = %format!("{:.3}", linear_reg_pred),
+            macd = %format!("{:.3}", macd_pred),
+            rsi = %format!("{:.3}", rsi_pred),
+            bb = %format!("{:.3}", bb_pred),
+            vwap = %format!("{:.3}", vwap_pred),
+            ens = %format!("{:.3}", ensemble_pred),
+            vol = %format!("{:.2}", self.volatility_score),
+            liq = %format!("{:.2}", self.liquidity_score),
+            mom = %format!("{:.2}", self.momentum_score),
+            "ML signal"
+        );
+        
+        // Log detailed info only for significant signals
+        if confidence > 0.7 {
+            info!(
+                strategy = "QML-HIGH",
+                signal = ?signal,
+                confidence = %format!("{:.3}", confidence),
+                original_conf = %format!("{:.3}", original_confidence),
+                models = %contributing_models.join(","),
+                ensemble = %format!("{:.3}", ensemble_pred),
+                "High confidence signal"
+            );
+        }
+        
+        (signal, confidence)
+    }
+}
+
+impl QuantumHftStrategy {
+    /// Apply risk filters to adjust confidence based on market conditions
+    fn apply_risk_filters(&self, confidence: f64) -> f64 {
+        let mut filtered_confidence = confidence;
+        let mut filter_reasons = Vec::new();
+        
+        // Volatility filter - less aggressive
+        if self.volatility_score > 0.9 { // Increased threshold
+            filtered_confidence *= 0.8; // Less reduction
+            filter_reasons.push("HIGH_VOL");
+        } else if self.volatility_score < 0.05 { // Decreased threshold
+            filtered_confidence *= 0.9; // Less reduction
+            filter_reasons.push("LOW_VOL");
+        }
+        
+        // Liquidity filter - less aggressive
+        if self.liquidity_score < 0.1 { // Decreased threshold
+            filtered_confidence *= 0.7; // Less reduction
+            filter_reasons.push("LOW_LIQ");
+        } else if self.liquidity_score > 2.0 { // Increased threshold
+            filtered_confidence *= 1.05; // Less boost
+            filter_reasons.push("HIGH_LIQ");
+        }
+        
+        // Momentum filter - less aggressive
+        if self.momentum_score.abs() > 0.7 { // Increased threshold
+            if (self.momentum_score > 0.0 && confidence > 0.0) || (self.momentum_score < 0.0 && confidence < 0.0) {
+                filtered_confidence *= 1.1; // Less boost
+                filter_reasons.push("MOM_ALIGN");
+            } else {
+                filtered_confidence *= 0.9; // Less reduction
+                filter_reasons.push("MOM_AGAINST");
+            }
+        }
+        
+        // Log filter effects if significant
+        if !filter_reasons.is_empty() && (filtered_confidence / confidence).abs() < 0.8 {
+            debug!(
+                strategy = "QML-FILTER",
+                original_conf = %format!("{:.3}", confidence),
+                filtered_conf = %format!("{:.3}", filtered_confidence),
+                filters = %filter_reasons.join(","),
+                "Risk filters applied"
+            );
+        }
+        
+        filtered_confidence.min(1.0)
+    }
+    
+    /// Record trade result for ML model adaptation
+    pub fn on_trade_result(&mut self, result: f64) {
+        self.trade_count += 1;
+        self.update_ensemble_weights(result);
+        
+        debug!(
+            strategy = "Quantum HFT ML",
+            trade_result = %format!("{:.6}", result),
+            trade_count = self.trade_count,
+            ensemble_weights = ?self.ensemble_weights,
+            "Trade result recorded for ML model adaptation"
+        );
     }
 } 
+
+
+

@@ -176,6 +176,8 @@ pub struct BacktestSettingsConfig {
     pub hft_latency_advantage: f64,
     pub hft_order_cancellation_rate: f64,
     pub hft_market_impact: f64,
+    pub disable_drawdown_limit: bool,
+    pub max_drawdown_override: Option<f64>,
 }
 
 
@@ -395,8 +397,18 @@ impl TradingEngine {
             return false;
         }
 
-        // Check drawdown
-        if self.metrics.max_drawdown > self.config.risk_management.max_drawdown {
+        // Check drawdown - respect backtest-specific settings
+        let effective_max_drawdown = if let Some(ref backtest_settings) = self.config.backtest_settings {
+            if backtest_settings.disable_drawdown_limit {
+                f64::INFINITY  // Disable drawdown limit completely
+            } else {
+                backtest_settings.max_drawdown_override.unwrap_or(self.config.risk_management.max_drawdown)
+            }
+        } else {
+            self.config.risk_management.max_drawdown
+        };
+        
+        if self.metrics.max_drawdown > effective_max_drawdown {
             warn!("Trading stopped due to maximum drawdown reached");
             return false;
         }

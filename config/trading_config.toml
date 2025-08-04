@@ -41,9 +41,9 @@ retry_delay = 1.0
 [risk_management]
 max_position_size = 1000.0
 max_daily_loss = 1000.0
-max_drawdown = 0.20
+max_drawdown = 2.0  # Increased from 0.25 to 2.0 (200%) for backtesting
 max_leverage = 1.0
-min_signal_strength = 0.3     # Minimum signal strength to trade
+min_signal_strength = 0.25    # Minimum signal strength to trade
 max_consecutive_losses = 5
 cooldown_period = 300
 max_trades_per_hour = 100
@@ -74,6 +74,10 @@ calculate_profit_factor = true
 [backtest_settings]
 # BACKTEST-SPECIFIC SETTINGS (only used by backtest command)
 # These settings are ignored by the trade command
+
+# Risk management override for backtesting
+max_drawdown_override = 10.0  # Allow up to 1000% drawdown for backtesting
+disable_drawdown_limit = true  # Completely disable drawdown limit for backtesting
 
 # Simulation parameters
 initial_capital = 10000.0

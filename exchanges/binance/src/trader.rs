@@ -7,7 +7,7 @@ use binance_sdk::spot::websocket_api::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal_macros::dec;
-use tracing::{error, debug};
+use tracing::{error, debug, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 use trade::trading_engine::TradingConfig;
@@ -297,45 +297,51 @@ impl Trader for BinanceTrader {
             let data = status.data().unwrap();
 
             if let Some(account_type) = &data.account_type {
-                println!("Account Type:\t{}", account_type);
+                info!(account_type = %account_type, "Account status retrieved");
             }
 
             if let Some(uid) = &data.uid {
-                println!("UID:\t{}", uid);
+                info!(uid = %uid, "Account UID");
             }
 
             if let Some(can_trade) = data.can_trade {
-                println!("Can Trade:\t{}", can_trade);
+                info!(can_trade = %can_trade, "Trading permissions");
             }
 
             if let Some(can_withdraw) = data.can_withdraw {
-                println!("Can Withdraw:\t{}", can_withdraw);
+                info!(can_withdraw = %can_withdraw, "Withdrawal permissions");
             }
 
             if let Some(can_deposit) = data.can_deposit {
-                println!("Can Deposit:\t{}", can_deposit);
+                info!(can_deposit = %can_deposit, "Deposit permissions");
             }
 
             if let Some(permissions) = &data.permissions {
-                println!("Permissions:\t{:?}", permissions);
+                info!(permissions = ?permissions, "Account permissions");
             }
 
             if let Some(rates) = &data.commission_rates {
-                println!("\nCommission Rates:");
-                println!("  Maker:\t{}", rates.maker.as_deref().unwrap_or("N/A"));
-                println!("  Taker:\t{}", rates.taker.as_deref().unwrap_or("N/A"));
-                println!("  Buyer:\t{}", rates.buyer.as_deref().unwrap_or("N/A"));
-                println!("  Seller:\t{}", rates.seller.as_deref().unwrap_or("N/A"));
+                info!(
+                    maker_rate = %rates.maker.as_deref().unwrap_or("N/A"),
+                    taker_rate = %rates.taker.as_deref().unwrap_or("N/A"),
+                    buyer_rate = %rates.buyer.as_deref().unwrap_or("N/A"),
+                    seller_rate = %rates.seller.as_deref().unwrap_or("N/A"),
+                    "Commission rates"
+                );
             }
 
             if let Some(balances) = &data.balances {
-                println!("\nAsset\tFree\t\tLocked");
-                println!("-----\t--------\t--------");
+                info!(balance_count = balances.len(), "Account balances");
                 for b in balances {
                     let asset = b.asset.as_deref().unwrap_or("-");
                     let free = b.free.as_deref().unwrap_or("0");
                     let locked = b.locked.as_deref().unwrap_or("0");
-                    println!("{}\t{}\t{}", asset, free, locked);
+                    info!(
+                        asset = %asset,
+                        free_balance = %free,
+                        locked_balance = %locked,
+                        "Balance for asset"
+                    );
                 }
             }
         }
