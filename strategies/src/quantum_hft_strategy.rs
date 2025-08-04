@@ -413,7 +413,7 @@ impl Strategy for QuantumHftStrategy {
         // Calculate all ML predictions using current state (immutable)
         let linear_reg_pred = self.linear_regression_slope;
         let macd_pred = *self.macd_signal.back().unwrap_or(&0.0);
-        let rsi_pred = *self.rsi_values.back().unwrap_or(&50.0);
+        let rsi_pred = *self.rsi_values.back().unwrap_or(&50.0); // This is the actual RSI value (0-100)
         let bb_pred = if let (Some(upper), Some(lower), Some(middle), Some(price)) = (
             self.bb_upper.back(),
             self.bb_lower.back(),
@@ -445,123 +445,153 @@ impl Strategy for QuantumHftStrategy {
         let mut confidence = 0.0;
         let mut contributing_models = Vec::new();
         
-        // 1. TREND DETECTION (Primary signal) - More selective
+        // 1. TREND DETECTION (Primary signal) - More selective for better win rate
         let trend_strength = linear_reg_pred.abs();
-        if trend_strength > 0.3 { // Strong trend required
+        if trend_strength > 0.4 { // Increased threshold for stronger trends
             if linear_reg_pred > 0.0 {
                 signal = Signal::Buy;
-                confidence += 0.6 * trend_strength.min(1.0); // High weight for trends
+                confidence += 0.7 * trend_strength.min(1.0); // Higher weight for strong trends
                 contributing_models.push("TREND");
             } else {
                 signal = Signal::Sell;
-                confidence += 0.6 * trend_strength.min(1.0);
+                confidence += 0.7 * trend_strength.min(1.0);
                 contributing_models.push("TREND");
             }
         }
         
-        // 2. MOMENTUM CONFIRMATION (Secondary signal) - Very selective
-        if macd_pred.abs() > 0.4 { // Strong momentum required
+        // 2. MOMENTUM CONFIRMATION (Secondary signal) - More selective
+        if macd_pred.abs() > 0.5 { // Increased threshold for stronger momentum
             if macd_pred > 0.0 && signal == Signal::Buy {
-                confidence += 0.4 * macd_pred.min(1.0);
+                confidence += 0.5 * macd_pred.min(1.0); // Higher weight
                 contributing_models.push("MOM");
             } else if macd_pred < 0.0 && signal == Signal::Sell {
-                confidence += 0.4 * macd_pred.abs().min(1.0);
+                confidence += 0.5 * macd_pred.abs().min(1.0);
                 contributing_models.push("MOM");
             } else if signal == Signal::Hold {
                 // Only generate new signal if momentum is very strong
-                if macd_pred.abs() > 0.6 {
+                if macd_pred.abs() > 0.7 { // Higher threshold
                     if macd_pred > 0.0 {
                         signal = Signal::Buy;
-                        confidence += 0.5 * macd_pred.min(1.0);
+                        confidence += 0.6 * macd_pred.min(1.0);
                         contributing_models.push("MOM");
                     } else {
                         signal = Signal::Sell;
-                        confidence += 0.5 * macd_pred.abs().min(1.0);
+                        confidence += 0.6 * macd_pred.abs().min(1.0);
                         contributing_models.push("MOM");
                     }
                 }
             }
         }
         
-        // 3. MEAN REVERSION (Counter-trend opportunities) - Very selective
-        if rsi_pred < 20.0 { // Extreme oversold
+        // 3. MEAN REVERSION (Counter-trend opportunities) - Less selective
+        // RSI is already in 0-100 range from stored values
+        let rsi_actual = rsi_pred; // Use RSI value directly (0-100 range)
+        if rsi_actual < 25.0 { // Less extreme oversold (was 15.0)
             if signal == Signal::Buy {
-                confidence += 0.3; // Boost buy signal
+                confidence += 0.4; // Higher boost
                 contributing_models.push("RSI_OS");
-            } else if signal == Signal::Hold && trend_strength < 0.2 {
+            } else if signal == Signal::Hold && trend_strength < 0.15 { // Lower threshold
                 signal = Signal::Buy;
-                confidence += 0.4;
+                confidence += 0.5; // Higher confidence
                 contributing_models.push("RSI_OS");
             }
-        } else if rsi_pred > 80.0 { // Extreme overbought
+        } else if rsi_actual > 75.0 { // Less extreme overbought (was 85.0)
             if signal == Signal::Sell {
-                confidence += 0.3; // Boost sell signal
+                confidence += 0.4; // Higher boost
                 contributing_models.push("RSI_OB");
-            } else if signal == Signal::Hold && trend_strength < 0.2 {
+            } else if signal == Signal::Hold && trend_strength < 0.15 { // Lower threshold
                 signal = Signal::Sell;
-                confidence += 0.4;
+                confidence += 0.5; // Higher confidence
                 contributing_models.push("RSI_OB");
             }
         }
         
-        // 4. VOLATILITY BREAKOUTS (Bollinger Bands) - Very selective
-        if bb_pred.abs() > 0.8 { // Strong breakout required
-            if bb_pred < -0.8 { // Price below lower band (oversold)
+        // 4. VOLATILITY BREAKOUTS (Bollinger Bands) - Less selective
+        if bb_pred.abs() > 0.7 { // Lower threshold for breakouts (was 0.9)
+            if bb_pred < -0.7 { // Price below lower band (oversold)
                 if signal == Signal::Buy {
-                    confidence += 0.25;
+                    confidence += 0.3; // Higher boost
                     contributing_models.push("BB_OS");
-                } else if signal == Signal::Hold && trend_strength < 0.3 {
+                } else if signal == Signal::Hold && trend_strength < 0.25 { // Lower threshold
                     signal = Signal::Buy;
-                    confidence += 0.3;
+                    confidence += 0.4; // Higher confidence
                     contributing_models.push("BB_OS");
                 }
-            } else if bb_pred > 0.8 { // Price above upper band (overbought)
+            } else if bb_pred > 0.7 { // Price above upper band (overbought)
                 if signal == Signal::Sell {
-                    confidence += 0.25;
+                    confidence += 0.3; // Higher boost
                     contributing_models.push("BB_OB");
-                } else if signal == Signal::Hold && trend_strength < 0.3 {
+                } else if signal == Signal::Hold && trend_strength < 0.25 { // Lower threshold
                     signal = Signal::Sell;
-                    confidence += 0.3;
+                    confidence += 0.4; // Higher confidence
                     contributing_models.push("BB_OB");
                 }
             }
         }
         
-        // 5. ENSEMBLE CONFIRMATION (Final check) - Critical
-        if ensemble_pred.abs() > 0.5 { // Strong ensemble signal required
+        // 5. ENSEMBLE CONFIRMATION (Final check) - Less selective
+        if ensemble_pred.abs() > 0.4 { // Lower threshold for ensemble (was 0.6)
             if (ensemble_pred > 0.0 && signal == Signal::Buy) || 
                (ensemble_pred < 0.0 && signal == Signal::Sell) {
-                confidence += 0.5 * ensemble_pred.abs().min(1.0);
+                confidence += 0.6 * ensemble_pred.abs().min(1.0); // Higher weight
                 contributing_models.push("ENS");
-            } else if signal == Signal::Hold && ensemble_pred.abs() > 0.7 {
+            } else if signal == Signal::Hold && ensemble_pred.abs() > 0.6 { // Lower threshold (was 0.8)
                 // Only generate new signal if ensemble is very strong
                 if ensemble_pred > 0.0 {
                     signal = Signal::Buy;
-                    confidence += 0.6 * ensemble_pred.min(1.0);
+                    confidence += 0.7 * ensemble_pred.min(1.0); // Higher weight
                     contributing_models.push("ENS");
                 } else {
                     signal = Signal::Sell;
-                    confidence += 0.6 * ensemble_pred.abs().min(1.0);
+                    confidence += 0.7 * ensemble_pred.abs().min(1.0); // Higher weight
                     contributing_models.push("ENS");
                 }
             }
+        }
+        
+        // NEW: Position-aware signal generation
+        // If we have a position and RSI is overbought, generate SELL signal
+        if _current_position.quantity > 0.0 && rsi_actual > 75.0 && signal == Signal::Hold {
+            signal = Signal::Sell;
+            confidence += 0.4;
+            contributing_models.push("POS_RSI");
+        }
+        
+        // If we have a position and price is above upper Bollinger Band, generate SELL signal
+        if _current_position.quantity > 0.0 && bb_pred > 0.7 && signal == Signal::Hold {
+            signal = Signal::Sell;
+            confidence += 0.3;
+            contributing_models.push("POS_BB");
+        }
+        
+        // If we have a position and ensemble is strongly negative, generate SELL signal
+        if _current_position.quantity > 0.0 && ensemble_pred < -0.5 && signal == Signal::Hold {
+            signal = Signal::Sell;
+            confidence += 0.5;
+            contributing_models.push("POS_ENS");
         }
         
         // Apply risk filters
         let original_confidence = confidence;
         confidence = temp_strategy.apply_risk_filters(confidence);
         
-        // CRITICAL: Much higher confidence threshold for profitability
-        confidence = confidence.max(0.5); // Reduced from 0.75 to 0.5 for more trades
+        // CRITICAL: Higher confidence threshold for better win rate
+        confidence = confidence.max(0.55); // Reduced from 0.6 to 0.55 for more trades
         
         // REQUIRE multiple strong signals for execution
-        if contributing_models.len() < 1 { // Reduced from 2 to 1
+        if contributing_models.len() < 1 { // Reduced back to 1 for more trades
             signal = Signal::Hold;
             confidence = 0.0;
         }
         
         // ADDITIONAL: Require minimum trend strength for trend-following signals
-        if signal != Signal::Hold && trend_strength < 0.1 && !contributing_models.contains(&"RSI_OS") && !contributing_models.contains(&"RSI_OB") { // Reduced from 0.2 to 0.1
+        if signal != Signal::Hold && trend_strength < 0.1 && !contributing_models.contains(&"RSI_OS") && !contributing_models.contains(&"RSI_OB") { // Reduced from 0.15 to 0.1
+            signal = Signal::Hold;
+            confidence = 0.0;
+        }
+        
+        // NEW: Additional filter for signal quality
+        if signal != Signal::Hold && confidence < 0.6 { // Reduced from 0.65 to 0.6
             signal = Signal::Hold;
             confidence = 0.0;
         }
@@ -574,7 +604,7 @@ impl Strategy for QuantumHftStrategy {
             models = %contributing_models.join(","),
             lr = %format!("{:.3}", linear_reg_pred),
             macd = %format!("{:.3}", macd_pred),
-            rsi = %format!("{:.1}", rsi_pred),
+            rsi = %format!("{:.1}", rsi_actual),
             bb = %format!("{:.3}", bb_pred),
             vwap = %format!("{:.3}", vwap_pred),
             ens = %format!("{:.3}", ensemble_pred),
@@ -609,37 +639,37 @@ impl QuantumHftStrategy {
         let mut filtered_confidence = confidence;
         let mut filter_reasons = Vec::new();
         
-        // Volatility filter - Much less aggressive
-        if self.volatility_score > 0.95 { // Much higher threshold
-            filtered_confidence *= 0.9; // Minimal reduction
-            filter_reasons.push("HIGH_VOL");
-        } else if self.volatility_score < 0.01 { // Much lower threshold
+        // Volatility filter - Much less aggressive for better signals
+        if self.volatility_score > 0.98 { // Much higher threshold
             filtered_confidence *= 0.95; // Minimal reduction
+            filter_reasons.push("HIGH_VOL");
+        } else if self.volatility_score < 0.005 { // Much lower threshold
+            filtered_confidence *= 0.98; // Very minimal reduction
             filter_reasons.push("LOW_VOL");
         }
         
-        // Liquidity filter - Much less aggressive
-        if self.liquidity_score < 0.05 { // Much lower threshold
-            filtered_confidence *= 0.85; // Minimal reduction
+        // Liquidity filter - Much less aggressive for better signals
+        if self.liquidity_score < 0.001 { // Much lower threshold
+            filtered_confidence *= 0.95; // Minimal reduction
             filter_reasons.push("LOW_LIQ");
-        } else if self.liquidity_score > 5.0 { // Much higher threshold
-            filtered_confidence *= 1.1; // Small boost
+        } else if self.liquidity_score > 20.0 { // Much higher threshold
+            filtered_confidence *= 1.2; // Higher boost for good liquidity
             filter_reasons.push("HIGH_LIQ");
         }
         
-        // Momentum filter - Much less aggressive
-        if self.momentum_score.abs() > 0.8 { // Much higher threshold
+        // Momentum filter - Much less aggressive for better signals
+        if self.momentum_score.abs() > 0.9 { // Much higher threshold
             if (self.momentum_score > 0.0 && confidence > 0.0) || (self.momentum_score < 0.0 && confidence < 0.0) {
-                filtered_confidence *= 1.15; // Small boost
+                filtered_confidence *= 1.2; // Higher boost for aligned momentum
                 filter_reasons.push("MOM_ALIGN");
             } else {
-                filtered_confidence *= 0.95; // Minimal reduction
+                filtered_confidence *= 0.98; // Very minimal reduction
                 filter_reasons.push("MOM_AGAINST");
             }
         }
         
         // Log filter effects only if significant reduction
-        if !filter_reasons.is_empty() && (filtered_confidence / confidence) < 0.9 {
+        if !filter_reasons.is_empty() && (filtered_confidence / confidence) < 0.95 {
             debug!(
                 strategy = "QML-FILTER",
                 original_conf = %format!("{:.3}", confidence),
