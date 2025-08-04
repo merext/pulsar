@@ -531,14 +531,26 @@ impl Trader for TradingEngine {
         // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
         // This is the core logic that both live trading and emulation use
         
-        // Calculate dynamic minimum notional based on confidence
-        // Higher confidence = higher minimum notional, but quantity must stay within trade_limit
-        let min_notional = 1.0 + 4.0 * confidence;
-        let raw_quantity = min_notional / price;
-        let quantity_to_trade = (raw_quantity / trading_size_step).ceil() * trading_size_step;
+        // Define minimum and maximum quantities based on exchange requirements
+        let min_qty = self.config.exchange.min_qty; // Minimum quantity (e.g., 1 DOGE)
+        let max_qty = trade_limit; // Maximum quantity is the trade limit
         
-        // Ensure quantity stays within the trading size limit
-        let final_quantity = quantity_to_trade.min(trade_limit);
+        // Calculate minimum viable notional (exchange requirement)
+        let min_notional = self.config.exchange.min_notional; // e.g., 1.0 USDT
+        let min_qty_from_notional = min_notional / price;
+        
+        // Use the higher of exchange min_qty and min_qty_from_notional
+        let effective_min_qty = min_qty.max(min_qty_from_notional);
+        
+        // Smooth linear interpolation between min and max quantities based on confidence
+        // 0% confidence = effective_min_qty, 100% confidence = max_qty
+        let dynamic_quantity = effective_min_qty + (confidence * (max_qty - effective_min_qty));
+        
+        // Apply step size rounding (round down to nearest step)
+        let quantity_to_trade = (dynamic_quantity / trading_size_step).floor() * trading_size_step;
+        
+        // Ensure we don't go below minimum quantity after rounding
+        let final_quantity = quantity_to_trade.max(effective_min_qty);
         
         tracing::debug!(
             exchange = "trading_engine",
@@ -548,8 +560,12 @@ impl Trader for TradingEngine {
             confidence = confidence,
             trade_limit = trade_limit,
             trading_size_step = trading_size_step,
+            min_qty = min_qty,
             min_notional = min_notional,
-            raw_quantity = raw_quantity,
+            min_qty_from_notional = min_qty_from_notional,
+            effective_min_qty = effective_min_qty,
+            max_qty = max_qty,
+            dynamic_quantity = dynamic_quantity,
             quantity_to_trade = quantity_to_trade,
             final_quantity = final_quantity
         );
