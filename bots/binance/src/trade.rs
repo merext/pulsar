@@ -13,7 +13,8 @@ pub async fn run_trade(
     mut strategy: impl Strategy + Send,
     binance_trader: &mut BinanceTrader,
     trade_mode: TradeMode,
-    trading_size_limit: f64,
+    trading_size_min: f64,
+    trading_size_max: f64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new()
         .await
@@ -94,8 +95,8 @@ pub async fn run_trade(
             Signal::Hold => Signal::Hold,
         };
 
-        // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
-        let quantity_to_trade = binance_trader.calculate_trade_size(trading_symbol, trade_price, confidence, trading_size_limit, 1.0);
+        // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
+        let quantity_to_trade = binance_trader.calculate_trade_size(trading_symbol, trade_price, confidence, trading_size_min, trading_size_max, 1.0);
 
         // Log BUY/SELL signals at info level with structured format
         match final_signal {

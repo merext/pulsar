@@ -10,7 +10,8 @@ pub async fn run_backtest(
     source: &str,
     mut strategy: impl Strategy + Send,
     symbol: &str,
-    trading_size_limit: f64,
+    trading_size_min: f64,
+    trading_size_max: f64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new().await?;
     let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin> =
@@ -35,8 +36,8 @@ pub async fn run_backtest(
 
         // Check if we should trade based on signal strength and risk management
         if trader.should_trade(&signal, confidence, trade_price, trade_time) {
-            // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
-            let quantity_to_trade = trader.calculate_trade_size(symbol, trade_price, confidence, trading_size_limit, 1.0);
+            // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
+            let quantity_to_trade = trader.calculate_trade_size(symbol, trade_price, confidence, trading_size_min, trading_size_max, 1.0);
             
             trader.on_emulate(signal, trade_price, quantity_to_trade).await;
         }

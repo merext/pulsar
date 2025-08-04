@@ -23,7 +23,6 @@ min_notional = 1.0     # Minimum order value in USDT
 max_order_size = 1000.0 # Maximum order size in base currency
 
 # DOGEUSDT specific lot size requirements
-max_qty = 1000000.0    # Maximum quantity
 step_size = 1.0        # Quantity step size (1 DOGE increments)
 
 [slippage]

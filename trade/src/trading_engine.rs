@@ -25,7 +25,6 @@ pub struct ExchangeConfig {
     pub tick_size: f64,
     pub min_notional: f64,
     pub max_order_size: f64,
-    pub max_qty: f64,
     pub step_size: f64,
 }
 
@@ -527,26 +526,19 @@ impl TradingEngine {
 
 #[async_trait::async_trait]
 impl Trader for TradingEngine {
-    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trade_limit: f64, trading_size_step: f64) -> f64 {
-        // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
+    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
+        // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
         // This is the core logic that both live trading and emulation use
         
-        // Define maximum quantity (trade limit)
-        let max_qty = trade_limit; // Maximum quantity is the trade limit
-        
-        // Calculate minimum quantity based on minimum notional requirement
-        let min_notional = self.config.exchange.min_notional; // e.g., 1.0 USDT
-        let min_qty = min_notional / price; // Minimum quantity based on notional requirement
-        
-        // Smooth linear interpolation between min and max quantities based on confidence
-        // 0% confidence = min_qty, 100% confidence = max_qty
-        let dynamic_quantity = min_qty + (confidence * (max_qty - min_qty));
+        // Simple linear interpolation between min and max quantities based on confidence
+        // 0% confidence = trading_size_min, 100% confidence = trading_size_max
+        let dynamic_quantity = trading_size_min + (confidence * (trading_size_max - trading_size_min));
         
         // Apply step size rounding (round down to nearest step)
         let quantity_to_trade = (dynamic_quantity / trading_size_step).floor() * trading_size_step;
         
-        // Ensure we don't go below minimum quantity after rounding
-        let final_quantity = quantity_to_trade.max(min_qty);
+        // Ensure we stay within the min/max bounds after rounding
+        let final_quantity = quantity_to_trade.max(trading_size_min).min(trading_size_max);
         
         tracing::debug!(
             exchange = "trading_engine",
@@ -554,11 +546,9 @@ impl Trader for TradingEngine {
             symbol = %symbol,
             price = price,
             confidence = confidence,
-            trade_limit = trade_limit,
+            trading_size_min = trading_size_min,
+            trading_size_max = trading_size_max,
             trading_size_step = trading_size_step,
-            min_notional = min_notional,
-            min_qty = min_qty,
-            max_qty = max_qty,
             dynamic_quantity = dynamic_quantity,
             quantity_to_trade = quantity_to_trade,
             final_quantity = final_quantity

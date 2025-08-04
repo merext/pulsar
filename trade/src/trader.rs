@@ -22,6 +22,6 @@ pub trait Trader {
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64);
     async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64);
     
-    // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
-    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trade_limit: f64, trading_size_step: f64) -> f64;
+    // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
+    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64;
 } 
