@@ -55,33 +55,10 @@ maintenance_margin = 0.8
 
 # Pair-specific trade size limits (in base currency)
 # Format: "SYMBOL" = max_trade_size
-# Examples:
-# "DOGEUSDT" = 15.0      # Maximum 15 DOGE per trade
-# "BTCUSDT" = 0.01       # Maximum 0.01 BTC per trade
-# "ETHUSDT" = 0.1        # Maximum 0.1 ETH per trade
 
 # Pair-specific configurations
 [position_sizing.pairs]
-# High-volume pairs with conservative limits
-"BTCUSDT" = 0.01         # Maximum 0.01 BTC per trade
-"ETHUSDT" = 0.1          # Maximum 0.1 ETH per trade
-"BNBUSDT" = 1.0          # Maximum 1.0 BNB per trade
-"ADAUSDT" = 100.0        # Maximum 100 ADA per trade
-"SOLUSDT" = 10.0         # Maximum 10 SOL per trade
-
-# Mid-volume pairs
 "DOGEUSDT" = 15.0        # Maximum 15 DOGE per trade
-"XRPUSDT" = 100.0        # Maximum 100 XRP per trade
-"DOTUSDT" = 10.0         # Maximum 10 DOT per trade
-"LINKUSDT" = 10.0        # Maximum 10 LINK per trade
-"MATICUSDT" = 100.0      # Maximum 100 MATIC per trade
-
-# Low-volume pairs with smaller limits
-"AVAXUSDT" = 5.0         # Maximum 5 AVAX per trade
-"ATOMUSDT" = 5.0         # Maximum 5 ATOM per trade
-"NEARUSDT" = 10.0        # Maximum 10 NEAR per trade
-"FTMUSDT" = 100.0        # Maximum 100 FTM per trade
-"ALGOUSDT" = 100.0       # Maximum 100 ALGO per trade
 
 [market_data]
 min_trade_size = 0.1
