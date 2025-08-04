@@ -70,10 +70,8 @@ pub struct RiskManagementConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PositionSizingConfig {
-    // Default fallback for pairs not specified
-    pub default_max_trade_size: f64,
-    
     // Pair-specific trade size limits (in base currency)
+    // ALL PAIRS MUST BE EXPLICITLY DEFINED - no default fallback
     pub pairs: std::collections::HashMap<String, f64>,
 }
 
@@ -500,10 +498,10 @@ impl TradingEngine {
     }
 
     pub fn calculate_position_size(&self, symbol: &str, price: f64, confidence: f64, _available_capital: f64) -> f64 {
-        // Get pair-specific maximum trade size limit
+        // Get pair-specific maximum trade size limit (MUST be explicitly defined)
         let max_trade_size = self.config.position_sizing.pairs
             .get(symbol)
-            .unwrap_or(&self.config.position_sizing.default_max_trade_size);
+            .expect(&format!("No trade size limit defined for pair: {}", symbol));
         
         // Calculate dynamic position size based on confidence
         // Higher confidence = larger position, but never exceed max_trade_size

@@ -51,9 +51,7 @@ maintenance_margin = 0.8
 # Dynamic position sizing based on current market price (bid/ask)
 # Each pair has a maximum trade size limit in base currency
 # The engine calculates position size dynamically but never exceeds this limit
-
-# Default fallback for pairs not specified below
-default_max_trade_size = 100.0
+# ALL PAIRS MUST BE EXPLICITLY DEFINED - no default fallback
 
 # Pair-specific trade size limits (in base currency)
 # Format: "SYMBOL" = max_trade_size
