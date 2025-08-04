@@ -9,9 +9,12 @@ use tracing::{info, warn};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingConfig {
     pub exchange: ExchangeConfig,
+    pub slippage: SlippageConfig,
+    pub order_execution: OrderExecutionConfig,
     pub risk_management: RiskManagementConfig,
-    pub order_management: OrderManagementConfig,
+    pub market_data: MarketDataConfig,
     pub performance_tracking: PerformanceTrackingConfig,
+    pub backtest_settings: Option<BacktestSettingsConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,9 +22,35 @@ pub struct ExchangeConfig {
     pub taker_fee: f64,
     pub maker_fee: f64,
     pub maker_rebate: f64,
+    pub tick_size: f64,
+    pub min_notional: f64,
+    pub max_order_size: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlippageConfig {
     pub min_slippage: f64,
     pub max_slippage: f64,
-    pub slippage_volatility: f64,
+    pub volatility_multiplier: f64,
+    pub size_multiplier: f64,
+    pub market_order_volatility: f64,
+    pub taker_order_volatility: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderExecutionConfig {
+    pub order_timeout: f64,
+    pub max_retries: u32,
+    pub retry_delay: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketDataConfig {
+    pub min_trade_size: f64,
+    pub max_price_change: f64,
+    pub outlier_threshold: f64,
+    pub trading_hours_start: u8,
+    pub trading_hours_end: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,19 +58,13 @@ pub struct RiskManagementConfig {
     pub max_position_size: f64,
     pub max_daily_loss: f64,
     pub max_drawdown: f64,
+    pub max_leverage: f64,
     pub min_signal_strength: f64,
-    pub min_edge_over_cost: f64,
     pub max_consecutive_losses: usize,
     pub cooldown_period: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrderManagementConfig {
-    pub use_limit_orders: bool,
-    pub limit_order_timeout: f64,
-    pub min_spread_capture: f64,
-    pub queue_position_penalty: f64,
-    pub partial_fill_probability: f64,
+    pub max_trades_per_hour: u32,
+    pub initial_margin: f64,
+    pub maintenance_margin: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,8 +73,109 @@ pub struct PerformanceTrackingConfig {
     pub track_slippage: bool,
     pub track_fees: bool,
     pub track_rebates: bool,
-    pub track_queue_position: bool,
+    pub track_order_rejections: bool,
+    pub calculate_sharpe_ratio: bool,
+    pub calculate_sortino_ratio: bool,
+    pub calculate_max_drawdown: bool,
+    pub calculate_calmar_ratio: bool,
+    pub calculate_profit_factor: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BacktestSettingsConfig {
+    // Simulation parameters
+    pub initial_capital: f64,
+    pub commission_model: String,
+    pub slippage_model: String,
+    pub fill_model: String,
+    
+    // Data handling
+    pub handle_data_gaps: bool,
+    pub interpolate_missing_data: bool,
+    pub filter_outliers: bool,
+    
+    // Bias prevention
+    pub prevent_lookahead_bias: bool,
+    pub use_point_in_time_data: bool,
+    
+    // Simulation features
+    pub simulate_market_microstructure: bool,
+    pub account_for_latency_in_signals: bool,
+    pub simulate_order_queue_position: bool,
+    pub simulate_partial_fills: bool,
+    pub simulate_order_cancellations: bool,
+    
+    // Market impact simulation
+    pub simulate_market_impact: bool,
+    pub market_impact_model: String,
+    pub impact_decay_rate: f64,
+    
+    // Order execution simulation
+    pub simulate_order_delays: bool,
+    pub simulate_exchange_errors: bool,
+    pub simulate_network_timeouts: bool,
+    
+    // Fill and rejection simulation
+    pub limit_order_fill_rate: f64,
+    pub partial_fill_probability: f64,
+    pub partial_fill_ratio: f64,
+    pub invalid_order_probability: f64,
+    pub rejection_reasons: Vec<String>,
+    
+    // Market events simulation
+    pub handle_market_halts: bool,
+    pub halt_probability: f64,
+    pub halt_duration_min: u64,
+    pub halt_duration_max: u64,
+    
+    // Spread and market impact simulation
+    pub base_spread: f64,
+    pub spread_volatility: f64,
+    pub spread_widening_factor: f64,
+    pub order_book_depth: u32,
+    pub market_impact_factor: f64,
+    
+    // Performance tracking simulation
+    pub track_queue_position: bool,
+    pub track_latency: bool,
+    pub track_market_impact: bool,
+    
+    // Latency simulation (20ms base latency)
+    pub total_latency_model: String,
+    pub propagation_delay: f64,      // 10ms
+    pub transmission_delay: f64,     // 2ms
+    pub queuing_delay: f64,          // 5ms
+    pub processing_delay: f64,       // 3ms
+    pub latency_spike_probability: f64,
+    pub latency_spike_multiplier: f64,
+    pub congestion_latency_factor: f64,
+    pub exchange_processing_time: f64,
+    pub order_matching_latency: f64,
+    pub market_data_latency: f64,
+    pub signal_generation_time: f64,
+    pub order_construction_time: f64,
+    pub risk_check_time: f64,
+    
+    // Market microstructure simulation
+    pub order_book_simulation: bool,
+    pub bid_ask_spread_model: String,
+    pub spread_volatility_factor: f64,
+    pub spread_widening_events: bool,
+    pub order_book_levels: u32,
+    pub level_size_distribution: String,
+    pub min_level_size: f64,
+    pub max_level_size: f64,
+    pub market_maker_presence: bool,
+    pub mm_spread_tightening: f64,
+    pub mm_inventory_management: bool,
+    pub mm_risk_aversion: f64,
+    pub hft_competition: bool,
+    pub hft_latency_advantage: f64,
+    pub hft_order_cancellation_rate: f64,
+    pub hft_market_impact: f64,
+}
+
+
 
 impl TradingConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
@@ -214,13 +338,21 @@ impl TradingEngine {
         })
     }
 
-    pub fn calculate_slippage(&self, _price: f64, volatility: f64) -> f64 {
-        let base_slippage = self.config.exchange.min_slippage;
-        let max_slippage = self.config.exchange.max_slippage;
-        let volatility_factor = volatility * self.config.exchange.slippage_volatility;
+    pub fn calculate_slippage(&self, _price: f64, quantity: f64, volatility: f64) -> f64 {
+        let base_slippage = self.config.slippage.min_slippage;
+        let max_slippage = self.config.slippage.max_slippage;
         
-        let slippage = base_slippage + (max_slippage - base_slippage) * volatility_factor;
-        slippage.min(max_slippage)
+        // Calculate volatility-adjusted slippage
+        let volatility_factor = volatility.min(1.0);
+        let volatility_slippage = base_slippage + (max_slippage - base_slippage) * volatility_factor * self.config.slippage.volatility_multiplier;
+        
+        // Calculate size-adjusted slippage
+        let size_factor = (quantity / self.config.exchange.max_order_size).min(1.0);
+        let size_slippage = base_slippage + (max_slippage - base_slippage) * size_factor * self.config.slippage.size_multiplier;
+        
+        // Combine volatility and size effects
+        let total_slippage = (volatility_slippage + size_slippage) / 2.0;
+        total_slippage.min(max_slippage)
     }
 
     pub fn calculate_fees(&self, price: f64, quantity: f64, is_maker: bool) -> f64 {
@@ -276,12 +408,8 @@ impl TradingEngine {
     }
 
     pub fn determine_order_type(&self, _signal: &Signal, confidence: f64, spread: f64) -> OrderType {
-        if !self.config.order_management.use_limit_orders {
-            return OrderType::Market;
-        }
-
         // Use maker orders for high confidence signals or when spread is wide
-        if confidence > 0.8 || spread > self.config.order_management.min_spread_capture {
+        if confidence > self.config.risk_management.min_signal_strength || spread > self.config.exchange.tick_size * 100.0 {
             OrderType::Maker
         } else {
             OrderType::Taker
@@ -291,16 +419,25 @@ impl TradingEngine {
     pub fn simulate_fill(&self, order_type: &OrderType, price: f64, quantity: f64) -> (f64, f64, f64) {
         let (fill_price, slippage, fill_quantity) = match order_type {
             OrderType::Market => {
-                let slippage = self.calculate_slippage(price, 0.1); // Assume some volatility
+                let slippage = self.calculate_slippage(price, quantity, self.config.slippage.market_order_volatility);
                 let fill_price = price + slippage;
                 (fill_price, slippage, quantity)
             }
             OrderType::Limit => {
                 // Limit orders might not fill immediately
-                if rand::random::<f64>() < 0.7 {
-                    (price, 0.0, quantity)
+                if let Some(ref backtest_settings) = self.config.backtest_settings {
+                    if rand::random::<f64>() < backtest_settings.limit_order_fill_rate {
+                        (price, 0.0, quantity)
+                    } else {
+                        (price, 0.0, quantity * backtest_settings.partial_fill_ratio)
+                    }
                 } else {
-                    (price, 0.0, quantity * 0.5) // Partial fill
+                    // Default fallback
+                    if rand::random::<f64>() < 0.7 {
+                        (price, 0.0, quantity)
+                    } else {
+                        (price, 0.0, quantity * 0.5)
+                    }
                 }
             }
             OrderType::Maker => {
@@ -309,13 +446,47 @@ impl TradingEngine {
                 (price, 0.0, quantity)
             }
             OrderType::Taker => {
-                let slippage = self.calculate_slippage(price, 0.2);
+                let slippage = self.calculate_slippage(price, quantity, self.config.slippage.taker_order_volatility);
                 let fill_price = price + slippage;
                 (fill_price, slippage, quantity)
             }
         };
 
         (fill_price, slippage, fill_quantity)
+    }
+
+    pub fn calculate_latency(&self) -> f64 {
+        // Check if we have backtest settings for latency simulation
+        if let Some(ref backtest_settings) = self.config.backtest_settings {
+            if backtest_settings.account_for_latency_in_signals {
+                // Calculate total latency with 20ms base
+                let base_latency = backtest_settings.propagation_delay 
+                    + backtest_settings.transmission_delay 
+                    + backtest_settings.queuing_delay 
+                    + backtest_settings.processing_delay
+                    + backtest_settings.exchange_processing_time
+                    + backtest_settings.order_matching_latency
+                    + backtest_settings.market_data_latency
+                    + backtest_settings.signal_generation_time
+                    + backtest_settings.order_construction_time
+                    + backtest_settings.risk_check_time;
+                
+                // Add latency spikes (1% probability)
+                let latency = if rand::random::<f64>() < backtest_settings.latency_spike_probability {
+                    base_latency * backtest_settings.latency_spike_multiplier
+                } else {
+                    base_latency
+                };
+                
+                // Add jitter (±20% variation)
+                let jitter = latency * (rand::random::<f64>() * 0.4 - 0.2);
+                latency + jitter
+            } else {
+                0.0 // No latency simulation
+            }
+        } else {
+            0.0 // No backtest settings, no latency simulation
+        }
     }
 }
 
@@ -333,7 +504,7 @@ impl Trader for TradingEngine {
             .unwrap()
             .as_secs_f64();
 
-        let order_type = self.determine_order_type(&signal, 0.8, 0.0001); // Assume some spread
+        let order_type = self.determine_order_type(&signal, 0.8, self.config.exchange.tick_size * 10.0); // Use tick size for spread
         let is_maker = matches!(order_type, OrderType::Maker);
         
         let (fill_price, slippage, fill_quantity) = self.simulate_fill(&order_type, price, quantity);

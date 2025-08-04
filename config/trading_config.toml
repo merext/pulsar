@@ -29,6 +29,8 @@ min_slippage = 0.00001  # 1 tick minimum
 max_slippage = 0.0005   # 50 ticks maximum (during high volatility)
 volatility_multiplier = 2.0 # Slippage increases with volatility
 size_multiplier = 1.5   # Slippage increases with order size
+market_order_volatility = 0.1  # Volatility assumption for market orders
+taker_order_volatility = 0.2   # Volatility assumption for taker orders
 
 [order_execution]
 # Order execution parameters (real-world applicable)
@@ -44,6 +46,7 @@ max_drawdown = 0.20           # 20% maximum drawdown
 max_leverage = 1.0            # No leverage (spot trading)
 
 # Circuit breakers
+min_signal_strength = 0.3     # Minimum signal strength to trade
 max_consecutive_losses = 5    # Stop after 5 consecutive losses
 cooldown_period = 300         # 5 minutes cooldown
 max_trades_per_hour = 100     # Rate limiting

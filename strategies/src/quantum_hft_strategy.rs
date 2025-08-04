@@ -99,8 +99,8 @@ impl QuantumHftStrategy {
             liquidity_score: 0.5,
             volatility_score: 0.5,
             momentum_score: 0.5,
-            ensemble_weights: vec![0.25, 0.25, 0.25, 0.25], // Equal weights initially
-            ensemble_predictions: vec![0.0; 4],
+            ensemble_weights: vec![0.25, 0.20, 0.20, 0.15, 0.10, 0.10], // Updated weights for 6 models
+            ensemble_predictions: vec![0.0; 6], // 6 models now
             market_regime: MarketRegime::Sideways,
             regime_confidence: 0.5,
             signal_threshold,
@@ -342,58 +342,122 @@ impl QuantumHftStrategy {
     }
 
     fn ensemble_prediction(&mut self, features: &[f64]) -> f64 {
-        // Model 1: Enhanced linear combination with smarter weights
+        // Model 1: Quantum-inspired linear combination with exponential decay weights
         let linear_pred = features.iter().enumerate()
             .map(|(i, &f)| {
-                let weight = if i < 5 { 1.0 } else { 0.5 }; // Prioritize first 5 features
+                let weight = (0.8_f64).powi(i as i32); // Exponential decay for feature importance
                 f * weight
             })
             .sum::<f64>();
-        self.ensemble_predictions[0] = linear_pred.tanh() * 1.5; // Moderate amplification
+        self.ensemble_predictions[0] = linear_pred.tanh() * 2.0; // Stronger amplification
         
-        // Model 2: Enhanced RSI-based with more sensitive thresholds
+        // Model 2: Enhanced RSI-based with dynamic thresholds
         let rsi_pred = if let Some(rsi) = self.rsi {
-            if rsi < 38.0 { 1.0 } else if rsi > 62.0 { -1.0 } else { 
-                // More sensitive gradual signal in middle range
-                if rsi < 50.0 { (50.0 - rsi) / 12.0 } else { (rsi - 50.0) / 12.0 }
+            if rsi < 35.0 { 1.0 } else if rsi > 65.0 { -1.0 } else { 
+                // More aggressive gradual signal in middle range
+                if rsi < 50.0 { (50.0 - rsi) / 15.0 } else { (rsi - 50.0) / 15.0 }
             }
         } else {
             0.0
         };
         self.ensemble_predictions[1] = rsi_pred;
         
-        // Model 3: Enhanced MACD-based with magnitude consideration
+        // Model 3: Enhanced MACD-based with adaptive thresholds
         let macd_pred = if let (Some(macd), Some(signal)) = (self.macd, self.macd_signal) {
             let diff = macd - signal;
-            if diff.abs() > 0.001 { // Only signal if difference is significant
+            let threshold = 0.0005; // Lower threshold for more signals
+            if diff.abs() > threshold {
                 if diff > 0.0 { 1.0 } else { -1.0 }
             } else {
-                0.0
+                // Gradual signal for smaller differences
+                (diff / threshold).max(-1.0).min(1.0)
             }
         } else {
             0.0
         };
         self.ensemble_predictions[2] = macd_pred;
         
-        // Model 4: Enhanced momentum-based with more aggressive amplification
-        let momentum_pred = self.momentum_score * 1.8; // More aggressive momentum amplification
-        self.ensemble_predictions[3] = momentum_pred.max(-1.0).min(1.0);
-        
-        // Weighted ensemble with adaptive weights based on market regime
-        let mut prediction = 0.0;
-        let regime_multiplier = match self.market_regime {
-            MarketRegime::Trending => 1.2,    // Boost in trending markets
-            MarketRegime::Breakout => 1.3,    // Boost in breakout markets
-            MarketRegime::MeanReverting => 0.8, // Reduce in mean reverting
-            MarketRegime::Volatile => 0.9,    // Slightly reduce in volatile
-            MarketRegime::Sideways => 0.7,    // Reduce in sideways
+        // Model 4: Enhanced momentum-based with volume confirmation
+        let momentum_pred = self.momentum_score * 2.0; // More aggressive momentum
+        let volume_boost = if self.volume_velocity.len() > 0 {
+            let recent_volume = self.volume_velocity.back().unwrap();
+            if *recent_volume > 1.2 { 1.2 } else { 1.0 } // Boost if high volume
+        } else {
+            1.0
         };
+        self.ensemble_predictions[3] = (momentum_pred * volume_boost).max(-1.0).min(1.0);
         
-        for (i, &weight) in self.ensemble_weights.iter().enumerate() {
-            prediction += self.ensemble_predictions[i] * weight;
+        // Model 5: Price velocity model (new)
+        let velocity_pred = if self.price_velocity.len() > 0 {
+            let recent_velocity = self.price_velocity.back().unwrap();
+            *recent_velocity * 100.0 // Scale up velocity signal
+        } else {
+            0.0
+        };
+        self.ensemble_predictions.push(velocity_pred.max(-1.0).min(1.0));
+        
+        // Model 6: Volatility-adjusted signal (new)
+        let volatility_pred = if self.volatility_score > 0.5 {
+            // In high volatility, be more conservative
+            -0.3
+        } else if self.volatility_score < 0.2 {
+            // In low volatility, be more aggressive
+            0.5
+        } else {
+            0.0
+        };
+        self.ensemble_predictions.push(volatility_pred);
+        
+        // Adaptive ensemble weights based on market regime and recent performance
+        let mut adaptive_weights = vec![0.25, 0.20, 0.20, 0.15, 0.10, 0.10]; // Add weights for new models
+        
+        // Adjust weights based on market regime
+        match self.market_regime {
+            MarketRegime::Trending => {
+                adaptive_weights[0] += 0.1; // Boost linear model
+                adaptive_weights[3] += 0.1; // Boost momentum model
+            },
+            MarketRegime::Breakout => {
+                adaptive_weights[3] += 0.15; // Boost momentum model
+                adaptive_weights[4] += 0.05; // Boost velocity model
+            },
+            MarketRegime::MeanReverting => {
+                adaptive_weights[1] += 0.1; // Boost RSI model
+                adaptive_weights[5] += 0.1; // Boost volatility model
+            },
+            MarketRegime::Volatile => {
+                adaptive_weights[5] += 0.2; // Boost volatility model
+                adaptive_weights[0] -= 0.1; // Reduce linear model
+            },
+            MarketRegime::Sideways => {
+                adaptive_weights[2] += 0.1; // Boost MACD model
+                adaptive_weights[1] += 0.1; // Boost RSI model
+            }
+        }
+        
+        // Normalize weights
+        let total_weight: f64 = adaptive_weights.iter().sum();
+        for weight in &mut adaptive_weights {
+            *weight /= total_weight;
+        }
+        
+        // Calculate weighted ensemble
+        let mut prediction = 0.0;
+        for (i, &weight) in adaptive_weights.iter().enumerate() {
+            if i < self.ensemble_predictions.len() {
+                prediction += self.ensemble_predictions[i] * weight;
+            }
         }
         
         // Apply regime-based amplification
+        let regime_multiplier = match self.market_regime {
+            MarketRegime::Trending => 1.3,    // Strong boost in trending markets
+            MarketRegime::Breakout => 1.4,    // Strong boost in breakout markets
+            MarketRegime::MeanReverting => 0.9, // Slight boost in mean reverting
+            MarketRegime::Volatile => 0.6,    // Reduce in volatile markets
+            MarketRegime::Sideways => 0.8,    // Reduce in sideways markets
+        };
+        
         prediction * regime_multiplier
     }
 
@@ -456,19 +520,32 @@ impl QuantumHftStrategy {
         let filtered_signal = signal;
         let mut filtered_confidence = confidence;
         
-        // Volatility filter - only filter if extremely volatile and very low confidence
-        if self.volatility_score > self.volatility_filter * 3.0 && confidence < 0.3 {
-            filtered_confidence *= 0.8; // Reduce confidence instead of blocking
+        // More aggressive risk filters for profit generation
+        
+        // Volatility filter - only filter if extremely volatile
+        if self.volatility_score > self.volatility_filter * 4.0 && confidence < 0.2 {
+            filtered_confidence *= 0.7; // More aggressive reduction
         }
         
         // Liquidity filter - only filter if extremely low liquidity
-        if self.liquidity_score < self.liquidity_filter * 0.3 {
-            filtered_confidence *= 0.9; // Reduce confidence instead of blocking
+        if self.liquidity_score < self.liquidity_filter * 0.2 {
+            filtered_confidence *= 0.8; // More aggressive reduction
         }
         
-        // Momentum filter - only filter if extremely low momentum and very low confidence
-        if self.momentum_score.abs() < self.momentum_filter * 0.3 && confidence < 0.3 {
-            filtered_confidence *= 0.9; // Reduce confidence instead of blocking
+        // Momentum filter - only filter if extremely low momentum
+        if self.momentum_score.abs() < self.momentum_filter * 0.2 && confidence < 0.2 {
+            filtered_confidence *= 0.8; // More aggressive reduction
+        }
+        
+        // Market regime boost for favorable conditions
+        match self.market_regime {
+            MarketRegime::Trending | MarketRegime::Breakout => {
+                filtered_confidence *= 1.1; // Boost confidence in trending markets
+            },
+            MarketRegime::MeanReverting => {
+                filtered_confidence *= 1.05; // Slight boost in mean reverting
+            },
+            _ => {} // No boost for volatile/sideways
         }
         
         (filtered_signal, filtered_confidence)
@@ -536,8 +613,8 @@ impl Strategy for QuantumHftStrategy {
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {
-        // Check if we have enough data (reduced requirement)
-        if self.prices.len() < 5 {
+        // Check if we have enough data
+        if self.prices.len() < self.short_window {
             return (Signal::Hold, 0.0);
         }
         
@@ -548,38 +625,141 @@ impl Strategy for QuantumHftStrategy {
         // Get ensemble prediction
         let ensemble_output = strategy.ensemble_prediction(&features);
         
-        // Force signal generation - much more aggressive for testing
+        // Quantum-inspired signal generation based on multiple indicators
         let mut signal = Signal::Hold;
+        let mut confidence = 0.0;
         
-        // Use data point index to generate deterministic signals
-        let data_index = self.prices.len() as u64;
-        
-        // Generate signals every 5th data point (much more frequent)
-        if data_index % 5 == 0 {
-            if data_index % 10 < 5 {
-                signal = Signal::Buy;
-            } else {
-                signal = Signal::Sell;
+        // 1. EMA Crossover Analysis (Primary signal) - Much more aggressive
+        if let (Some(ema_short), Some(ema_long)) = (self.ema_short, self.ema_long) {
+            let ema_crossover = ema_short - ema_long;
+            let ema_strength = ema_crossover.abs() / current_price;
+            
+            if ema_strength > 0.0001 { // 0.01% threshold - much more sensitive
+                if ema_crossover > 0.0 {
+                    signal = Signal::Buy;
+                    confidence += 0.5 * ema_strength.min(1.0);
+                } else {
+                    signal = Signal::Sell;
+                    confidence += 0.5 * ema_strength.min(1.0);
+                }
             }
         }
         
-        // If still no signal, force a buy signal every 20th data point
-        if signal == Signal::Hold && data_index % 20 == 0 {
-            signal = Signal::Buy;
+        // 2. RSI Momentum Analysis - Much more aggressive
+        if let Some(rsi) = self.rsi {
+            let rsi_signal = if rsi < 40.0 { // More sensitive thresholds
+                Signal::Buy
+            } else if rsi > 60.0 { // More sensitive thresholds
+                Signal::Sell
+            } else {
+                Signal::Hold
+            };
+            
+            if rsi_signal != Signal::Hold {
+                let rsi_strength = if rsi < 40.0 {
+                    (40.0 - rsi) / 40.0
+                } else {
+                    (rsi - 60.0) / 40.0
+                };
+                
+                if signal == Signal::Hold {
+                    signal = rsi_signal;
+                    confidence += 0.4 * rsi_strength.min(1.0);
+                } else if signal == rsi_signal {
+                    confidence += 0.3 * rsi_strength.min(1.0);
+                }
+            }
         }
         
-        let confidence = ensemble_output.abs().max(0.5); // Higher minimum confidence to meet trading requirements
+        // 3. MACD Momentum Confirmation - Much more aggressive
+        if let (Some(macd), Some(macd_signal)) = (self.macd, self.macd_signal) {
+            let macd_histogram = macd - macd_signal;
+            let macd_strength = macd_histogram.abs() / current_price;
+            
+            if macd_strength > 0.0001 { // 0.01% threshold - much more sensitive
+                let macd_direction = if macd_histogram > 0.0 { Signal::Buy } else { Signal::Sell };
+                
+                if signal == Signal::Hold {
+                    signal = macd_direction;
+                    confidence += 0.35 * macd_strength.min(1.0);
+                } else if signal == macd_direction {
+                    confidence += 0.25 * macd_strength.min(1.0);
+                }
+            }
+        }
+        
+        // 4. Volume-Price Confirmation
+        if self.volume_velocity.len() > 0 {
+            let recent_volume_velocity = self.volume_velocity.back().unwrap();
+            let volume_threshold = 1.5; // 50% above average
+            
+            if *recent_volume_velocity > volume_threshold {
+                if signal != Signal::Hold {
+                    confidence += 0.1; // Boost confidence with high volume
+                }
+            }
+        }
+        
+        // 5. Price Momentum Analysis - Much more aggressive
+        if self.price_velocity.len() > 0 {
+            let recent_momentum = self.price_velocity.back().unwrap();
+            let momentum_threshold = 0.0001; // 0.01% price change - much more sensitive
+            
+            if recent_momentum.abs() > momentum_threshold {
+                let momentum_signal = if *recent_momentum > 0.0 { Signal::Buy } else { Signal::Sell };
+                
+                if signal == Signal::Hold {
+                    signal = momentum_signal;
+                    confidence += 0.3 * (recent_momentum.abs() / momentum_threshold).min(1.0);
+                } else if signal == momentum_signal {
+                    confidence += 0.2 * (recent_momentum.abs() / momentum_threshold).min(1.0);
+                }
+            }
+        }
+        
+        // 6. Ensemble Model Confirmation - Much more aggressive
+        let ensemble_strength = ensemble_output.abs();
+        if ensemble_strength > 0.1 { // 10% threshold - much more sensitive
+            let ensemble_signal = if ensemble_output > 0.0 { Signal::Buy } else { Signal::Sell };
+            
+            if signal == Signal::Hold {
+                signal = ensemble_signal;
+                confidence += 0.4 * ensemble_strength.min(1.0);
+            } else if signal == ensemble_signal {
+                confidence += 0.3 * ensemble_strength.min(1.0);
+            }
+        }
+        
+        // Ensure minimum confidence threshold
+        confidence = confidence.max(0.3); // Minimum 30% confidence - more aggressive
+        
+        // Fallback signal generation if no signal detected
+        if signal == Signal::Hold && self.prices.len() > 10 {
+            // Generate signals based on simple price movement
+            let recent_prices: Vec<f64> = self.prices.iter().rev().take(5).cloned().collect();
+            let price_change = (recent_prices[0] - recent_prices[4]) / recent_prices[4];
+            
+            if price_change.abs() > 0.0001 { // 0.01% change
+                if price_change > 0.0 {
+                    signal = Signal::Buy;
+                    confidence = 0.35;
+                } else {
+                    signal = Signal::Sell;
+                    confidence = 0.35;
+                }
+            }
+        }
         
         // Apply risk filters
         let (filtered_signal, filtered_confidence) = strategy.apply_risk_filters(signal, confidence);
         
         // Apply regime-based confidence adjustment
         let regime_confidence_boost = match self.market_regime {
-            MarketRegime::Trending => 1.1,    // Boost confidence in trending markets
-            MarketRegime::Breakout => 1.2,    // Higher boost in breakout markets
+            MarketRegime::Trending => 1.2,    // Boost confidence in trending markets
+            MarketRegime::Breakout => 1.3,    // Higher boost in breakout markets
             MarketRegime::MeanReverting => 0.9, // Slightly reduce in mean reverting
-            MarketRegime::Volatile => 0.8,    // Reduce in volatile markets
-            MarketRegime::Sideways => 0.7,    // Reduce in sideways markets
+            MarketRegime::Volatile => 0.7,    // Reduce in volatile markets
+            MarketRegime::Sideways => 0.6,    // Reduce in sideways markets
         };
         
         let final_confidence = filtered_confidence * regime_confidence_boost;
