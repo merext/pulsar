@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &api_key,
                 &api_secret,
                 TradeMode::Real,
-            ).await;
+            ).await?;
             
             trade::run_trade(
                 trading_symbol,
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &api_key,
                 &api_secret,
                 TradeMode::Emulated,
-            ).await;
+            ).await?;
             
             trade::run_trade(
                 trading_symbol,

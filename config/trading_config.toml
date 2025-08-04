@@ -8,6 +8,7 @@
 # - [risk_management] - Risk management rules
 # - [market_data] - Market data handling
 # - [performance_tracking] - Performance metrics
+# - [position_sizing] - Dynamic position sizing per pair
 #
 # BACKTEST-SPECIFIC SETTINGS (only used by backtest command):
 # - [backtest_settings] - Backtest-only parameters (ignored by trade command)
@@ -17,63 +18,86 @@
 taker_fee = 0.001      # 0.1% taker fee
 maker_fee = 0.0001     # 0.01% maker fee
 maker_rebate = 0.0001  # 0.01% rebate for maker orders
-
-# Market microstructure
 tick_size = 0.00001    # Minimum price increment (1 tick)
 min_notional = 5.0     # Minimum order value in USDT
 max_order_size = 1000.0 # Maximum order size in base currency
 
 [slippage]
-# Realistic slippage modeling
-min_slippage = 0.00001  # 1 tick minimum
-max_slippage = 0.0005   # 50 ticks maximum (during high volatility)
-volatility_multiplier = 2.0 # Slippage increases with volatility
-size_multiplier = 1.5   # Slippage increases with order size
+min_slippage = 0.00001
+max_slippage = 0.0005
+volatility_multiplier = 2.0
+size_multiplier = 1.5
 market_order_volatility = 0.1  # Volatility assumption for market orders
 taker_order_volatility = 0.2   # Volatility assumption for taker orders
 
 [order_execution]
-# Order execution parameters (real-world applicable)
-order_timeout = 30.0          # 30 seconds order timeout
-max_retries = 3               # Maximum order retry attempts
-retry_delay = 1.0             # 1 second delay between retries
+order_timeout = 30.0
+max_retries = 3
+retry_delay = 1.0
 
 [risk_management]
-# Position sizing
-max_position_size = 1000.0    # Maximum position size
-max_daily_loss = 1000.0       # Maximum daily loss
-max_drawdown = 0.20           # 20% maximum drawdown
-max_leverage = 1.0            # No leverage (spot trading)
-
-# Circuit breakers
+max_position_size = 1000.0
+max_daily_loss = 1000.0
+max_drawdown = 0.20
+max_leverage = 1.0
 min_signal_strength = 0.3     # Minimum signal strength to trade
-max_consecutive_losses = 5    # Stop after 5 consecutive losses
-cooldown_period = 300         # 5 minutes cooldown
-max_trades_per_hour = 100     # Rate limiting
+max_consecutive_losses = 5
+cooldown_period = 300
+max_trades_per_hour = 100
+initial_margin = 1.0
+maintenance_margin = 0.8
 
-# Margin requirements
-initial_margin = 1.0          # 100% margin required
-maintenance_margin = 0.8      # 80% maintenance margin
+[position_sizing]
+# Dynamic position sizing based on current market price (bid/ask)
+# Each pair has a maximum trade size limit in base currency
+# The engine calculates position size dynamically but never exceeds this limit
+
+# Default fallback for pairs not specified below
+default_max_trade_size = 100.0
+
+# Pair-specific trade size limits (in base currency)
+# Format: "SYMBOL" = max_trade_size
+# Examples:
+# "DOGEUSDT" = 15.0      # Maximum 15 DOGE per trade
+# "BTCUSDT" = 0.01       # Maximum 0.01 BTC per trade
+# "ETHUSDT" = 0.1        # Maximum 0.1 ETH per trade
+
+# Pair-specific configurations
+[position_sizing.pairs]
+# High-volume pairs with conservative limits
+"BTCUSDT" = 0.01         # Maximum 0.01 BTC per trade
+"ETHUSDT" = 0.1          # Maximum 0.1 ETH per trade
+"BNBUSDT" = 1.0          # Maximum 1.0 BNB per trade
+"ADAUSDT" = 100.0        # Maximum 100 ADA per trade
+"SOLUSDT" = 10.0         # Maximum 10 SOL per trade
+
+# Mid-volume pairs
+"DOGEUSDT" = 15.0        # Maximum 15 DOGE per trade
+"XRPUSDT" = 100.0        # Maximum 100 XRP per trade
+"DOTUSDT" = 10.0         # Maximum 10 DOT per trade
+"LINKUSDT" = 10.0        # Maximum 10 LINK per trade
+"MATICUSDT" = 100.0      # Maximum 100 MATIC per trade
+
+# Low-volume pairs with smaller limits
+"AVAXUSDT" = 5.0         # Maximum 5 AVAX per trade
+"ATOMUSDT" = 5.0         # Maximum 5 ATOM per trade
+"NEARUSDT" = 10.0        # Maximum 10 NEAR per trade
+"FTMUSDT" = 100.0        # Maximum 100 FTM per trade
+"ALGOUSDT" = 100.0       # Maximum 100 ALGO per trade
 
 [market_data]
-# Data quality filters
-min_trade_size = 0.1          # Minimum trade size to consider
-max_price_change = 0.1        # Maximum allowed price change (10%)
-outlier_threshold = 3.0       # Standard deviations for outlier detection
-
-# Market hours (UTC)
-trading_hours_start = 0       # 00:00 UTC
-trading_hours_end = 24        # 24:00 UTC (24/7 for crypto)
+min_trade_size = 0.1
+max_price_change = 0.1
+outlier_threshold = 3.0
+trading_hours_start = 0
+trading_hours_end = 24
 
 [performance_tracking]
-# Comprehensive metrics (real-world applicable)
 track_fill_rate = true
 track_slippage = true
 track_fees = true
 track_rebates = true
 track_order_rejections = true
-
-# Advanced analytics
 calculate_sharpe_ratio = true
 calculate_sortino_ratio = true
 calculate_max_drawdown = true
@@ -85,106 +109,92 @@ calculate_profit_factor = true
 # These settings are ignored by the trade command
 
 # Simulation parameters
-initial_capital = 10000.0     # $10,000 starting capital for backtesting
-commission_model = "binance"  # Use Binance fee structure for simulation
-slippage_model = "realistic"  # Use realistic slippage model for simulation
-fill_model = "probabilistic"  # Use probabilistic fill model for simulation
+initial_capital = 10000.0
+commission_model = "binance"
+slippage_model = "realistic"
+fill_model = "probabilistic"
 
 # Data handling (backtest-specific)
-handle_data_gaps = true       # Handle missing data points in historical data
-interpolate_missing_data = false # Don't interpolate (use last known)
-filter_outliers = true        # Filter price outliers in historical data
+handle_data_gaps = true
+interpolate_missing_data = false
+filter_outliers = true
 
 # Bias prevention (backtest-specific)
-prevent_lookahead_bias = true # Ensure no future data leakage in backtesting
-use_point_in_time_data = true # Use data available at each timestamp
+prevent_lookahead_bias = true
+use_point_in_time_data = true
 
 # Simulation-only features (not used in live trading)
-simulate_market_microstructure = true # Simulate realistic market microstructure
-account_for_latency_in_signals = true # Apply latency to signal generation
-simulate_order_queue_position = true # Simulate order book queue position
-simulate_partial_fills = true # Simulate realistic partial fills
-simulate_order_cancellations = true # Simulate order cancellations and rejections
+simulate_market_microstructure = true
+account_for_latency_in_signals = true
+simulate_order_queue_position = true
+simulate_partial_fills = true
+simulate_order_cancellations = true
 
 # Market impact simulation (backtest-specific)
-simulate_market_impact = true # Account for order size impact on price
-market_impact_model = "linear" # Linear market impact model
-impact_decay_rate = 0.1       # How quickly market impact decays
+simulate_market_impact = true
+market_impact_model = "linear"
+impact_decay_rate = 0.1
 
 # Realistic order execution simulation
-simulate_order_delays = true  # Simulate realistic order processing delays
-simulate_exchange_errors = true # Simulate occasional exchange errors
-simulate_network_timeouts = true # Simulate network timeouts and retries
+simulate_order_delays = true
+simulate_exchange_errors = true
+simulate_network_timeouts = true
 
 # Fill and rejection simulation (backtest-specific)
-limit_order_fill_rate = 0.65  # 65% chance of limit order fill
-partial_fill_probability = 0.25 # 25% chance of partial fills
-partial_fill_ratio = 0.6      # Average 60% of order filled when partial
-invalid_order_probability = 0.02 # 2% chance of order rejection
+limit_order_fill_rate = 0.65
+partial_fill_probability = 0.25
+partial_fill_ratio = 0.6
+invalid_order_probability = 0.02
 rejection_reasons = ["insufficient_balance", "invalid_price", "order_too_small"]
 
 # Market events simulation (backtest-specific)
-handle_market_halts = true    # Simulate market halts
-halt_probability = 0.001      # 0.1% chance of halt per hour
-halt_duration_min = 60        # 1 minute minimum halt
-halt_duration_max = 3600      # 1 hour maximum halt
+handle_market_halts = true
+halt_probability = 0.001
+halt_duration_min = 60
+halt_duration_max = 3600
 
 # Spread and market impact simulation (backtest-specific)
-base_spread = 0.00002  # Base spread (2 ticks)
-spread_volatility = 0.3 # How much spread varies with volatility
-spread_widening_factor = 2.0 # Spread widens during high volatility
-order_book_depth = 10  # Levels to simulate
-market_impact_factor = 0.0001 # Price impact per unit traded
+base_spread = 0.00002
+spread_volatility = 0.3
+spread_widening_factor = 2.0
+order_book_depth = 10
+market_impact_factor = 0.0001
 
 # Performance tracking simulation (backtest-specific)
-track_queue_position = true # Simulate order book queue position
-track_latency = true # Track simulated latency
-track_market_impact = true # Track simulated market impact
+track_queue_position = true
+track_latency = true
+track_market_impact = true
 
 # Latency simulation (backtest-specific)
-total_latency_model = "realistic" # Realistic latency model for simulation
-
-# Network latency components (simulation only)
-propagation_delay = 0.010      # 10ms propagation delay (simulation)
-transmission_delay = 0.002     # 2ms transmission delay (simulation)
-queuing_delay = 0.005          # 5ms queuing delay at routers (simulation)
-processing_delay = 0.003       # 3ms processing delay at exchange (simulation)
-
-# Latency variation factors (simulation only)
-latency_spike_probability = 0.01 # 1% chance of latency spike (simulation)
-latency_spike_multiplier = 5.0   # 5x normal latency during spikes (simulation)
-congestion_latency_factor = 2.0  # 2x latency during market congestion (simulation)
-
-# Exchange-specific latency (simulation only)
-exchange_processing_time = 0.001 # 1ms exchange order processing (simulation)
-order_matching_latency = 0.002   # 2ms order matching engine latency (simulation)
-market_data_latency = 0.001      # 1ms market data dissemination (simulation)
-
-# Strategy latency considerations (simulation only)
-signal_generation_time = 0.001   # 1ms strategy signal generation (simulation)
-order_construction_time = 0.001  # 1ms order construction time (simulation)
-risk_check_time = 0.002          # 2ms risk management checks (simulation)
+total_latency_model = "realistic"
+propagation_delay = 0.010
+transmission_delay = 0.002
+queuing_delay = 0.005
+processing_delay = 0.003
+latency_spike_probability = 0.01
+latency_spike_multiplier = 5.0
+congestion_latency_factor = 2.0
+exchange_processing_time = 0.001
+order_matching_latency = 0.002
+market_data_latency = 0.001
+signal_generation_time = 0.001
+order_construction_time = 0.001
+risk_check_time = 0.002
 
 # Market microstructure simulation (backtest-specific)
-order_book_simulation = true     # Simulate realistic order book
-bid_ask_spread_model = "dynamic" # Dynamic spread model
-spread_volatility_factor = 0.3   # How much spread varies
-spread_widening_events = true    # Simulate spread widening during stress
-
-# Order book depth simulation (simulation only)
-order_book_levels = 10           # Number of price levels to simulate
-level_size_distribution = "exponential" # Exponential decay of order sizes
-min_level_size = 1.0             # Minimum order size at each level
-max_level_size = 1000.0          # Maximum order size at each level
-
-# Market maker behavior (simulation only)
-market_maker_presence = true     # Simulate market maker activity
-mm_spread_tightening = 0.8       # Market makers tighten spreads by 20%
-mm_inventory_management = true   # Market makers manage inventory
-mm_risk_aversion = 0.5           # Market maker risk aversion factor
-
-# High-frequency trading effects (simulation only)
-hft_competition = true           # Simulate HFT competition
-hft_latency_advantage = 0.001    # 1ms advantage for HFTs
-hft_order_cancellation_rate = 0.3 # 30% of HFT orders are cancelled
-hft_market_impact = 0.0001       # HFT market impact factor 
+order_book_simulation = true
+bid_ask_spread_model = "dynamic"
+spread_volatility_factor = 0.3
+spread_widening_events = true
+order_book_levels = 10
+level_size_distribution = "exponential"
+min_level_size = 1.0
+max_level_size = 1000.0
+market_maker_presence = true
+mm_spread_tightening = 0.8
+mm_inventory_management = true
+mm_risk_aversion = 0.5
+hft_competition = true
+hft_latency_advantage = 0.001
+hft_order_cancellation_rate = 0.3
+hft_market_impact = 0.0001 

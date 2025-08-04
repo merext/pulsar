@@ -12,6 +12,7 @@ pub struct TradingConfig {
     pub slippage: SlippageConfig,
     pub order_execution: OrderExecutionConfig,
     pub risk_management: RiskManagementConfig,
+    pub position_sizing: PositionSizingConfig,
     pub market_data: MarketDataConfig,
     pub performance_tracking: PerformanceTrackingConfig,
     pub backtest_settings: Option<BacktestSettingsConfig>,
@@ -65,6 +66,15 @@ pub struct RiskManagementConfig {
     pub max_trades_per_hour: u32,
     pub initial_margin: f64,
     pub maintenance_margin: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionSizingConfig {
+    // Default fallback for pairs not specified
+    pub default_max_trade_size: f64,
+    
+    // Pair-specific trade size limits (in base currency)
+    pub pairs: std::collections::HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -487,6 +497,38 @@ impl TradingEngine {
         } else {
             0.0 // No backtest settings, no latency simulation
         }
+    }
+
+    pub fn calculate_position_size(&self, symbol: &str, price: f64, confidence: f64, _available_capital: f64) -> f64 {
+        // Get pair-specific maximum trade size limit
+        let max_trade_size = self.config.position_sizing.pairs
+            .get(symbol)
+            .unwrap_or(&self.config.position_sizing.default_max_trade_size);
+        
+        // Calculate dynamic position size based on confidence
+        // Higher confidence = larger position, but never exceed max_trade_size
+        let base_quantity = max_trade_size * 0.1; // Start with 10% of max limit
+        let confidence_multiplier = 0.5 + (confidence * 0.5); // 0.5x to 1.0x based on confidence
+        let dynamic_quantity = base_quantity * confidence_multiplier;
+        
+        // Ensure we never exceed the maximum trade size limit
+        let quantity = dynamic_quantity.min(*max_trade_size);
+        
+        // Apply exchange minimum notional requirement
+        let min_notional = self.config.exchange.min_notional;
+        let position_value = quantity * price;
+        if position_value < min_notional {
+            let min_quantity = min_notional / price;
+            return min_quantity.min(*max_trade_size); // Still respect max limit
+        }
+        
+        // Apply tick size rounding
+        let tick_size = self.config.exchange.tick_size;
+        let quantity_step = tick_size;
+        let rounded_quantity = (quantity / quantity_step).ceil() * quantity_step;
+        
+        // Final check to ensure we don't exceed max trade size after rounding
+        rounded_quantity.min(*max_trade_size)
     }
 }
 

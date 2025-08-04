@@ -34,17 +34,14 @@ pub async fn run_backtest(
 
         // Check if we should trade based on signal strength and risk management
         if trader.should_trade(&signal, confidence, trade_price, trade_time) {
-            // Use config min_notional instead of hardcoded value
-            let min_notional = trader.config.exchange.min_notional + 3.0 * confidence;
-            let raw_quantity = min_notional / trade_price;
+            // Use dynamic position sizing based on pair-specific configuration
+            let available_capital = if let Some(backtest_settings) = &trader.config.backtest_settings {
+                backtest_settings.initial_capital
+            } else {
+                10000.0 // Default fallback
+            };
             
-            // Apply tick size rounding
-            let tick_size = trader.config.exchange.tick_size;
-            let quantity_step = tick_size;
-            let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
-            
-            // Apply max order size limit
-            let quantity_to_trade = quantity_to_trade.min(trader.config.exchange.max_order_size);
+            let quantity_to_trade = trader.calculate_position_size(symbol, trade_price, confidence, available_capital);
             
             trader.on_emulate(signal, trade_price, quantity_to_trade).await;
         }

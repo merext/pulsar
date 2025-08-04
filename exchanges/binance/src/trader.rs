@@ -10,15 +10,17 @@ use rust_decimal_macros::dec;
 use tracing::{error, debug};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
+use trade::trading_engine::TradingConfig;
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
     pub position: Position,
     pub realized_pnl: f64,
+    pub config: TradingConfig,
 }
 
 impl BinanceTrader {
-    pub async fn new(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode) -> Self {
+    pub async fn new(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let connection = if mode == TradeMode::Real {
             let config = ConfigurationWebsocketApi::builder()
                 .api_key(api_key)
@@ -38,7 +40,9 @@ impl BinanceTrader {
             None
         };
 
-        BinanceTrader {
+        let trading_config = TradingConfig::load()?;
+
+        Ok(BinanceTrader {
             connection,
             position: Position {
                 symbol: symbol.to_string(),
@@ -46,7 +50,40 @@ impl BinanceTrader {
                 entry_price: 0.0,
             },
             realized_pnl: 0.0,
+            config: trading_config,
+        })
+    }
+
+    pub fn calculate_position_size(&self, symbol: &str, price: f64, confidence: f64, _available_capital: f64) -> f64 {
+        // Get pair-specific maximum trade size limit
+        let max_trade_size = self.config.position_sizing.pairs
+            .get(symbol)
+            .unwrap_or(&self.config.position_sizing.default_max_trade_size);
+        
+        // Calculate dynamic position size based on confidence
+        // Higher confidence = larger position, but never exceed max_trade_size
+        let base_quantity = max_trade_size * 0.1; // Start with 10% of max limit
+        let confidence_multiplier = 0.5 + (confidence * 0.5); // 0.5x to 1.0x based on confidence
+        let dynamic_quantity = base_quantity * confidence_multiplier;
+        
+        // Ensure we never exceed the maximum trade size limit
+        let quantity = dynamic_quantity.min(*max_trade_size);
+        
+        // Apply exchange minimum notional requirement
+        let min_notional = self.config.exchange.min_notional;
+        let position_value = quantity * price;
+        if position_value < min_notional {
+            let min_quantity = min_notional / price;
+            return min_quantity.min(*max_trade_size); // Still respect max limit
         }
+        
+        // Apply tick size rounding
+        let tick_size = self.config.exchange.tick_size;
+        let quantity_step = tick_size;
+        let rounded_quantity = (quantity / quantity_step).ceil() * quantity_step;
+        
+        // Final check to ensure we don't exceed max trade size after rounding
+        rounded_quantity.min(*max_trade_size)
     }
 }
 

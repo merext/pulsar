@@ -93,17 +93,12 @@ pub async fn run_trade(
             Signal::Hold => Signal::Hold,
         };
 
-        // Use reasonable defaults for live trading (config values would be loaded separately)
-        let min_notional = 5.0 + 3.0 * confidence; // 5.0 USDT minimum
-        let raw_quantity = min_notional / trade_price;
+        // Use dynamic position sizing for live trading
+        // Note: For live trading, we would need to get available capital from the exchange
+        // For now, we'll use a reasonable default and load config separately
+        let available_capital = 10000.0; // This would come from exchange account balance
         
-        // Apply tick size rounding (0.00001 for most crypto pairs)
-        let tick_size = 0.00001;
-        let quantity_step = tick_size;
-        let quantity_to_trade = (raw_quantity / quantity_step).ceil() * quantity_step;
-        
-        // Apply max order size limit (1000.0 base currency)
-        let quantity_to_trade = quantity_to_trade.min(1000.0);
+        let quantity_to_trade = binance_trader.calculate_position_size(trading_symbol, trade_price, confidence, available_capital);
 
         // Log BUY/SELL signals at info level with structured format
         match final_signal {
