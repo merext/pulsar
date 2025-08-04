@@ -16,6 +16,7 @@ pub mod advanced_momentum_strategy;
 pub mod trend_volume_strategy;
 pub mod enhanced_rsi_strategy;
 pub mod refined_rsi_strategy;
+pub mod quantum_hft_strategy;
 
 pub mod models;
 pub mod strategy;
@@ -33,3 +34,4 @@ pub use adaptive_multi_factor_strategy::AdaptiveMultiFactorStrategy;
 pub use neural_market_microstructure_strategy::NeuralMarketMicrostructureStrategy;
 pub use ultra_fast_strategy::UltraFastStrategy;
 pub use market_maker_strategy::MarketMakerStrategy;
+pub use quantum_hft_strategy::QuantumHftStrategy;

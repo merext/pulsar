@@ -1,5 +1,7 @@
-linux:
-	cargo build --release --target x86_64-unknown-linux-gnu
+.PHONY: test trade
 
-deploy:
-	scp target/x86_64-unknown-linux-gnu/release/binance-bot ec2-user@3.112.246.38:~/
+test:
+	RUST_LOG=info cargo run backtest --path ./data/DOGEUSDT-trades-2025-05-28.zip
+
+trade:
+	RUST_LOG=info cargo run trade

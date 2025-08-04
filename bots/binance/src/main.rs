@@ -44,8 +44,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     
     let cli = Cli::parse();
     
-    use strategies::rsi_strategy::RsiStrategy;
-    let strategy = RsiStrategy::new();
+    use strategies::quantum_hft_strategy::QuantumHftStrategy;
+    let strategy = QuantumHftStrategy::new();
     
     let trading_symbol = "DOGEUSDT";
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");

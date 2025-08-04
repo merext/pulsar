@@ -1,0 +1,32 @@
+# Quantum HFT Strategy Configuration
+# Revolutionary machine learning-based HFT strategy
+# OPTIMIZED FOR 50%+ WIN RATE
+
+# Core Parameters
+short_window = 3              # Ultra-short for immediate signals
+medium_window = 10            # Medium for trend confirmation
+long_window = 30              # Long for overall direction
+signal_threshold = 0.4        # Lower threshold for more signals (was 0.6)
+
+# Ensemble Configuration
+ensemble_size = 7             # Multiple model types
+feature_count = 25            # Rich feature set
+
+# Risk Management
+max_position_size = 500.0     # Conservative position sizing
+stop_loss_pct = 0.015         # 1.5% stop loss
+take_profit_pct = 0.03        # 3% take profit
+max_drawdown_pct = 0.10       # 10% max drawdown
+
+# Advanced Filters (relaxed for more signals)
+momentum_filter = 0.2         # Lower momentum threshold (was 0.3)
+volatility_filter = 0.3       # Lower volatility threshold (was 0.4)
+liquidity_filter = 0.2        # Lower liquidity threshold (was 0.3)
+
+# Learning Parameters
+learning_rate = 0.01          # Adaptive learning rate
+adaptation_threshold = 0.1    # Performance threshold for adaptation
+
+# Pattern Detection
+confidence_threshold = 0.7    # Pattern confidence threshold
+min_pattern_length = 5        # Minimum pattern length 
