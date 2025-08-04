@@ -46,7 +46,7 @@ pub struct QuantumHftStrategy {
     momentum_score: f64,
     
     // Ensemble models
-    ensemble_weights: Vec<f64>,
+    _ensemble_weights: Vec<f64>,
     ensemble_predictions: Vec<f64>,
     
     // Market regime
@@ -54,7 +54,7 @@ pub struct QuantumHftStrategy {
     regime_confidence: f64,
     
     // Signal parameters
-    signal_threshold: f64,
+    _signal_threshold: f64,
     momentum_filter: f64,
     volatility_filter: f64,
     liquidity_filter: f64,
@@ -99,11 +99,11 @@ impl QuantumHftStrategy {
             liquidity_score: 0.5,
             volatility_score: 0.5,
             momentum_score: 0.5,
-            ensemble_weights: vec![0.25, 0.20, 0.20, 0.15, 0.10, 0.10], // Updated weights for 6 models
+            _ensemble_weights: vec![0.25, 0.20, 0.20, 0.15, 0.10, 0.10], // Updated weights for 6 models
             ensemble_predictions: vec![0.0; 6], // 6 models now
             market_regime: MarketRegime::Sideways,
             regime_confidence: 0.5,
-            signal_threshold,
+            _signal_threshold: signal_threshold,
             momentum_filter,
             volatility_filter,
             liquidity_filter,

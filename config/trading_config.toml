@@ -19,8 +19,13 @@ taker_fee = 0.001      # 0.1% taker fee
 maker_fee = 0.0001     # 0.01% maker fee
 maker_rebate = 0.0001  # 0.01% rebate for maker orders
 tick_size = 0.00001    # Minimum price increment (1 tick)
-min_notional = 5.0     # Minimum order value in USDT
+min_notional = 1.0     # Minimum order value in USDT
 max_order_size = 1000.0 # Maximum order size in base currency
+
+# DOGEUSDT specific lot size requirements
+min_qty = 1.0          # Minimum quantity (1 DOGE)
+max_qty = 1000000.0    # Maximum quantity
+step_size = 1.0        # Quantity step size (1 DOGE increments)
 
 [slippage]
 min_slippage = 0.00001
@@ -47,18 +52,7 @@ max_trades_per_hour = 100
 initial_margin = 1.0
 maintenance_margin = 0.8
 
-[position_sizing]
-# Dynamic position sizing based on current market price (bid/ask)
-# Each pair has a maximum trade size limit in base currency
-# The engine calculates position size dynamically but never exceeds this limit
-# ALL PAIRS MUST BE EXPLICITLY DEFINED - no default fallback
 
-# Pair-specific trade size limits (in base currency)
-# Format: "SYMBOL" = max_trade_size
-
-# Pair-specific configurations
-[position_sizing.pairs]
-"DOGEUSDT" = 15.0        # Maximum 15 DOGE per trade
 
 [market_data]
 min_trade_size = 0.1

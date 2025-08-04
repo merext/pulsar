@@ -13,6 +13,7 @@ pub async fn run_trade(
     mut strategy: impl Strategy + Send,
     binance_trader: &mut BinanceTrader,
     trade_mode: TradeMode,
+    trading_size_limit: f64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new()
         .await
@@ -93,12 +94,8 @@ pub async fn run_trade(
             Signal::Hold => Signal::Hold,
         };
 
-        // Use dynamic position sizing for live trading
-        // Note: For live trading, we would need to get available capital from the exchange
-        // For now, we'll use a reasonable default and load config separately
-        let available_capital = 10000.0; // This would come from exchange account balance
-        
-        let quantity_to_trade = binance_trader.calculate_position_size(trading_symbol, trade_price, confidence, available_capital);
+        // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
+        let quantity_to_trade = binance_trader.calculate_trade_size(trading_symbol, trade_price, confidence, trading_size_limit, 1.0);
 
         // Log BUY/SELL signals at info level with structured format
         match final_signal {

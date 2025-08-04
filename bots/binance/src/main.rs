@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let strategy = QuantumHftStrategy::new();
     
     let trading_symbol = "DOGEUSDT";
+    let trading_size_limit = 15.0;
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
     
@@ -70,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 strategy,
                 &mut binance_trader,
                 TradeMode::Real,
+                trading_size_limit,
             ).await?;
         }
         Commands::Emulate => {
@@ -88,15 +90,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 strategy,
                 &mut binance_trader,
                 TradeMode::Emulated,
+                trading_size_limit,
             ).await?;
         }
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {
                 info!("Starting backtest with data from: {}", data_path);
-                backtest::run_backtest(&data_path, strategy, trading_symbol).await?;
+                backtest::run_backtest(&data_path, strategy, trading_symbol, trading_size_limit).await?;
             } else if let Some(ws_url) = url {
                 info!("Starting backtest with WebSocket data from: {}", ws_url);
-                backtest::run_backtest(&ws_url, strategy, trading_symbol).await?;
+                backtest::run_backtest(&ws_url, strategy, trading_symbol, trading_size_limit).await?;
             } else {
                 return Err("No data source specified for backtest".into());
             }

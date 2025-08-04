@@ -54,41 +54,43 @@ impl BinanceTrader {
         })
     }
 
-    pub fn calculate_position_size(&self, symbol: &str, price: f64, confidence: f64, _available_capital: f64) -> f64 {
-        // Get pair-specific maximum trade size limit (MUST be explicitly defined)
-        let max_trade_size = self.config.position_sizing.pairs
-            .get(symbol)
-            .expect(&format!("No trade size limit defined for pair: {}", symbol));
+    pub fn calculate_trade_size_impl(&self, symbol: &str, price: f64, confidence: f64, trade_limit: f64, trading_size_step: f64) -> f64 {
+        // Exchange calculates exact trade size based on symbol, price, confidence, trade limit, and step size
+        // This is the core logic that both live trading and emulation use
         
-        // Calculate dynamic position size based on confidence
-        // Higher confidence = larger position, but never exceed max_trade_size
-        let base_quantity = max_trade_size * 0.1; // Start with 10% of max limit
-        let confidence_multiplier = 0.5 + (confidence * 0.5); // 0.5x to 1.0x based on confidence
-        let dynamic_quantity = base_quantity * confidence_multiplier;
+        // Calculate dynamic minimum notional based on confidence
+        // Higher confidence = higher minimum notional, but quantity must stay within trade_limit
+        let min_notional = 1.0 + 4.0 * confidence;
+        let raw_quantity = min_notional / price;
+        let quantity_to_trade = (raw_quantity / trading_size_step).ceil() * trading_size_step;
         
-        // Ensure we never exceed the maximum trade size limit
-        let quantity = dynamic_quantity.min(*max_trade_size);
+        // Ensure quantity stays within the trading size limit
+        let final_quantity = quantity_to_trade.min(trade_limit);
         
-        // Apply exchange minimum notional requirement
-        let min_notional = self.config.exchange.min_notional;
-        let position_value = quantity * price;
-        if position_value < min_notional {
-            let min_quantity = min_notional / price;
-            return min_quantity.min(*max_trade_size); // Still respect max limit
-        }
+        debug!(
+            exchange = "binance",
+            action = "calculate_trade_size",
+            symbol = %symbol,
+            price = price,
+            confidence = confidence,
+            trade_limit = trade_limit,
+            trading_size_step = trading_size_step,
+            min_notional = min_notional,
+            raw_quantity = raw_quantity,
+            quantity_to_trade = quantity_to_trade,
+            final_quantity = final_quantity
+        );
         
-        // Apply tick size rounding
-        let tick_size = self.config.exchange.tick_size;
-        let quantity_step = tick_size;
-        let rounded_quantity = (quantity / quantity_step).ceil() * quantity_step;
-        
-        // Final check to ensure we don't exceed max trade size after rounding
-        rounded_quantity.min(*max_trade_size)
+        final_quantity
     }
 }
 
 #[async_trait]
 impl Trader for BinanceTrader {
+    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trade_limit: f64, trading_size_step: f64) -> f64 {
+        self.calculate_trade_size_impl(symbol, price, confidence, trade_limit, trading_size_step)
+    }
+    
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
         let symbol = self.position.symbol.clone();
         let quantity = Decimal::from_f64(quantity).expect("Failed to convert quantity to Decimal");
