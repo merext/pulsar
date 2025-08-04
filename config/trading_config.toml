@@ -1,5 +1,16 @@
-# Realistic Backtesting Configuration
-# Comprehensive parameters for accurate simulation
+# Trading Configuration
+# This file contains both general trading settings and backtest-specific settings
+# 
+# GENERAL TRADING SETTINGS (used by both trade and backtest commands):
+# - [exchange] - Exchange fees and market structure
+# - [slippage] - Slippage modeling
+# - [order_execution] - Order execution parameters
+# - [risk_management] - Risk management rules
+# - [market_data] - Market data handling
+# - [performance_tracking] - Performance metrics
+#
+# BACKTEST-SPECIFIC SETTINGS (only used by backtest command):
+# - [backtest_settings] - Backtest-only parameters (ignored by trade command)
 
 [exchange]
 # Binance fees (realistic for 2024)
@@ -12,15 +23,6 @@ tick_size = 0.00001    # Minimum price increment (1 tick)
 min_notional = 5.0     # Minimum order value in USDT
 max_order_size = 1000.0 # Maximum order size in base currency
 
-# Bid-ask spread simulation
-base_spread = 0.00002  # Base spread (2 ticks)
-spread_volatility = 0.3 # How much spread varies with volatility
-spread_widening_factor = 2.0 # Spread widens during high volatility
-
-# Order book simulation
-order_book_depth = 10  # Levels to simulate
-market_impact_factor = 0.0001 # Price impact per unit traded
-
 [slippage]
 # Realistic slippage modeling
 min_slippage = 0.00001  # 1 tick minimum
@@ -29,19 +31,10 @@ volatility_multiplier = 2.0 # Slippage increases with volatility
 size_multiplier = 1.5   # Slippage increases with order size
 
 [order_execution]
-# Fill simulation
-limit_order_fill_rate = 0.65  # 65% chance of limit order fill
-partial_fill_probability = 0.25 # 25% chance of partial fills
-partial_fill_ratio = 0.6      # Average 60% of order filled when partial
-
-# Order rejection simulation
-invalid_order_probability = 0.02 # 2% chance of order rejection
-rejection_reasons = ["insufficient_balance", "invalid_price", "order_too_small"]
-
-# Latency simulation
-network_latency_min = 0.001   # 1ms minimum latency
-network_latency_max = 0.050   # 50ms maximum latency
-latency_jitter = 0.010        # 10ms jitter
+# Order execution parameters (real-world applicable)
+order_timeout = 30.0          # 30 seconds order timeout
+max_retries = 3               # Maximum order retry attempts
+retry_delay = 1.0             # 1 second delay between retries
 
 [risk_management]
 # Position sizing
@@ -69,21 +62,12 @@ outlier_threshold = 3.0       # Standard deviations for outlier detection
 trading_hours_start = 0       # 00:00 UTC
 trading_hours_end = 24        # 24:00 UTC (24/7 for crypto)
 
-# Market events
-handle_market_halts = true    # Simulate market halts
-halt_probability = 0.001      # 0.1% chance of halt per hour
-halt_duration_min = 60        # 1 minute minimum halt
-halt_duration_max = 3600      # 1 hour maximum halt
-
 [performance_tracking]
-# Comprehensive metrics
+# Comprehensive metrics (real-world applicable)
 track_fill_rate = true
 track_slippage = true
 track_fees = true
 track_rebates = true
-track_queue_position = true
-track_latency = true
-track_market_impact = true
 track_order_rejections = true
 
 # Advanced analytics
@@ -94,17 +78,110 @@ calculate_calmar_ratio = true
 calculate_profit_factor = true
 
 [backtest_settings]
+# BACKTEST-SPECIFIC SETTINGS (only used by backtest command)
+# These settings are ignored by the trade command
+
 # Simulation parameters
-initial_capital = 10000.0     # $10,000 starting capital
-commission_model = "binance"  # Use Binance fee structure
-slippage_model = "realistic"  # Use realistic slippage model
-fill_model = "probabilistic"  # Use probabilistic fill model
+initial_capital = 10000.0     # $10,000 starting capital for backtesting
+commission_model = "binance"  # Use Binance fee structure for simulation
+slippage_model = "realistic"  # Use realistic slippage model for simulation
+fill_model = "probabilistic"  # Use probabilistic fill model for simulation
 
-# Data handling
-handle_data_gaps = true       # Handle missing data points
+# Data handling (backtest-specific)
+handle_data_gaps = true       # Handle missing data points in historical data
 interpolate_missing_data = false # Don't interpolate (use last known)
-filter_outliers = true        # Filter price outliers
+filter_outliers = true        # Filter price outliers in historical data
 
-# Bias prevention
-prevent_lookahead_bias = true # Ensure no future data leakage
-use_point_in_time_data = true # Use data available at each timestamp 
+# Bias prevention (backtest-specific)
+prevent_lookahead_bias = true # Ensure no future data leakage in backtesting
+use_point_in_time_data = true # Use data available at each timestamp
+
+# Simulation-only features (not used in live trading)
+simulate_market_microstructure = true # Simulate realistic market microstructure
+account_for_latency_in_signals = true # Apply latency to signal generation
+simulate_order_queue_position = true # Simulate order book queue position
+simulate_partial_fills = true # Simulate realistic partial fills
+simulate_order_cancellations = true # Simulate order cancellations and rejections
+
+# Market impact simulation (backtest-specific)
+simulate_market_impact = true # Account for order size impact on price
+market_impact_model = "linear" # Linear market impact model
+impact_decay_rate = 0.1       # How quickly market impact decays
+
+# Realistic order execution simulation
+simulate_order_delays = true  # Simulate realistic order processing delays
+simulate_exchange_errors = true # Simulate occasional exchange errors
+simulate_network_timeouts = true # Simulate network timeouts and retries
+
+# Fill and rejection simulation (backtest-specific)
+limit_order_fill_rate = 0.65  # 65% chance of limit order fill
+partial_fill_probability = 0.25 # 25% chance of partial fills
+partial_fill_ratio = 0.6      # Average 60% of order filled when partial
+invalid_order_probability = 0.02 # 2% chance of order rejection
+rejection_reasons = ["insufficient_balance", "invalid_price", "order_too_small"]
+
+# Market events simulation (backtest-specific)
+handle_market_halts = true    # Simulate market halts
+halt_probability = 0.001      # 0.1% chance of halt per hour
+halt_duration_min = 60        # 1 minute minimum halt
+halt_duration_max = 3600      # 1 hour maximum halt
+
+# Spread and market impact simulation (backtest-specific)
+base_spread = 0.00002  # Base spread (2 ticks)
+spread_volatility = 0.3 # How much spread varies with volatility
+spread_widening_factor = 2.0 # Spread widens during high volatility
+order_book_depth = 10  # Levels to simulate
+market_impact_factor = 0.0001 # Price impact per unit traded
+
+# Performance tracking simulation (backtest-specific)
+track_queue_position = true # Simulate order book queue position
+track_latency = true # Track simulated latency
+track_market_impact = true # Track simulated market impact
+
+# Latency simulation (backtest-specific)
+total_latency_model = "realistic" # Realistic latency model for simulation
+
+# Network latency components (simulation only)
+propagation_delay = 0.010      # 10ms propagation delay (simulation)
+transmission_delay = 0.002     # 2ms transmission delay (simulation)
+queuing_delay = 0.005          # 5ms queuing delay at routers (simulation)
+processing_delay = 0.003       # 3ms processing delay at exchange (simulation)
+
+# Latency variation factors (simulation only)
+latency_spike_probability = 0.01 # 1% chance of latency spike (simulation)
+latency_spike_multiplier = 5.0   # 5x normal latency during spikes (simulation)
+congestion_latency_factor = 2.0  # 2x latency during market congestion (simulation)
+
+# Exchange-specific latency (simulation only)
+exchange_processing_time = 0.001 # 1ms exchange order processing (simulation)
+order_matching_latency = 0.002   # 2ms order matching engine latency (simulation)
+market_data_latency = 0.001      # 1ms market data dissemination (simulation)
+
+# Strategy latency considerations (simulation only)
+signal_generation_time = 0.001   # 1ms strategy signal generation (simulation)
+order_construction_time = 0.001  # 1ms order construction time (simulation)
+risk_check_time = 0.002          # 2ms risk management checks (simulation)
+
+# Market microstructure simulation (backtest-specific)
+order_book_simulation = true     # Simulate realistic order book
+bid_ask_spread_model = "dynamic" # Dynamic spread model
+spread_volatility_factor = 0.3   # How much spread varies
+spread_widening_events = true    # Simulate spread widening during stress
+
+# Order book depth simulation (simulation only)
+order_book_levels = 10           # Number of price levels to simulate
+level_size_distribution = "exponential" # Exponential decay of order sizes
+min_level_size = 1.0             # Minimum order size at each level
+max_level_size = 1000.0          # Maximum order size at each level
+
+# Market maker behavior (simulation only)
+market_maker_presence = true     # Simulate market maker activity
+mm_spread_tightening = 0.8       # Market makers tighten spreads by 20%
+mm_inventory_management = true   # Market makers manage inventory
+mm_risk_aversion = 0.5           # Market maker risk aversion factor
+
+# High-frequency trading effects (simulation only)
+hft_competition = true           # Simulate HFT competition
+hft_latency_advantage = 0.001    # 1ms advantage for HFTs
+hft_order_cancellation_rate = 0.3 # 30% of HFT orders are cancelled
+hft_market_impact = 0.0001       # HFT market impact factor 
