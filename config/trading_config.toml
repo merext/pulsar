@@ -1,45 +1,110 @@
-# HFT Trading Configuration
-# Realistic parameters for live trading
+# Realistic Backtesting Configuration
+# Comprehensive parameters for accurate simulation
 
 [exchange]
-# Binance fees (taker/maker)
-taker_fee = 0.001  # 0.1% taker fee
-maker_fee = 0.0001  # 0.01% maker fee (with rebate)
+# Binance fees (realistic for 2024)
+taker_fee = 0.001      # 0.1% taker fee
+maker_fee = 0.0001     # 0.01% maker fee
 maker_rebate = 0.0001  # 0.01% rebate for maker orders
 
-# Slippage simulation
-min_slippage = 0.00001  # 1 tick minimum slippage
-max_slippage = 0.0001   # 10 ticks maximum slippage
-slippage_volatility = 0.5  # How much slippage varies with volatility
+# Market microstructure
+tick_size = 0.00001    # Minimum price increment (1 tick)
+min_notional = 5.0     # Minimum order value in USDT
+max_order_size = 1000.0 # Maximum order size in base currency
+
+# Bid-ask spread simulation
+base_spread = 0.00002  # Base spread (2 ticks)
+spread_volatility = 0.3 # How much spread varies with volatility
+spread_widening_factor = 2.0 # Spread widens during high volatility
+
+# Order book simulation
+order_book_depth = 10  # Levels to simulate
+market_impact_factor = 0.0001 # Price impact per unit traded
+
+[slippage]
+# Realistic slippage modeling
+min_slippage = 0.00001  # 1 tick minimum
+max_slippage = 0.0005   # 50 ticks maximum (during high volatility)
+volatility_multiplier = 2.0 # Slippage increases with volatility
+size_multiplier = 1.5   # Slippage increases with order size
+
+[order_execution]
+# Fill simulation
+limit_order_fill_rate = 0.65  # 65% chance of limit order fill
+partial_fill_probability = 0.25 # 25% chance of partial fills
+partial_fill_ratio = 0.6      # Average 60% of order filled when partial
+
+# Order rejection simulation
+invalid_order_probability = 0.02 # 2% chance of order rejection
+rejection_reasons = ["insufficient_balance", "invalid_price", "order_too_small"]
+
+# Latency simulation
+network_latency_min = 0.001   # 1ms minimum latency
+network_latency_max = 0.050   # 50ms maximum latency
+latency_jitter = 0.010        # 10ms jitter
 
 [risk_management]
 # Position sizing
-max_position_size = 500.0   # Reduced maximum position size for lower risk
-max_daily_loss = 500.0      # Reduced maximum daily loss
-max_drawdown = 0.15         # 15% maximum drawdown (much more conservative)
-
-# Signal filtering
-min_signal_strength = 0.4   # Higher signal strength requirement for better quality
-min_edge_over_cost = 1.5    # Higher edge requirement for more profitable trades
+max_position_size = 1000.0    # Maximum position size
+max_daily_loss = 1000.0       # Maximum daily loss
+max_drawdown = 0.20           # 20% maximum drawdown
+max_leverage = 1.0            # No leverage (spot trading)
 
 # Circuit breakers
-max_consecutive_losses = 3   # Stop trading after 3 consecutive losses (more conservative)
-cooldown_period = 600        # Wait 10 minutes after circuit breaker
+max_consecutive_losses = 5    # Stop after 5 consecutive losses
+cooldown_period = 300         # 5 minutes cooldown
+max_trades_per_hour = 100     # Rate limiting
 
-[order_management]
-# Order types and timing
-use_limit_orders = true      # Use limit orders instead of market orders
-limit_order_timeout = 1.0    # Cancel limit orders after 1 second
-min_spread_capture = 0.00005 # Only place orders if spread > 0.5 ticks
+# Margin requirements
+initial_margin = 1.0          # 100% margin required
+maintenance_margin = 0.8      # 80% maintenance margin
 
-# Queue position simulation
-queue_position_penalty = 0.00002  # Additional cost for being deep in queue
-partial_fill_probability = 0.3    # 30% chance of partial fills
+[market_data]
+# Data quality filters
+min_trade_size = 0.1          # Minimum trade size to consider
+max_price_change = 0.1        # Maximum allowed price change (10%)
+outlier_threshold = 3.0       # Standard deviations for outlier detection
+
+# Market hours (UTC)
+trading_hours_start = 0       # 00:00 UTC
+trading_hours_end = 24        # 24:00 UTC (24/7 for crypto)
+
+# Market events
+handle_market_halts = true    # Simulate market halts
+halt_probability = 0.001      # 0.1% chance of halt per hour
+halt_duration_min = 60        # 1 minute minimum halt
+halt_duration_max = 3600      # 1 hour maximum halt
 
 [performance_tracking]
-# Metrics to track
+# Comprehensive metrics
 track_fill_rate = true
 track_slippage = true
 track_fees = true
 track_rebates = true
-track_queue_position = true 
+track_queue_position = true
+track_latency = true
+track_market_impact = true
+track_order_rejections = true
+
+# Advanced analytics
+calculate_sharpe_ratio = true
+calculate_sortino_ratio = true
+calculate_max_drawdown = true
+calculate_calmar_ratio = true
+calculate_profit_factor = true
+
+[backtest_settings]
+# Simulation parameters
+initial_capital = 10000.0     # $10,000 starting capital
+commission_model = "binance"  # Use Binance fee structure
+slippage_model = "realistic"  # Use realistic slippage model
+fill_model = "probabilistic"  # Use probabilistic fill model
+
+# Data handling
+handle_data_gaps = true       # Handle missing data points
+interpolate_missing_data = false # Don't interpolate (use last known)
+filter_outliers = true        # Filter price outliers
+
+# Bias prevention
+prevent_lookahead_bias = true # Ensure no future data leakage
+use_point_in_time_data = true # Use data available at each timestamp 
