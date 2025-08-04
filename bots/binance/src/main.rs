@@ -48,8 +48,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let strategy = QuantumHftStrategy::new();
     
     let trading_symbol = "DOGEUSDT";
-    let trading_size_min = 5.0;
-    let trading_size_max = 15.0;
+    let trading_size_min = 10.0;
+    let trading_size_max = 50.0;
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
     
