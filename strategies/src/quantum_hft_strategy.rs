@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use trade::signal::Signal;
 use trade::trader::Position;
 use trade::models::TradeData;
-use tracing::{debug, info};
+use tracing::debug;
 use crate::strategy::Strategy;
 use crate::config::StrategyConfig;
 use async_trait::async_trait;
@@ -342,7 +342,8 @@ impl QuantumHftStrategy {
         let predictions = [
             self.linear_regression_slope,
             *self.macd_signal.back().unwrap_or(&0.0),
-            *self.rsi_values.back().unwrap_or(&0.0),
+            // Normalize RSI from 0-100 range to -1 to 1 range
+            (*self.rsi_values.back().unwrap_or(&50.0) - 50.0) / 50.0,
             if let (Some(upper), Some(lower), Some(middle), Some(price)) = (
                 self.bb_upper.back(),
                 self.bb_lower.back(),
@@ -654,9 +655,9 @@ impl Strategy for QuantumHftStrategy {
         let original_confidence = confidence;
         confidence = temp_strategy.apply_risk_filters(confidence);
         
-        // CRITICAL: Higher confidence threshold for better win rate
-        let confidence_min = self.config.get_or("confidence_min", 0.55);
-        confidence = confidence.max(confidence_min); // Reduced from 0.6 to 0.55 for more trades
+        // CRITICAL: Use minimum confidence as a filter instead of setting it
+        let confidence_min = self.config.get_or("confidence_min", 0.4);
+        // Don't set minimum confidence, just use it as a filter
         
         // REQUIRE multiple strong signals for execution
         let contributing_models_min = self.config.get_or("contributing_models_min", 1);
@@ -673,10 +674,25 @@ impl Strategy for QuantumHftStrategy {
         }
         
         // NEW: Additional filter for signal quality
-        let confidence_quality_threshold = self.config.get_or("confidence_quality_threshold", 0.6);
+        let confidence_quality_threshold = self.config.get_or("confidence_quality_threshold", 0.4);
         if signal != Signal::Hold && confidence < confidence_quality_threshold { // Reduced from 0.65 to 0.6
             signal = Signal::Hold;
             confidence = 0.0;
+        }
+        
+        // FALLBACK: Generate signals even with weak indicators if we have some confidence
+        if signal == Signal::Hold && confidence > confidence_min {
+            // If we have some confidence but no specific signal, generate based on strongest indicator
+            if linear_reg_pred.abs() > 0.1 {
+                signal = if linear_reg_pred > 0.0 { Signal::Buy } else { Signal::Sell };
+                contributing_models.push("FALLBACK_TREND");
+            } else if macd_pred.abs() > 0.1 {
+                signal = if macd_pred > 0.0 { Signal::Buy } else { Signal::Sell };
+                contributing_models.push("FALLBACK_MOM");
+            } else if ensemble_pred.abs() > 0.1 {
+                signal = if ensemble_pred > 0.0 { Signal::Buy } else { Signal::Sell };
+                contributing_models.push("FALLBACK_ENS");
+            }
         }
         
         // Log strategy state
@@ -700,7 +716,7 @@ impl Strategy for QuantumHftStrategy {
         
         // Log detailed info only for high-confidence signals
         if confidence > 0.8 {
-            info!(
+            debug!(
                 strategy = "QML-HIGH",
                 signal = ?signal,
                 confidence = %format!("{:.3}", confidence),

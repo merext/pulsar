@@ -1,7 +1,130 @@
 # Trading Configuration
-# This file contains the position sizing configuration used by the trading bot
+# This file contains the complete trading configuration used by the trading bot
 
 [position_sizing]
 trading_size_min = 10.0
 trading_size_max = 50.0
-default_trading_symbol = "DOGEUSDT" 
+default_trading_symbol = "DOGEUSDT"
+
+[exchange]
+taker_fee = 0.001
+maker_fee = 0.001
+maker_rebate = 0.0005
+tick_size = 0.00001
+min_notional = 10.0
+max_order_size = 1000000.0
+step_size = 0.1
+
+[slippage]
+min_slippage = 0.0001
+max_slippage = 0.01
+volatility_multiplier = 1.5
+size_multiplier = 1.2
+market_order_volatility = 0.002
+taker_order_volatility = 0.001
+
+[order_execution]
+order_timeout = 5.0
+max_retries = 3
+retry_delay = 0.1
+
+[risk_management]
+max_position_size = 100000.0
+max_daily_loss = 1000.0
+max_drawdown = 0.1
+max_leverage = 1.0
+min_signal_strength = 0.3
+max_consecutive_losses = 5
+cooldown_period = 60
+max_trades_per_hour = 100
+initial_margin = 0.1
+maintenance_margin = 0.05
+
+[market_data]
+min_trade_size = 1.0
+max_price_change = 0.1
+outlier_threshold = 3.0
+trading_hours_start = 0
+trading_hours_end = 24
+
+[performance_tracking]
+track_fill_rate = true
+track_slippage = true
+track_fees = true
+track_rebates = true
+track_order_rejections = true
+calculate_sharpe_ratio = true
+calculate_sortino_ratio = true
+calculate_max_drawdown = true
+calculate_calmar_ratio = true
+calculate_profit_factor = true
+
+[backtest_settings]
+initial_capital = 10000.0
+commission_model = "binance"
+slippage_model = "realistic"
+fill_model = "immediate"
+handle_data_gaps = true
+interpolate_missing_data = false
+filter_outliers = true
+prevent_lookahead_bias = true
+use_point_in_time_data = true
+simulate_market_microstructure = true
+account_for_latency_in_signals = true
+simulate_order_queue_position = true
+simulate_partial_fills = true
+simulate_order_cancellations = true
+simulate_market_impact = true
+market_impact_model = "linear"
+impact_decay_rate = 0.1
+simulate_order_delays = true
+simulate_exchange_errors = false
+simulate_network_timeouts = false
+limit_order_fill_rate = 0.95
+partial_fill_probability = 0.1
+partial_fill_ratio = 0.5
+invalid_order_probability = 0.001
+rejection_reasons = ["insufficient_balance", "invalid_price", "invalid_quantity"]
+handle_market_halts = false
+halt_probability = 0.0001
+halt_duration_min = 60
+halt_duration_max = 300
+base_spread = 0.0001
+spread_volatility = 0.00005
+spread_widening_factor = 1.5
+order_book_depth = 10
+market_impact_factor = 0.0001
+track_queue_position = true
+track_latency = true
+track_market_impact = true
+total_latency_model = "realistic"
+propagation_delay = 0.01
+transmission_delay = 0.002
+queuing_delay = 0.005
+processing_delay = 0.003
+latency_spike_probability = 0.01
+latency_spike_multiplier = 5.0
+congestion_latency_factor = 1.2
+exchange_processing_time = 0.001
+order_matching_latency = 0.0005
+market_data_latency = 0.001
+signal_generation_time = 0.0001
+order_construction_time = 0.0001
+risk_check_time = 0.0001
+order_book_simulation = true
+bid_ask_spread_model = "realistic"
+spread_volatility_factor = 1.0
+spread_widening_events = true
+order_book_levels = 10
+level_size_distribution = "exponential"
+min_level_size = 100.0
+max_level_size = 10000.0
+market_maker_presence = true
+mm_spread_tightening = 0.8
+mm_inventory_management = true
+mm_risk_aversion = 0.5
+hft_competition = true
+hft_latency_advantage = 0.5
+hft_order_cancellation_rate = 0.3
+hft_market_impact = 0.00005
+disable_drawdown_limit = false 

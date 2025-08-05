@@ -18,13 +18,13 @@ impl StrategyConfig {
 
     /// Load strategy-specific configuration from the config directory
     pub fn load_strategy_config(strategy_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let config_path = format!("../../config/{}.toml", strategy_name);
+        let config_path = format!("config/{}.toml", strategy_name);
         Self::from_file(config_path)
     }
 
     /// Load trading configuration from the config directory
     pub fn load_trading_config() -> Result<Self, Box<dyn std::error::Error>> {
-        let config_path = "../../config/trading_config.toml";
+        let config_path = "config/trading_config.toml";
         Self::from_file(config_path)
     }
 
