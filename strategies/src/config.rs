@@ -25,7 +25,14 @@ impl StrategyConfig {
     /// Load trading configuration from the config directory
     pub fn load_trading_config() -> Result<Self, Box<dyn std::error::Error>> {
         let config_path = "config/trading_config.toml";
-        Self::from_file(config_path)
+        match Self::from_file(config_path) {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                eprintln!("Failed to load trading config from {}: {}", config_path, e);
+                eprintln!("Current working directory: {:?}", std::env::current_dir()?);
+                Err(e)
+            }
+        }
     }
 
     /// Get a value from the configuration

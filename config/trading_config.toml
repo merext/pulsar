@@ -23,13 +23,8 @@ size_multiplier = 1.2
 market_order_volatility = 0.002
 taker_order_volatility = 0.001
 
-[order_execution]
-order_timeout = 5.0
-max_retries = 3
-retry_delay = 0.1
-
 [risk_management]
-max_position_size = 100000.0
+max_position_size = 1000000.0
 max_daily_loss = 1000.0
 max_drawdown = 0.1
 max_leverage = 1.0
@@ -39,6 +34,11 @@ cooldown_period = 60
 max_trades_per_hour = 100
 initial_margin = 0.1
 maintenance_margin = 0.05
+
+[order_execution]
+order_timeout = 5.0
+max_retries = 3
+retry_delay = 0.1
 
 [market_data]
 min_trade_size = 1.0
@@ -84,7 +84,11 @@ limit_order_fill_rate = 0.95
 partial_fill_probability = 0.1
 partial_fill_ratio = 0.5
 invalid_order_probability = 0.001
-rejection_reasons = ["insufficient_balance", "invalid_price", "invalid_quantity"]
+rejection_reasons = [
+    "insufficient_balance",
+    "invalid_price",
+    "invalid_quantity",
+]
 handle_market_halts = false
 halt_probability = 0.0001
 halt_duration_min = 60
@@ -127,4 +131,4 @@ hft_competition = true
 hft_latency_advantage = 0.5
 hft_order_cancellation_rate = 0.3
 hft_market_impact = 0.00005
-disable_drawdown_limit = false 
+disable_drawdown_limit = false

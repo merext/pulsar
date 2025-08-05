@@ -18,13 +18,11 @@ ensemble_weight_vwap = 0.167
 ensemble_weight_ensemble = 0.167
 
 # Risk Management Parameters
-volatility_score = 0.5
 liquidity_score = 0.5
 momentum_score = 0.5
 
 # Learning Parameters
 learning_rate = 0.01
-performance_decay = 0.95
 
 # Data Window Capacities
 price_window_capacity = 1000
