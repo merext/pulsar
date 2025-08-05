@@ -1,10 +1,7 @@
 .PHONY: test trade
 
 test:
-	RUST_LOG=info ./target/debug/binance-bot backtest --path ./data/DOGEUSDT-trades-2025-05-28.zip
-
-emulate:
-	RUST_LOG=info ./target/debug/binance-bot emulate
+	RUST_LOG=info cargo run backtest --path ./data/DOGEUSDT-trades-2025-05-28.zip | tail -1
 
 trade:
-	RUST_LOG=info ./target/debug/binance-bot trade
+	RUST_LOG=info cargo run trade
