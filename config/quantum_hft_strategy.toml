@@ -1,32 +1,108 @@
 # Quantum HFT Strategy Configuration
-# Revolutionary machine learning-based HFT strategy
-# OPTIMIZED FOR 50%+ WIN RATE
+# Best for: High-frequency trading with ensemble machine learning
+# OPTIMIZED FOR MAXIMUM PROFIT
 
-# Core Parameters
-short_window = 3              # Ultra-short for immediate signals
-medium_window = 10            # Medium for trend confirmation
-long_window = 30              # Long for overall direction
-signal_threshold = 0.02       # Very aggressive threshold to ensure trades
+# Data Window Parameters
+short_window = 12
+long_window = 26
+rsi_window = 14
+bb_window = 20
+vwap_window = 50
 
-# Ensemble Configuration
-ensemble_size = 7             # Multiple model types
-feature_count = 25            # Rich feature set
+# Ensemble Weights (initially equal, will adapt)
+ensemble_weight_linear = 0.167
+ensemble_weight_macd = 0.167
+ensemble_weight_rsi = 0.167
+ensemble_weight_bollinger = 0.167
+ensemble_weight_vwap = 0.167
+ensemble_weight_ensemble = 0.167
 
-# Risk Management
-max_position_size = 500.0     # Conservative position sizing
-stop_loss_pct = 0.015         # 1.5% stop loss
-take_profit_pct = 0.03        # 3% take profit
-max_drawdown_pct = 0.10       # 10% max drawdown
+# Risk Management Parameters
+volatility_score = 0.5
+liquidity_score = 0.5
+momentum_score = 0.5
 
-# Advanced Filters (very aggressive to ensure trades)
-momentum_filter = 0.02        # Very aggressive momentum threshold
-volatility_filter = 0.03      # Very aggressive volatility threshold
-liquidity_filter = 0.02       # Very aggressive liquidity threshold
+# Signal Thresholds
+signal_threshold = 0.6
+confidence_boost = 0.4
+confidence_reduction = 0.95
+confidence_threshold = 0.55
+rsi_oversold_threshold = 25.0
+rsi_overbought_threshold = 75.0
+bb_breakout_threshold = 0.7
+ensemble_threshold = 0.4
+ensemble_strong_threshold = 0.6
 
 # Learning Parameters
-learning_rate = 0.01          # Adaptive learning rate
-adaptation_threshold = 0.1    # Performance threshold for adaptation
+learning_rate = 0.01
+performance_decay = 0.95
 
-# Pattern Detection
-confidence_threshold = 0.7    # Pattern confidence threshold
-min_pattern_length = 5        # Minimum pattern length 
+# Data Window Capacities
+price_window_capacity = 1000
+volume_window_capacity = 1000
+macd_window_capacity = 100
+rsi_window_capacity = 100
+bb_window_capacity = 100
+vwap_window_capacity = 100
+
+# MACD Parameters
+macd_signal_window = 9
+
+# Bollinger Bands Parameters
+bb_std_dev_multiplier = 2.0
+
+# RSI Parameters
+rsi_default_value = 50.0
+
+# Signal Generation Thresholds
+trend_strength_threshold = 0.4
+momentum_threshold = 0.5
+momentum_strong_threshold = 0.7
+rsi_oversold_threshold = 25.0
+rsi_overbought_threshold = 75.0
+bb_breakout_threshold = 0.7
+ensemble_threshold = 0.4
+ensemble_strong_threshold = 0.6
+trend_strength_min = 0.15
+trend_strength_min_trend = 0.1
+confidence_min = 0.55
+confidence_quality_threshold = 0.6
+contributing_models_min = 1
+
+# Confidence Boost Values
+trend_confidence_weight = 0.7
+momentum_confidence_weight = 0.5
+momentum_strong_confidence_weight = 0.6
+rsi_confidence_boost = 0.4
+rsi_confidence_strong = 0.5
+bb_confidence_boost = 0.3
+bb_confidence_strong = 0.4
+ensemble_confidence_weight = 0.6
+ensemble_confidence_strong = 0.7
+position_rsi_confidence = 0.4
+position_bb_confidence = 0.3
+position_ensemble_confidence = 0.5
+
+# Risk Filter Parameters
+volatility_high_threshold = 0.98
+volatility_low_threshold = 0.005
+volatility_high_reduction = 0.95
+volatility_low_reduction = 0.98
+liquidity_low_threshold = 0.001
+liquidity_high_threshold = 20.0
+liquidity_low_reduction = 0.95
+liquidity_high_boost = 1.2
+momentum_high_threshold = 0.9
+momentum_boost = 1.2
+momentum_reduction = 0.98
+filter_significant_threshold = 0.95
+
+# Risk Score Update Parameters
+volatility_window_size = 20
+liquidity_window_size = 20
+momentum_window_size = 10
+volatility_multiplier = 100.0
+liquidity_max_ratio = 2.0
+
+# Position Management
+position_ensemble_sell_threshold = -0.5 

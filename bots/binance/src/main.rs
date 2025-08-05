@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
 use strategies::strategy::Strategy;
+use strategies::config::StrategyConfig;
 use tracing::info;
 
 mod backtest;
@@ -47,9 +48,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     use strategies::quantum_hft_strategy::QuantumHftStrategy;
     let strategy = QuantumHftStrategy::new();
     
-    let trading_symbol = "DOGEUSDT";
-    let trading_size_min = 10.0;
-    let trading_size_max = 50.0;
+    // Load trading configuration
+    let trading_config = StrategyConfig::load_trading_config()
+        .expect("Failed to load trading configuration");
+    let position_sizing = trading_config.section("position_sizing")
+        .expect("Position sizing configuration not found");
+    
+    let trading_symbol = position_sizing.get_or("default_trading_symbol", "DOGEUSDT".to_string());
+    let trading_size_min = position_sizing.get_or("trading_size_min", 10.0);
+    let trading_size_max = position_sizing.get_or("trading_size_max", 50.0);
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
     
@@ -59,14 +66,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Trade => {
             info!("Starting live trading...");
             let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
-                trading_symbol,
+                &trading_symbol,
                 &api_key,
                 &api_secret,
                 TradeMode::Real,
             ).await?;
             
             trade::run_trade(
-                trading_symbol,
+                &trading_symbol,
                 &api_key,
                 &api_secret,
                 strategy,
@@ -79,14 +86,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Emulate => {
             info!("Starting emulated trading...");
             let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
-                trading_symbol,
+                &trading_symbol,
                 &api_key,
                 &api_secret,
                 TradeMode::Emulated,
             ).await?;
             
             trade::run_trade(
-                trading_symbol,
+                &trading_symbol,
                 &api_key,
                 &api_secret,
                 strategy,
@@ -99,10 +106,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {
                 info!("Starting backtest with data from: {}", data_path);
-                backtest::run_backtest(&data_path, strategy, trading_symbol, trading_size_min, trading_size_max).await?;
+                backtest::run_backtest(&data_path, strategy, &trading_symbol, trading_size_min, trading_size_max).await?;
             } else if let Some(ws_url) = url {
                 info!("Starting backtest with WebSocket data from: {}", ws_url);
-                backtest::run_backtest(&ws_url, strategy, trading_symbol, trading_size_min, trading_size_max).await?;
+                backtest::run_backtest(&ws_url, strategy, &trading_symbol, trading_size_min, trading_size_max).await?;
             } else {
                 return Err("No data source specified for backtest".into());
             }

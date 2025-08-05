@@ -15,6 +15,7 @@ use trade::trader::Position;
 use trade::models::TradeData;
 use tracing::{debug, info};
 use crate::strategy::Strategy;
+use crate::config::StrategyConfig;
 use async_trait::async_trait;
 
 /// Machine Learning-based Quantum HFT Strategy
@@ -28,6 +29,9 @@ use async_trait::async_trait;
 /// 6. Ensemble prediction combining all models
 #[derive(Clone)]
 pub struct QuantumHftStrategy {
+    // Configuration
+    config: StrategyConfig,
+    
     // Data windows
     price_window: VecDeque<f64>,
     volume_window: VecDeque<f64>,
@@ -65,36 +69,73 @@ pub struct QuantumHftStrategy {
 
 impl QuantumHftStrategy {
     pub fn new() -> Self {
+        let config = StrategyConfig::load_strategy_config("quantum_hft_strategy")
+            .expect("Failed to load quantum_hft_strategy configuration");
+        
+        let short_window = config.get_or("short_window", 12);
+        let long_window = config.get_or("long_window", 26);
+        let rsi_window = config.get_or("rsi_window", 14);
+        let bb_window = config.get_or("bb_window", 20);
+        let vwap_window = config.get_or("vwap_window", 50);
+        
+        let ensemble_weight_linear = config.get_or("ensemble_weight_linear", 0.167);
+        let ensemble_weight_macd = config.get_or("ensemble_weight_macd", 0.167);
+        let ensemble_weight_rsi = config.get_or("ensemble_weight_rsi", 0.167);
+        let ensemble_weight_bollinger = config.get_or("ensemble_weight_bollinger", 0.167);
+        let ensemble_weight_vwap = config.get_or("ensemble_weight_vwap", 0.167);
+        let ensemble_weight_ensemble = config.get_or("ensemble_weight_ensemble", 0.167);
+        
+        let volatility_score = config.get_or("volatility_score", 0.5);
+        let liquidity_score = config.get_or("liquidity_score", 0.5);
+        let momentum_score = config.get_or("momentum_score", 0.5);
+        
+        let price_window_capacity = config.get_or("price_window_capacity", 1000);
+        let volume_window_capacity = config.get_or("volume_window_capacity", 1000);
+        let macd_window_capacity = config.get_or("macd_window_capacity", 100);
+        let rsi_window_capacity = config.get_or("rsi_window_capacity", 100);
+        let bb_window_capacity = config.get_or("bb_window_capacity", 100);
+        let vwap_window_capacity = config.get_or("vwap_window_capacity", 100);
+        
         Self {
+            // Configuration
+            config,
+            
             // Data windows
-            price_window: VecDeque::with_capacity(1000),
-            volume_window: VecDeque::with_capacity(1000),
+            price_window: VecDeque::with_capacity(price_window_capacity),
+            volume_window: VecDeque::with_capacity(volume_window_capacity),
             
             // ML model parameters
-            short_window: 12,
-            long_window: 26,
-            rsi_window: 14,
-            bb_window: 20,
-            vwap_window: 50,
+            short_window,
+            long_window,
+            rsi_window,
+            bb_window,
+            vwap_window,
             
             // ML model states
             linear_regression_slope: 0.0,
-            macd_fast: VecDeque::with_capacity(100),
-            macd_slow: VecDeque::with_capacity(100),
-            macd_signal: VecDeque::with_capacity(100),
-            rsi_values: VecDeque::with_capacity(100),
-            bb_upper: VecDeque::with_capacity(100),
-            bb_lower: VecDeque::with_capacity(100),
-            bb_middle: VecDeque::with_capacity(100),
-            vwap_values: VecDeque::with_capacity(100),
+            macd_fast: VecDeque::with_capacity(macd_window_capacity),
+            macd_slow: VecDeque::with_capacity(macd_window_capacity),
+            macd_signal: VecDeque::with_capacity(macd_window_capacity),
+            rsi_values: VecDeque::with_capacity(rsi_window_capacity),
+            bb_upper: VecDeque::with_capacity(bb_window_capacity),
+            bb_lower: VecDeque::with_capacity(bb_window_capacity),
+            bb_middle: VecDeque::with_capacity(bb_window_capacity),
+            vwap_values: VecDeque::with_capacity(vwap_window_capacity),
             
             // Ensemble weights (initially equal, will adapt)
-            ensemble_weights: [0.167, 0.167, 0.167, 0.167, 0.167, 0.167],
+            ensemble_weights: [
+                ensemble_weight_linear,
+                ensemble_weight_macd,
+                ensemble_weight_rsi,
+                ensemble_weight_bollinger,
+                ensemble_weight_vwap,
+                ensemble_weight_ensemble
+            ],
             
             // Risk management
-            volatility_score: 0.5,
-            liquidity_score: 0.5,
-            momentum_score: 0.5,
+            volatility_score,
+            liquidity_score,
+            momentum_score,
             
             // Performance tracking
             model_performance: [0.0; 6],
@@ -162,18 +203,21 @@ impl QuantumHftStrategy {
         self.macd_fast.push_back(ema_fast);
         self.macd_slow.push_back(ema_slow);
         
-        if self.macd_fast.len() > 100 {
+        let macd_window_capacity = self.config.get_or("macd_window_capacity", 100);
+        if self.macd_fast.len() > macd_window_capacity {
             self.macd_fast.pop_front();
         }
-        if self.macd_slow.len() > 100 {
+        if self.macd_slow.len() > macd_window_capacity {
             self.macd_slow.pop_front();
         }
         
         let macd_line = ema_fast - ema_slow;
-        let signal_line = self.calculate_ema(&self.macd_fast, 9).unwrap_or(macd_line);
+        let macd_signal_window = self.config.get_or("macd_signal_window", 9);
+        let signal_line = self.calculate_ema(&self.macd_fast, macd_signal_window).unwrap_or(macd_line);
         
         self.macd_signal.push_back(signal_line);
-        if self.macd_signal.len() > 100 {
+        let macd_window_capacity = self.config.get_or("macd_window_capacity", 100);
+        if self.macd_signal.len() > macd_window_capacity {
             self.macd_signal.pop_front();
         }
         
@@ -185,8 +229,9 @@ impl QuantumHftStrategy {
     
     /// RSI calculation
     fn calculate_rsi(&mut self) -> f64 {
+        let rsi_default_value = self.config.get_or("rsi_default_value", 50.0);
         if self.price_window.len() < self.rsi_window + 1 {
-            return 50.0;
+            return rsi_default_value;
         }
         
         let mut gains = 0.0;
@@ -212,7 +257,8 @@ impl QuantumHftStrategy {
         let rsi = 100.0 - (100.0 / (1.0 + rs));
         
         self.rsi_values.push_back(rsi);
-        if self.rsi_values.len() > 100 {
+        let rsi_window_capacity = self.config.get_or("rsi_window_capacity", 100);
+        if self.rsi_values.len() > rsi_window_capacity {
             self.rsi_values.pop_front();
         }
         
@@ -232,21 +278,23 @@ impl QuantumHftStrategy {
         let variance: f64 = prices.iter().map(|&p| (p - sma).powi(2)).sum::<f64>() / self.bb_window as f64;
         let std_dev = variance.sqrt();
         
-        let upper_band = sma + (2.0 * std_dev);
-        let lower_band = sma - (2.0 * std_dev);
+        let bb_std_dev_multiplier = self.config.get_or("bb_std_dev_multiplier", 2.0);
+        let upper_band = sma + (bb_std_dev_multiplier * std_dev);
+        let lower_band = sma - (bb_std_dev_multiplier * std_dev);
         let current_price = self.price_window.back().unwrap();
         
         self.bb_upper.push_back(upper_band);
         self.bb_lower.push_back(lower_band);
         self.bb_middle.push_back(sma);
         
-        if self.bb_upper.len() > 100 {
+        let bb_window_capacity = self.config.get_or("bb_window_capacity", 100);
+        if self.bb_upper.len() > bb_window_capacity {
             self.bb_upper.pop_front();
         }
-        if self.bb_lower.len() > 100 {
+        if self.bb_lower.len() > bb_window_capacity {
             self.bb_lower.pop_front();
         }
-        if self.bb_middle.len() > 100 {
+        if self.bb_middle.len() > bb_window_capacity {
             self.bb_middle.pop_front();
         }
         
@@ -277,7 +325,8 @@ impl QuantumHftStrategy {
         let vwap: f64 = prices.iter().zip(volumes.iter()).map(|(p, v)| p * v).sum::<f64>() / total_volume;
         
         self.vwap_values.push_back(vwap);
-        if self.vwap_values.len() > 100 {
+        let vwap_window_capacity = self.config.get_or("vwap_window_capacity", 100);
+        if self.vwap_values.len() > vwap_window_capacity {
             self.vwap_values.pop_front();
         }
         
@@ -324,25 +373,30 @@ impl QuantumHftStrategy {
     /// Update risk management scores
     fn update_risk_scores(&mut self) {
         // Volatility score based on price changes
-        if self.price_window.len() >= 20 {
-            let recent_prices: Vec<f64> = self.price_window.iter().rev().take(20).cloned().collect();
+        let volatility_window_size = self.config.get_or("volatility_window_size", 20);
+        if self.price_window.len() >= volatility_window_size {
+            let recent_prices: Vec<f64> = self.price_window.iter().rev().take(volatility_window_size).cloned().collect();
             let returns: Vec<f64> = recent_prices.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
             let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
             let variance = returns.iter().map(|r| (r - mean_return).powi(2)).sum::<f64>() / returns.len() as f64;
-            self.volatility_score = (variance.sqrt() * 100.0).min(1.0);
+            let volatility_multiplier = self.config.get_or("volatility_multiplier", 100.0);
+            self.volatility_score = (variance.sqrt() * volatility_multiplier).min(1.0);
         }
         
         // Liquidity score based on volume
-        if self.volume_window.len() >= 20 {
-            let recent_volume: Vec<f64> = self.volume_window.iter().rev().take(20).cloned().collect();
+        let liquidity_window_size = self.config.get_or("liquidity_window_size", 20);
+        if self.volume_window.len() >= liquidity_window_size {
+            let recent_volume: Vec<f64> = self.volume_window.iter().rev().take(liquidity_window_size).cloned().collect();
             let avg_volume = recent_volume.iter().sum::<f64>() / recent_volume.len() as f64;
             let current_volume = self.volume_window.back().unwrap_or(&avg_volume);
-            self.liquidity_score = (current_volume / avg_volume).min(2.0) / 2.0;
+            let liquidity_max_ratio = self.config.get_or("liquidity_max_ratio", 2.0);
+            self.liquidity_score = (current_volume / avg_volume).min(liquidity_max_ratio) / liquidity_max_ratio;
         }
         
         // Momentum score based on recent price movement
-        if self.price_window.len() >= 10 {
-            let recent_prices: Vec<f64> = self.price_window.iter().rev().take(10).cloned().collect();
+        let momentum_window_size = self.config.get_or("momentum_window_size", 10);
+        if self.price_window.len() >= momentum_window_size {
+            let recent_prices: Vec<f64> = self.price_window.iter().rev().take(momentum_window_size).cloned().collect();
             let momentum = (recent_prices[0] - recent_prices[recent_prices.len() - 1]) / recent_prices[recent_prices.len() - 1];
             self.momentum_score = momentum.tanh();
         }
@@ -355,7 +409,7 @@ impl QuantumHftStrategy {
         }
         
         // Simple performance update (in a real system, this would be more sophisticated)
-        let learning_rate = 0.01;
+        let learning_rate = self.config.get_or("learning_rate", 0.01);
         for i in 0..6 {
             self.model_performance[i] += trade_result * learning_rate;
         }
@@ -379,12 +433,14 @@ impl Strategy for QuantumHftStrategy {
     async fn on_trade(&mut self, trade: TradeData) {
         // Update data windows with new trade data
         self.price_window.push_back(trade.price);
-        if self.price_window.len() > 1000 {
+        let price_window_capacity = self.config.get_or("price_window_capacity", 1000);
+        if self.price_window.len() > price_window_capacity {
             self.price_window.pop_front();
         }
         
         self.volume_window.push_back(trade.qty);
-        if self.volume_window.len() > 1000 {
+        let volume_window_capacity = self.config.get_or("volume_window_capacity", 1000);
+        if self.volume_window.len() > volume_window_capacity {
             self.volume_window.pop_front();
         }
         
@@ -447,36 +503,42 @@ impl Strategy for QuantumHftStrategy {
         
         // 1. TREND DETECTION (Primary signal) - More selective for better win rate
         let trend_strength = linear_reg_pred.abs();
-        if trend_strength > 0.4 { // Increased threshold for stronger trends
+        let trend_strength_threshold = self.config.get_or("trend_strength_threshold", 0.4);
+        let trend_confidence_weight = self.config.get_or("trend_confidence_weight", 0.7);
+        if trend_strength > trend_strength_threshold { // Increased threshold for stronger trends
             if linear_reg_pred > 0.0 {
                 signal = Signal::Buy;
-                confidence += 0.7 * trend_strength.min(1.0); // Higher weight for strong trends
+                confidence += trend_confidence_weight * trend_strength.min(1.0); // Higher weight for strong trends
                 contributing_models.push("TREND");
             } else {
                 signal = Signal::Sell;
-                confidence += 0.7 * trend_strength.min(1.0);
+                confidence += trend_confidence_weight * trend_strength.min(1.0);
                 contributing_models.push("TREND");
             }
         }
         
         // 2. MOMENTUM CONFIRMATION (Secondary signal) - More selective
-        if macd_pred.abs() > 0.5 { // Increased threshold for stronger momentum
+        let momentum_threshold = self.config.get_or("momentum_threshold", 0.5);
+        let momentum_confidence_weight = self.config.get_or("momentum_confidence_weight", 0.5);
+        let momentum_strong_threshold = self.config.get_or("momentum_strong_threshold", 0.7);
+        let momentum_strong_confidence_weight = self.config.get_or("momentum_strong_confidence_weight", 0.6);
+        if macd_pred.abs() > momentum_threshold { // Increased threshold for stronger momentum
             if macd_pred > 0.0 && signal == Signal::Buy {
-                confidence += 0.5 * macd_pred.min(1.0); // Higher weight
+                confidence += momentum_confidence_weight * macd_pred.min(1.0); // Higher weight
                 contributing_models.push("MOM");
             } else if macd_pred < 0.0 && signal == Signal::Sell {
-                confidence += 0.5 * macd_pred.abs().min(1.0);
+                confidence += momentum_confidence_weight * macd_pred.abs().min(1.0);
                 contributing_models.push("MOM");
             } else if signal == Signal::Hold {
                 // Only generate new signal if momentum is very strong
-                if macd_pred.abs() > 0.7 { // Higher threshold
+                if macd_pred.abs() > momentum_strong_threshold { // Higher threshold
                     if macd_pred > 0.0 {
                         signal = Signal::Buy;
-                        confidence += 0.6 * macd_pred.min(1.0);
+                        confidence += momentum_strong_confidence_weight * macd_pred.min(1.0);
                         contributing_models.push("MOM");
                     } else {
                         signal = Signal::Sell;
-                        confidence += 0.6 * macd_pred.abs().min(1.0);
+                        confidence += momentum_strong_confidence_weight * macd_pred.abs().min(1.0);
                         contributing_models.push("MOM");
                     }
                 }
@@ -486,88 +548,105 @@ impl Strategy for QuantumHftStrategy {
         // 3. MEAN REVERSION (Counter-trend opportunities) - Less selective
         // RSI is already in 0-100 range from stored values
         let rsi_actual = rsi_pred; // Use RSI value directly (0-100 range)
-        if rsi_actual < 25.0 { // Less extreme oversold (was 15.0)
+        let rsi_oversold_threshold = self.config.get_or("rsi_oversold_threshold", 25.0);
+        let rsi_overbought_threshold = self.config.get_or("rsi_overbought_threshold", 75.0);
+        let rsi_confidence_boost = self.config.get_or("rsi_confidence_boost", 0.4);
+        let rsi_confidence_strong = self.config.get_or("rsi_confidence_strong", 0.5);
+        let trend_strength_min = self.config.get_or("trend_strength_min", 0.15);
+        if rsi_actual < rsi_oversold_threshold { // Less extreme oversold (was 15.0)
             if signal == Signal::Buy {
-                confidence += 0.4; // Higher boost
+                confidence += rsi_confidence_boost; // Higher boost
                 contributing_models.push("RSI_OS");
-            } else if signal == Signal::Hold && trend_strength < 0.15 { // Lower threshold
+            } else if signal == Signal::Hold && trend_strength < trend_strength_min { // Lower threshold
                 signal = Signal::Buy;
-                confidence += 0.5; // Higher confidence
+                confidence += rsi_confidence_strong; // Higher confidence
                 contributing_models.push("RSI_OS");
             }
-        } else if rsi_actual > 75.0 { // Less extreme overbought (was 85.0)
+        } else if rsi_actual > rsi_overbought_threshold { // Less extreme overbought (was 85.0)
             if signal == Signal::Sell {
-                confidence += 0.4; // Higher boost
+                confidence += rsi_confidence_boost; // Higher boost
                 contributing_models.push("RSI_OB");
-            } else if signal == Signal::Hold && trend_strength < 0.15 { // Lower threshold
+            } else if signal == Signal::Hold && trend_strength < trend_strength_min { // Lower threshold
                 signal = Signal::Sell;
-                confidence += 0.5; // Higher confidence
+                confidence += rsi_confidence_strong; // Higher confidence
                 contributing_models.push("RSI_OB");
             }
         }
         
         // 4. VOLATILITY BREAKOUTS (Bollinger Bands) - Less selective
-        if bb_pred.abs() > 0.7 { // Lower threshold for breakouts (was 0.9)
-            if bb_pred < -0.7 { // Price below lower band (oversold)
+        let bb_breakout_threshold = self.config.get_or("bb_breakout_threshold", 0.7);
+        let bb_confidence_boost = self.config.get_or("bb_confidence_boost", 0.3);
+        let bb_confidence_strong = self.config.get_or("bb_confidence_strong", 0.4);
+        if bb_pred.abs() > bb_breakout_threshold { // Lower threshold for breakouts (was 0.9)
+            if bb_pred < -bb_breakout_threshold { // Price below lower band (oversold)
                 if signal == Signal::Buy {
-                    confidence += 0.3; // Higher boost
+                    confidence += bb_confidence_boost; // Higher boost
                     contributing_models.push("BB_OS");
                 } else if signal == Signal::Hold && trend_strength < 0.25 { // Lower threshold
                     signal = Signal::Buy;
-                    confidence += 0.4; // Higher confidence
+                    confidence += bb_confidence_strong; // Higher confidence
                     contributing_models.push("BB_OS");
                 }
-            } else if bb_pred > 0.7 { // Price above upper band (overbought)
+            } else if bb_pred > bb_breakout_threshold { // Price above upper band (overbought)
                 if signal == Signal::Sell {
-                    confidence += 0.3; // Higher boost
+                    confidence += bb_confidence_boost; // Higher boost
                     contributing_models.push("BB_OB");
                 } else if signal == Signal::Hold && trend_strength < 0.25 { // Lower threshold
                     signal = Signal::Sell;
-                    confidence += 0.4; // Higher confidence
+                    confidence += bb_confidence_strong; // Higher confidence
                     contributing_models.push("BB_OB");
                 }
             }
         }
         
         // 5. ENSEMBLE CONFIRMATION (Final check) - Less selective
-        if ensemble_pred.abs() > 0.4 { // Lower threshold for ensemble (was 0.6)
+        let ensemble_threshold = self.config.get_or("ensemble_threshold", 0.4);
+        let ensemble_confidence_weight = self.config.get_or("ensemble_confidence_weight", 0.6);
+        let ensemble_strong_threshold = self.config.get_or("ensemble_strong_threshold", 0.6);
+        let ensemble_confidence_strong = self.config.get_or("ensemble_confidence_strong", 0.7);
+        if ensemble_pred.abs() > ensemble_threshold { // Lower threshold for ensemble (was 0.6)
             if (ensemble_pred > 0.0 && signal == Signal::Buy) || 
                (ensemble_pred < 0.0 && signal == Signal::Sell) {
-                confidence += 0.6 * ensemble_pred.abs().min(1.0); // Higher weight
+                confidence += ensemble_confidence_weight * ensemble_pred.abs().min(1.0); // Higher weight
                 contributing_models.push("ENS");
-            } else if signal == Signal::Hold && ensemble_pred.abs() > 0.6 { // Lower threshold (was 0.8)
+            } else if signal == Signal::Hold && ensemble_pred.abs() > ensemble_strong_threshold { // Lower threshold (was 0.8)
                 // Only generate new signal if ensemble is very strong
                 if ensemble_pred > 0.0 {
                     signal = Signal::Buy;
-                    confidence += 0.7 * ensemble_pred.min(1.0); // Higher weight
+                    confidence += ensemble_confidence_strong * ensemble_pred.min(1.0); // Higher weight
                     contributing_models.push("ENS");
                 } else {
                     signal = Signal::Sell;
-                    confidence += 0.7 * ensemble_pred.abs().min(1.0); // Higher weight
+                    confidence += ensemble_confidence_strong * ensemble_pred.abs().min(1.0); // Higher weight
                     contributing_models.push("ENS");
                 }
             }
         }
         
         // NEW: Position-aware signal generation
+        let position_rsi_confidence = self.config.get_or("position_rsi_confidence", 0.4);
+        let position_bb_confidence = self.config.get_or("position_bb_confidence", 0.3);
+        let position_ensemble_confidence = self.config.get_or("position_ensemble_confidence", 0.5);
+        let position_ensemble_sell_threshold = self.config.get_or("position_ensemble_sell_threshold", -0.5);
+        
         // If we have a position and RSI is overbought, generate SELL signal
-        if _current_position.quantity > 0.0 && rsi_actual > 75.0 && signal == Signal::Hold {
+        if _current_position.quantity > 0.0 && rsi_actual > rsi_overbought_threshold && signal == Signal::Hold {
             signal = Signal::Sell;
-            confidence += 0.4;
+            confidence += position_rsi_confidence;
             contributing_models.push("POS_RSI");
         }
         
         // If we have a position and price is above upper Bollinger Band, generate SELL signal
-        if _current_position.quantity > 0.0 && bb_pred > 0.7 && signal == Signal::Hold {
+        if _current_position.quantity > 0.0 && bb_pred > bb_breakout_threshold && signal == Signal::Hold {
             signal = Signal::Sell;
-            confidence += 0.3;
+            confidence += position_bb_confidence;
             contributing_models.push("POS_BB");
         }
         
         // If we have a position and ensemble is strongly negative, generate SELL signal
-        if _current_position.quantity > 0.0 && ensemble_pred < -0.5 && signal == Signal::Hold {
+        if _current_position.quantity > 0.0 && ensemble_pred < position_ensemble_sell_threshold && signal == Signal::Hold {
             signal = Signal::Sell;
-            confidence += 0.5;
+            confidence += position_ensemble_confidence;
             contributing_models.push("POS_ENS");
         }
         
@@ -576,22 +655,26 @@ impl Strategy for QuantumHftStrategy {
         confidence = temp_strategy.apply_risk_filters(confidence);
         
         // CRITICAL: Higher confidence threshold for better win rate
-        confidence = confidence.max(0.55); // Reduced from 0.6 to 0.55 for more trades
+        let confidence_min = self.config.get_or("confidence_min", 0.55);
+        confidence = confidence.max(confidence_min); // Reduced from 0.6 to 0.55 for more trades
         
         // REQUIRE multiple strong signals for execution
-        if contributing_models.len() < 1 { // Reduced back to 1 for more trades
+        let contributing_models_min = self.config.get_or("contributing_models_min", 1);
+        if contributing_models.len() < contributing_models_min { // Reduced back to 1 for more trades
             signal = Signal::Hold;
             confidence = 0.0;
         }
         
         // ADDITIONAL: Require minimum trend strength for trend-following signals
-        if signal != Signal::Hold && trend_strength < 0.1 && !contributing_models.contains(&"RSI_OS") && !contributing_models.contains(&"RSI_OB") { // Reduced from 0.15 to 0.1
+        let trend_strength_min_trend = self.config.get_or("trend_strength_min_trend", 0.1);
+        if signal != Signal::Hold && trend_strength < trend_strength_min_trend && !contributing_models.contains(&"RSI_OS") && !contributing_models.contains(&"RSI_OB") { // Reduced from 0.15 to 0.1
             signal = Signal::Hold;
             confidence = 0.0;
         }
         
         // NEW: Additional filter for signal quality
-        if signal != Signal::Hold && confidence < 0.6 { // Reduced from 0.65 to 0.6
+        let confidence_quality_threshold = self.config.get_or("confidence_quality_threshold", 0.6);
+        if signal != Signal::Hold && confidence < confidence_quality_threshold { // Reduced from 0.65 to 0.6
             signal = Signal::Hold;
             confidence = 0.0;
         }
@@ -640,36 +723,51 @@ impl QuantumHftStrategy {
         let mut filter_reasons = Vec::new();
         
         // Volatility filter - Much less aggressive for better signals
-        if self.volatility_score > 0.98 { // Much higher threshold
-            filtered_confidence *= 0.95; // Minimal reduction
+        let volatility_high_threshold = self.config.get_or("volatility_high_threshold", 0.98);
+        let volatility_low_threshold = self.config.get_or("volatility_low_threshold", 0.005);
+        let volatility_high_reduction = self.config.get_or("volatility_high_reduction", 0.95);
+        let volatility_low_reduction = self.config.get_or("volatility_low_reduction", 0.98);
+        
+        if self.volatility_score > volatility_high_threshold { // Much higher threshold
+            filtered_confidence *= volatility_high_reduction; // Minimal reduction
             filter_reasons.push("HIGH_VOL");
-        } else if self.volatility_score < 0.005 { // Much lower threshold
-            filtered_confidence *= 0.98; // Very minimal reduction
+        } else if self.volatility_score < volatility_low_threshold { // Much lower threshold
+            filtered_confidence *= volatility_low_reduction; // Very minimal reduction
             filter_reasons.push("LOW_VOL");
         }
         
         // Liquidity filter - Much less aggressive for better signals
-        if self.liquidity_score < 0.001 { // Much lower threshold
-            filtered_confidence *= 0.95; // Minimal reduction
+        let liquidity_low_threshold = self.config.get_or("liquidity_low_threshold", 0.001);
+        let liquidity_high_threshold = self.config.get_or("liquidity_high_threshold", 20.0);
+        let liquidity_low_reduction = self.config.get_or("liquidity_low_reduction", 0.95);
+        let liquidity_high_boost = self.config.get_or("liquidity_high_boost", 1.2);
+        
+        if self.liquidity_score < liquidity_low_threshold { // Much lower threshold
+            filtered_confidence *= liquidity_low_reduction; // Minimal reduction
             filter_reasons.push("LOW_LIQ");
-        } else if self.liquidity_score > 20.0 { // Much higher threshold
-            filtered_confidence *= 1.2; // Higher boost for good liquidity
+        } else if self.liquidity_score > liquidity_high_threshold { // Much higher threshold
+            filtered_confidence *= liquidity_high_boost; // Higher boost for good liquidity
             filter_reasons.push("HIGH_LIQ");
         }
         
         // Momentum filter - Much less aggressive for better signals
-        if self.momentum_score.abs() > 0.9 { // Much higher threshold
+        let momentum_high_threshold = self.config.get_or("momentum_high_threshold", 0.9);
+        let momentum_boost = self.config.get_or("momentum_boost", 1.2);
+        let momentum_reduction = self.config.get_or("momentum_reduction", 0.98);
+        
+        if self.momentum_score.abs() > momentum_high_threshold { // Much higher threshold
             if (self.momentum_score > 0.0 && confidence > 0.0) || (self.momentum_score < 0.0 && confidence < 0.0) {
-                filtered_confidence *= 1.2; // Higher boost for aligned momentum
+                filtered_confidence *= momentum_boost; // Higher boost for aligned momentum
                 filter_reasons.push("MOM_ALIGN");
             } else {
-                filtered_confidence *= 0.98; // Very minimal reduction
+                filtered_confidence *= momentum_reduction; // Very minimal reduction
                 filter_reasons.push("MOM_AGAINST");
             }
         }
         
         // Log filter effects only if significant reduction
-        if !filter_reasons.is_empty() && (filtered_confidence / confidence) < 0.95 {
+        let filter_significant_threshold = self.config.get_or("filter_significant_threshold", 0.95);
+        if !filter_reasons.is_empty() && (filtered_confidence / confidence) < filter_significant_threshold {
             debug!(
                 strategy = "QML-FILTER",
                 original_conf = %format!("{:.3}", confidence),
