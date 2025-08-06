@@ -678,18 +678,22 @@ impl Trader for TradingEngine {
     }
 }
 
-// Add rand dependency for random number generation
+// Add rand dependency for random number generation - OPTIMIZED
 mod rand {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    use std::time::SystemTime;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     pub fn random<T>() -> T 
     where
         T: std::ops::Rem<f64, Output = T> + From<f64>,
     {
+        // Use atomic counter for faster random generation
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut hasher = DefaultHasher::new();
-        SystemTime::now().hash(&mut hasher);
+        counter.hash(&mut hasher);
         let hash = hasher.finish();
         let random_f64 = (hash as f64) / (u64::MAX as f64);
         T::from(random_f64)
