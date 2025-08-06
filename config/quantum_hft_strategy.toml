@@ -14,11 +14,11 @@ batch_size = 32
 epochs = 100
 validation_split = 0.2
 
-# Prediction Parameters - OPTIMIZED FOR MORE TRADES
-prediction_horizon = 3
-confidence_threshold = 0.1
-prediction_window = 50
-accuracy_threshold = 0.4
+# Prediction Parameters - OPTIMIZED FOR PROFIT
+prediction_horizon = 5
+confidence_threshold = 0.2
+prediction_window = 100
+accuracy_threshold = 0.5
 
 # Statistical Analysis Parameters
 rolling_window_size = 20
@@ -34,13 +34,12 @@ macd_signal = 9
 bollinger_period = 20
 bollinger_std = 2.0
 
-# Risk Management - MORE AGGRESSIVE
+# Risk Management - Simple Mean Reversion
 max_position_size = 1000.0
-position_size_multiplier = 1.5
-stop_loss_threshold = 0.015
-take_profit_threshold = 0.02
+stop_loss_threshold = 0.008
+take_profit_threshold = 0.012
 max_consecutive_losses = 3
-min_win_rate_threshold = 0.3
+min_win_rate_threshold = 0.5
 
 # Ensemble Model Weights
 ml_model_weight = 0.25
