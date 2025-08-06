@@ -1,21 +1,16 @@
-# Advanced Machine Learning HFT Strategy Configuration
-# Best for: Ensemble ML models with pattern recognition and trend prediction
-# OPTIMIZED FOR PROFITABILITY - MACHINE LEARNING
+# Fractal-Based HFT Strategy Configuration
+# Best for: Geometric pattern recognition and market structure analysis
+# OPTIMIZED FOR PROFITABILITY - FRACTAL ANALYSIS
 
-# Feature Engineering Parameters
-feature_window = 50
-price_window_capacity = 100
-volume_window_capacity = 100
+# Fractal Analysis Parameters
+fractal_period = 5
+price_window_capacity = 200
+volume_window_capacity = 200
 
-# Machine Learning Model Parameters
-ensemble_weights = [0.3, 0.25, 0.25, 0.2]  # RF, NN, SVM, GB
-gb_learning_rate = 0.1
-
-# Signal Detection Thresholds
-long_entry_threshold = 0.1
-short_entry_threshold = -0.1
-long_exit_threshold = -0.05
-short_exit_threshold = 0.05
+# Pattern Recognition Thresholds
+pattern_threshold = 0.3
+trend_strength_threshold = 0.2
+fractal_strength_threshold = 0.1
 
 # Position Sizing Parameters
 trading_size_min = 10.0
@@ -24,36 +19,25 @@ trading_size_max = 50.0
 # Risk Management Thresholds
 max_consecutive_losses = 3
 min_win_rate_threshold = 0.4
-max_volatility_threshold = 0.9
-min_pattern_threshold = 0.2
+stop_loss_percentage = 0.02
+take_profit_percentage = 0.04
 
-# Neural Network Settings
-nn_layers = [20, 10, 5, 1]
-nn_learning_rate = 0.01
-nn_momentum = 0.9
+# Fractal Detection Settings
+min_fractal_strength = 0.001
+max_fractal_age = 100
+fractal_confirmation_period = 3
 
-# Random Forest Settings
-rf_n_trees = 10
-rf_max_depth = 5
-rf_min_samples_split = 2
+# Support/Resistance Levels
+level_tolerance = 0.001
+min_level_touches = 2
+level_strength_decay = 0.95
 
-# Support Vector Machine Settings
-svm_kernel = "rbf"
-svm_gamma = 0.1
-svm_c = 1.0
+# Market Structure Analysis
+fractal_dimension_window = 50
+structure_analysis_enabled = true
+breakout_detection_enabled = true
 
-# Gradient Boosting Settings
-gb_n_estimators = 100
-gb_max_depth = 3
-gb_subsample = 0.8
-
-# Model Performance Tracking
-model_accuracy_window = 100
-feature_importance_update_rate = 0.1
-ensemble_weight_update_rate = 0.05
-
-# Advanced ML Settings
-adaptive_training = true
-feature_selection = true
-model_ensemble_voting = true
-cross_validation_enabled = true 
+# Performance Tracking
+performance_window = 50
+adaptive_thresholds = true
+dynamic_risk_management = true 
