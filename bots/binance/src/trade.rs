@@ -3,27 +3,36 @@ use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
 use tracing::{debug, info};
-use trade::trader::{TradeMode, Trader};
 use trade::signal::Signal;
+use trade::trader::{TradeMode, Trader};
+
+pub struct TradeConfig {
+    pub trading_symbol: String,
+    pub trade_mode: TradeMode,
+    pub trading_size_min: f64,
+    pub trading_size_max: f64,
+}
 
 pub async fn run_trade(
-    trading_symbol: &str,
+    config: TradeConfig,
     _api_key: &str,
     _api_secret: &str,
     mut strategy: impl Strategy + Send,
     binance_trader: &mut BinanceTrader,
-    trade_mode: TradeMode,
-    trading_size_min: f64,
-    trading_size_max: f64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new()
         .await
-        .expect("Failed to create BinanceClient");
-    let mut trade_stream = binance_client
-        .trade_stream(trading_symbol)
-        .await
-        .expect("Failed to create trade stream");
+        .expect("Failed to create Binance client");
 
+    let mut trade_stream = binance_client
+        .trade_stream(&config.trading_symbol)
+        .await
+        .expect("Failed to get trade stream");
+
+    info!(
+        "Starting to consume trade stream for {}",
+        config.trading_symbol
+    );
     let mut last_position_change_time = 0.0;
     let mut last_position_quantity = 0.0;
     let cooldown_period = 2.0; // 2 seconds cooldown after position change
@@ -56,7 +65,7 @@ pub async fn run_trade(
         // Check if position has changed recently
         let time_since_position_change = trade_time - last_position_change_time;
         let position_has_changed = current_position.quantity != last_position_quantity;
-        
+
         if position_has_changed {
             last_position_change_time = trade_time;
             last_position_quantity = current_position.quantity;
@@ -96,7 +105,14 @@ pub async fn run_trade(
         };
 
         // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
-        let quantity_to_trade = binance_trader.calculate_trade_size(trading_symbol, trade_price, confidence, trading_size_min, trading_size_max, 1.0);
+        let quantity_to_trade = binance_trader.calculate_trade_size(
+            &config.trading_symbol,
+            trade_price,
+            confidence,
+            config.trading_size_min,
+            config.trading_size_max,
+            1.0,
+        );
 
         // Log BUY/SELL signals at info level with structured format
         match final_signal {
@@ -121,7 +137,7 @@ pub async fn run_trade(
             }
         }
 
-        match trade_mode {
+        match config.trade_mode {
             TradeMode::Real => {
                 binance_trader
                     .on_signal(final_signal, trade_price, quantity_to_trade)

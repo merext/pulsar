@@ -18,7 +18,7 @@ impl StrategyConfig {
 
     /// Load strategy-specific configuration from the config directory
     pub fn load_strategy_config(strategy_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let config_path = format!("config/{}.toml", strategy_name);
+        let config_path = format!("config/{strategy_name}.toml");
         Self::from_file(config_path)
     }
 
@@ -73,4 +73,4 @@ impl ConfigValue for String {
     fn from_config_value(config: &Value, key: &str) -> Option<Self> {
         config.get(key)?.as_str().map(|s| s.to_string())
     }
-} 
+}

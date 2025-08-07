@@ -68,8 +68,6 @@ pub struct RiskManagementConfig {
     pub maintenance_margin: f64,
 }
 
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceTrackingConfig {
     pub track_fill_rate: bool,
@@ -91,64 +89,64 @@ pub struct BacktestSettingsConfig {
     pub commission_model: String,
     pub slippage_model: String,
     pub fill_model: String,
-    
+
     // Data handling
     pub handle_data_gaps: bool,
     pub interpolate_missing_data: bool,
     pub filter_outliers: bool,
-    
+
     // Bias prevention
     pub prevent_lookahead_bias: bool,
     pub use_point_in_time_data: bool,
-    
+
     // Simulation features
     pub simulate_market_microstructure: bool,
     pub account_for_latency_in_signals: bool,
     pub simulate_order_queue_position: bool,
     pub simulate_partial_fills: bool,
     pub simulate_order_cancellations: bool,
-    
+
     // Market impact simulation
     pub simulate_market_impact: bool,
     pub market_impact_model: String,
     pub impact_decay_rate: f64,
-    
+
     // Order execution simulation
     pub simulate_order_delays: bool,
     pub simulate_exchange_errors: bool,
     pub simulate_network_timeouts: bool,
-    
+
     // Fill and rejection simulation
     pub limit_order_fill_rate: f64,
     pub partial_fill_probability: f64,
     pub partial_fill_ratio: f64,
     pub invalid_order_probability: f64,
     pub rejection_reasons: Vec<String>,
-    
+
     // Market events simulation
     pub handle_market_halts: bool,
     pub halt_probability: f64,
     pub halt_duration_min: u64,
     pub halt_duration_max: u64,
-    
+
     // Spread and market impact simulation
     pub base_spread: f64,
     pub spread_volatility: f64,
     pub spread_widening_factor: f64,
     pub order_book_depth: u32,
     pub market_impact_factor: f64,
-    
+
     // Performance tracking simulation
     pub track_queue_position: bool,
     pub track_latency: bool,
     pub track_market_impact: bool,
-    
+
     // Latency simulation (20ms base latency)
     pub total_latency_model: String,
-    pub propagation_delay: f64,      // 10ms
-    pub transmission_delay: f64,     // 2ms
-    pub queuing_delay: f64,          // 5ms
-    pub processing_delay: f64,       // 3ms
+    pub propagation_delay: f64,  // 10ms
+    pub transmission_delay: f64, // 2ms
+    pub queuing_delay: f64,      // 5ms
+    pub processing_delay: f64,   // 3ms
     pub latency_spike_probability: f64,
     pub latency_spike_multiplier: f64,
     pub congestion_latency_factor: f64,
@@ -158,7 +156,7 @@ pub struct BacktestSettingsConfig {
     pub signal_generation_time: f64,
     pub order_construction_time: f64,
     pub risk_check_time: f64,
-    
+
     // Market microstructure simulation
     pub order_book_simulation: bool,
     pub bid_ask_spread_model: String,
@@ -180,8 +178,6 @@ pub struct BacktestSettingsConfig {
     pub max_drawdown_override: Option<f64>,
 }
 
-
-
 impl TradingConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Try multiple possible paths for the config file
@@ -190,7 +186,7 @@ impl TradingConfig {
             "../../config/trading_config.toml",
             "../config/trading_config.toml",
         ];
-        
+
         for config_path in &possible_paths {
             if let Ok(config_content) = fs::read_to_string(config_path) {
                 if let Ok(config) = toml::from_str(&config_content) {
@@ -198,7 +194,7 @@ impl TradingConfig {
                 }
             }
         }
-        
+
         Err("Could not find or parse trading_config.toml".into())
     }
 }
@@ -240,6 +236,12 @@ pub enum OrderType {
     Taker,
 }
 
+impl Default for PerformanceMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceMetrics {
     pub fn new() -> Self {
         Self {
@@ -263,7 +265,7 @@ impl PerformanceMetrics {
         if new_equity > self.peak_equity {
             self.peak_equity = new_equity;
         }
-        
+
         // Prevent division by zero when peak_equity is 0
         if self.peak_equity > 0.0 {
             let drawdown = (self.peak_equity - new_equity) / self.peak_equity;
@@ -278,7 +280,7 @@ impl PerformanceMetrics {
         self.total_fees += record.fees;
         self.total_slippage += record.slippage;
         self.total_rebates += record.rebates;
-        
+
         if record.pnl > 0.0 {
             self.winning_trades += 1;
             self.consecutive_losses = 0;
@@ -286,7 +288,7 @@ impl PerformanceMetrics {
             self.losing_trades += 1;
             self.consecutive_losses += 1;
         }
-        
+
         self.trade_history.push_back(record);
         if self.trade_history.len() > 1000 {
             self.trade_history.pop_front();
@@ -327,7 +329,7 @@ pub struct TradingEngine {
 impl TradingEngine {
     pub fn new(symbol: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let config = TradingConfig::load()?;
-        
+
         Ok(Self {
             position: Position {
                 symbol: symbol.to_string(),
@@ -346,15 +348,19 @@ impl TradingEngine {
     pub fn calculate_slippage(&self, _price: f64, quantity: f64, volatility: f64) -> f64 {
         let base_slippage = self.config.slippage.min_slippage;
         let max_slippage = self.config.slippage.max_slippage;
-        
+
         // Calculate volatility-adjusted slippage
         let volatility_factor = volatility.min(1.0);
-        let volatility_slippage = base_slippage + (max_slippage - base_slippage) * volatility_factor * self.config.slippage.volatility_multiplier;
-        
+        let volatility_slippage = base_slippage
+            + (max_slippage - base_slippage)
+                * volatility_factor
+                * self.config.slippage.volatility_multiplier;
+
         // Calculate size-adjusted slippage
         let size_factor = (quantity / self.config.exchange.max_order_size).min(1.0);
-        let size_slippage = base_slippage + (max_slippage - base_slippage) * size_factor * self.config.slippage.size_multiplier;
-        
+        let size_slippage = base_slippage
+            + (max_slippage - base_slippage) * size_factor * self.config.slippage.size_multiplier;
+
         // Combine volatility and size effects
         let total_slippage = (volatility_slippage + size_slippage) / 2.0;
         total_slippage.min(max_slippage)
@@ -366,7 +372,7 @@ impl TradingEngine {
         } else {
             self.config.exchange.taker_fee
         };
-        
+
         price * quantity * fee_rate
     }
 
@@ -374,10 +380,18 @@ impl TradingEngine {
         price * quantity * self.config.exchange.maker_rebate
     }
 
-    pub fn should_trade(&mut self, _signal: &Signal, confidence: f64, _current_price: f64, timestamp: f64) -> bool {
+    pub fn should_trade(
+        &mut self,
+        _signal: &Signal,
+        confidence: f64,
+        _current_price: f64,
+        timestamp: f64,
+    ) -> bool {
         // Check circuit breaker
         if self.is_circuit_breaker_active {
-            if timestamp - self.circuit_breaker_start > self.config.risk_management.cooldown_period as f64 {
+            if timestamp - self.circuit_breaker_start
+                > self.config.risk_management.cooldown_period as f64
+            {
                 self.is_circuit_breaker_active = false; // Circuit breaker expired
                 return true;
             }
@@ -398,16 +412,19 @@ impl TradingEngine {
         }
 
         // Check drawdown - respect backtest-specific settings
-        let effective_max_drawdown = if let Some(ref backtest_settings) = self.config.backtest_settings {
-            if backtest_settings.disable_drawdown_limit {
-                f64::INFINITY  // Disable drawdown limit completely
+        let effective_max_drawdown =
+            if let Some(ref backtest_settings) = self.config.backtest_settings {
+                if backtest_settings.disable_drawdown_limit {
+                    f64::INFINITY // Disable drawdown limit completely
+                } else {
+                    backtest_settings
+                        .max_drawdown_override
+                        .unwrap_or(self.config.risk_management.max_drawdown)
+                }
             } else {
-                backtest_settings.max_drawdown_override.unwrap_or(self.config.risk_management.max_drawdown)
-            }
-        } else {
-            self.config.risk_management.max_drawdown
-        };
-        
+                self.config.risk_management.max_drawdown
+            };
+
         if self.metrics.max_drawdown > effective_max_drawdown {
             warn!("Trading stopped due to maximum drawdown reached");
             return false;
@@ -422,19 +439,35 @@ impl TradingEngine {
         true
     }
 
-    pub fn determine_order_type(&self, _signal: &Signal, confidence: f64, spread: f64) -> OrderType {
+    pub fn determine_order_type(
+        &self,
+        _signal: &Signal,
+        confidence: f64,
+        spread: f64,
+    ) -> OrderType {
         // Use maker orders for high confidence signals or when spread is wide
-        if confidence > self.config.risk_management.min_signal_strength || spread > self.config.exchange.tick_size * 100.0 {
+        if confidence > self.config.risk_management.min_signal_strength
+            || spread > self.config.exchange.tick_size * 100.0
+        {
             OrderType::Maker
         } else {
             OrderType::Taker
         }
     }
 
-    pub fn simulate_fill(&self, order_type: &OrderType, price: f64, quantity: f64) -> (f64, f64, f64) {
+    pub fn simulate_fill(
+        &self,
+        order_type: &OrderType,
+        price: f64,
+        quantity: f64,
+    ) -> (f64, f64, f64) {
         let (fill_price, slippage, fill_quantity) = match order_type {
             OrderType::Market => {
-                let slippage = self.calculate_slippage(price, quantity, self.config.slippage.market_order_volatility);
+                let slippage = self.calculate_slippage(
+                    price,
+                    quantity,
+                    self.config.slippage.market_order_volatility,
+                );
                 let fill_price = price + slippage;
                 (fill_price, slippage, quantity)
             }
@@ -461,7 +494,11 @@ impl TradingEngine {
                 (price, 0.0, quantity)
             }
             OrderType::Taker => {
-                let slippage = self.calculate_slippage(price, quantity, self.config.slippage.taker_order_volatility);
+                let slippage = self.calculate_slippage(
+                    price,
+                    quantity,
+                    self.config.slippage.taker_order_volatility,
+                );
                 let fill_price = price + slippage;
                 (fill_price, slippage, quantity)
             }
@@ -475,9 +512,9 @@ impl TradingEngine {
         if let Some(ref backtest_settings) = self.config.backtest_settings {
             if backtest_settings.account_for_latency_in_signals {
                 // Calculate total latency with 20ms base
-                let base_latency = backtest_settings.propagation_delay 
-                    + backtest_settings.transmission_delay 
-                    + backtest_settings.queuing_delay 
+                let base_latency = backtest_settings.propagation_delay
+                    + backtest_settings.transmission_delay
+                    + backtest_settings.queuing_delay
                     + backtest_settings.processing_delay
                     + backtest_settings.exchange_processing_time
                     + backtest_settings.order_matching_latency
@@ -485,14 +522,15 @@ impl TradingEngine {
                     + backtest_settings.signal_generation_time
                     + backtest_settings.order_construction_time
                     + backtest_settings.risk_check_time;
-                
+
                 // Add latency spikes (1% probability)
-                let latency = if rand::random::<f64>() < backtest_settings.latency_spike_probability {
+                let latency = if rand::random::<f64>() < backtest_settings.latency_spike_probability
+                {
                     base_latency * backtest_settings.latency_spike_multiplier
                 } else {
                     base_latency
                 };
-                
+
                 // Add jitter (±20% variation)
                 let jitter = latency * (rand::random::<f64>() * 0.4 - 0.2);
                 latency + jitter
@@ -504,16 +542,22 @@ impl TradingEngine {
         }
     }
 
-    pub fn calculate_position_size(&self, _symbol: &str, price: f64, confidence: f64, max_trade_size: f64) -> f64 {
+    pub fn calculate_position_size(
+        &self,
+        _symbol: &str,
+        price: f64,
+        confidence: f64,
+        max_trade_size: f64,
+    ) -> f64 {
         // Calculate dynamic position size based on confidence
         // Higher confidence = larger position, but never exceed max_trade_size
         let base_quantity = max_trade_size * 0.1; // Start with 10% of max limit
         let confidence_multiplier = 0.5 + (confidence * 0.5); // 0.5x to 1.0x based on confidence
         let dynamic_quantity = base_quantity * confidence_multiplier;
-        
+
         // Ensure we never exceed the maximum trade size limit
         let quantity = dynamic_quantity.min(max_trade_size);
-        
+
         // Apply exchange minimum notional requirement
         let min_notional = self.config.exchange.min_notional;
         let position_value = quantity * price;
@@ -521,16 +565,16 @@ impl TradingEngine {
             let min_quantity = min_notional / price;
             return min_quantity.min(max_trade_size); // Still respect max limit
         }
-        
+
         // Apply step size rounding for lot size compliance
         let step_size = self.config.exchange.step_size;
         let rounded_quantity = (quantity / step_size).floor() * step_size;
-        
+
         // Ensure minimum quantity based on notional requirement
         let min_notional = self.config.exchange.min_notional;
         let min_qty = min_notional / price;
         let final_quantity = rounded_quantity.max(min_qty);
-        
+
         // Final check to ensure we don't exceed max trade size after rounding
         final_quantity.min(max_trade_size)
     }
@@ -538,20 +582,31 @@ impl TradingEngine {
 
 #[async_trait::async_trait]
 impl Trader for TradingEngine {
-    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
+    fn calculate_trade_size(
+        &self,
+        symbol: &str,
+        price: f64,
+        confidence: f64,
+        trading_size_min: f64,
+        trading_size_max: f64,
+        trading_size_step: f64,
+    ) -> f64 {
         // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
         // This is the core logic that both live trading and emulation use
-        
+
         // Simple linear interpolation between min and max quantities based on confidence
         // 0% confidence = trading_size_min, 100% confidence = trading_size_max
-        let dynamic_quantity = trading_size_min + (confidence * (trading_size_max - trading_size_min));
-        
+        let dynamic_quantity =
+            trading_size_min + (confidence * (trading_size_max - trading_size_min));
+
         // Apply step size rounding (round down to nearest step)
         let quantity_to_trade = (dynamic_quantity / trading_size_step).floor() * trading_size_step;
-        
+
         // Ensure we stay within the min/max bounds after rounding
-        let final_quantity = quantity_to_trade.max(trading_size_min).min(trading_size_max);
-        
+        let final_quantity = quantity_to_trade
+            .max(trading_size_min)
+            .min(trading_size_max);
+
         tracing::debug!(
             exchange = "trading_engine",
             action = "calculate_trade_size",
@@ -565,10 +620,10 @@ impl Trader for TradingEngine {
             quantity_to_trade = quantity_to_trade,
             final_quantity = final_quantity
         );
-        
+
         final_quantity
     }
-    
+
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
         // This would be implemented for live trading
         // For now, we'll use on_emulate for backtesting
@@ -581,12 +636,18 @@ impl Trader for TradingEngine {
             .unwrap()
             .as_secs_f64();
 
-        let order_type = self.determine_order_type(&signal, 0.8, self.config.exchange.tick_size * 10.0); // Use tick size for spread
+        let order_type =
+            self.determine_order_type(&signal, 0.8, self.config.exchange.tick_size * 10.0); // Use tick size for spread
         let is_maker = matches!(order_type, OrderType::Maker);
-        
-        let (fill_price, slippage, fill_quantity) = self.simulate_fill(&order_type, price, quantity);
+
+        let (fill_price, slippage, fill_quantity) =
+            self.simulate_fill(&order_type, price, quantity);
         let fees = self.calculate_fees(fill_price, fill_quantity, is_maker);
-        let rebates = if is_maker { self.calculate_rebates(fill_price, fill_quantity) } else { 0.0 };
+        let rebates = if is_maker {
+            self.calculate_rebates(fill_price, fill_quantity)
+        } else {
+            0.0
+        };
 
         match signal {
             Signal::Buy => {
@@ -594,10 +655,10 @@ impl Trader for TradingEngine {
                     let _cost = fill_price * fill_quantity + fees - rebates;
                     self.position.quantity = fill_quantity;
                     self.position.entry_price = fill_price;
-                    
+
                     let record = TradeRecord {
                         timestamp,
-                        signal: signal.clone(),
+                        signal,
                         price: fill_price,
                         quantity: fill_quantity,
                         fees,
@@ -606,9 +667,9 @@ impl Trader for TradingEngine {
                         pnl: 0.0, // Will be calculated on sell
                         order_type: order_type.clone(),
                     };
-                    
+
                     self.metrics.record_trade(record);
-                    
+
                     info!(
                         "BUY: price={:.6}, qty={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}",
                         fill_price, fill_quantity, fees, rebates, slippage
@@ -621,17 +682,17 @@ impl Trader for TradingEngine {
                     let revenue = fill_price * sell_quantity - fees + rebates;
                     let cost = self.position.entry_price * sell_quantity;
                     let pnl = revenue - cost;
-                    
+
                     self.realized_pnl += pnl;
                     self.position.quantity -= sell_quantity;
-                    
+
                     if self.position.quantity == 0.0 {
                         self.position.entry_price = 0.0;
                     }
-                    
+
                     let record = TradeRecord {
                         timestamp,
-                        signal: signal.clone(),
+                        signal,
                         price: fill_price,
                         quantity: sell_quantity,
                         fees,
@@ -640,10 +701,10 @@ impl Trader for TradingEngine {
                         pnl,
                         order_type: order_type.clone(),
                     };
-                    
+
                     self.metrics.record_trade(record);
                     self.metrics.update_equity(self.realized_pnl);
-                    
+
                     info!(
                         "SELL: price={:.6}, qty={:.6}, pnl={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}",
                         fill_price, sell_quantity, pnl, fees, rebates, slippage
@@ -686,7 +747,7 @@ mod rand {
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    pub fn random<T>() -> T 
+    pub fn random<T>() -> T
     where
         T: std::ops::Rem<f64, Output = T> + From<f64>,
     {
@@ -698,4 +759,4 @@ mod rand {
         let random_f64 = (hash as f64) / (u64::MAX as f64);
         T::from(random_f64)
     }
-} 
+}
