@@ -1,6 +1,22 @@
 pub mod config;
 pub mod quantum_hft_strategy;
+pub mod microstructure_arbitrage_strategy;
+pub mod statistical_arbitrage_strategy;
+pub mod multi_timeframe_momentum_strategy;
+pub mod game_theory_ml_strategy;
+pub mod adaptive_regime_strategy;
+pub mod sentiment_analysis_strategy;
+pub mod neural_network_strategy;
+pub mod strategy_factory;
 pub mod models;
 pub mod strategy;
 
 pub use quantum_hft_strategy::QuantumHftStrategy;
+pub use microstructure_arbitrage_strategy::MicrostructureArbitrageStrategy;
+pub use statistical_arbitrage_strategy::StatisticalArbitrageStrategy;
+pub use multi_timeframe_momentum_strategy::MultiTimeframeMomentumStrategy;
+pub use game_theory_ml_strategy::GameTheoryMLStrategy;
+pub use adaptive_regime_strategy::AdaptiveRegimeStrategy;
+pub use sentiment_analysis_strategy::SentimentAnalysisStrategy;
+pub use neural_network_strategy::NeuralNetworkStrategy;
+pub use strategy_factory::{StrategyFactory, StrategyType};

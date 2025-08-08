@@ -1,0 +1,80 @@
+# Statistical Arbitrage Strategy Configuration
+
+# Z-Score Parameters
+z_score_threshold = 2.0
+z_score_window = 20
+z_score_decay_rate = 0.95
+
+# Mean Reversion Parameters
+mean_reversion_threshold = 0.7
+mean_reversion_window = 50
+reversion_strength_factor = 1.5
+
+# Volatility Parameters
+volatility_threshold = 0.002
+volatility_window = 20
+volatility_regime_threshold = 0.003
+
+# Machine Learning Parameters
+feature_dimension = 20
+learning_rate = 0.001
+prediction_threshold = 0.3
+confidence_decay_rate = 0.9
+
+# Risk Management
+max_position_size = 1000.0
+stop_loss_threshold = 0.005
+take_profit_threshold = 0.008
+max_consecutive_losses = 3
+min_win_rate_threshold = 0.55
+
+# Statistical Analysis
+correlation_window = 20
+autocorrelation_lags = 10
+regression_window = 50
+outlier_threshold = 3.0
+
+# Performance Tracking
+track_z_score_accuracy = true
+track_mean_reversion_profitability = true
+track_ml_prediction_accuracy = true
+adaptive_thresholds = true
+
+# Feature Engineering
+use_price_features = true
+use_volume_features = true
+use_momentum_features = true
+use_statistical_features = true
+use_performance_features = true
+
+# Model Training
+online_learning = true
+retrain_frequency = 500
+feature_selection = true
+cross_validation = false
+early_stopping = true
+
+# Signal Generation
+min_confidence_for_trade = 0.4
+signal_decay_rate = 0.9
+ensemble_voting = true
+model_uncertainty = true
+
+# Position Management
+position_sizing_factor = 0.1
+max_positions_per_side = 1
+position_rotation_enabled = true
+quick_exit_threshold = 0.002
+
+# Advanced Features
+use_statistical_arbitrage = true
+use_volatility_arbitrage = true
+use_ml_predictions = true
+use_correlation_analysis = true
+use_outlier_detection = true
+
+# Performance Optimization
+prediction_cache_size = 50
+feature_cache_size = 25
+model_update_frequency = 5
+memory_efficient = true

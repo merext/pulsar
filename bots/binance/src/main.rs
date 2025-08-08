@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
 use strategies::config::StrategyConfig;
+use strategies::QuantumHftStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
 
@@ -45,9 +46,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
-    use strategies::quantum_hft_strategy::QuantumHftStrategy;
+    // Create Quantum HFT strategy instance
     let strategy = QuantumHftStrategy::new();
-
+    
     // Load trading configuration
     let trading_config =
         StrategyConfig::load_trading_config().expect("Failed to load trading configuration");

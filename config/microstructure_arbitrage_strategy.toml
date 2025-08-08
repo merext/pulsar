@@ -1,0 +1,76 @@
+# Market Microstructure Arbitrage Strategy Configuration
+
+# Spread Analysis Parameters
+min_spread_threshold = 0.0002
+max_spread_threshold = 0.005
+spread_history_window = 50
+spread_mean_reversion_factor = 1.5
+
+# Order Flow Parameters
+order_flow_threshold = 0.6
+order_flow_window = 20
+price_pressure_window = 5
+imbalance_decay_rate = 0.95
+
+# Liquidity Analysis
+liquidity_threshold = 0.5
+liquidity_window = 10
+min_liquidity_score = 0.1
+max_liquidity_score = 2.0
+
+# Risk Management
+max_position_size = 1000.0
+stop_loss_threshold = 0.005
+take_profit_threshold = 0.008
+max_consecutive_losses = 3
+min_win_rate_threshold = 0.55
+
+# Arbitrage Parameters
+cross_exchange_threshold = 0.001
+latency_arbitrage_threshold = 0.0005
+order_book_depth_levels = 10
+min_order_size = 10.0
+
+# Performance Tracking
+track_spread_opportunities = true
+track_order_flow_accuracy = true
+track_liquidity_profitability = true
+adaptive_thresholds = true
+
+# Market Microstructure
+bid_ask_spread = 0.0001
+volume_profile_levels = 10
+price_impact_factor = 0.0001
+market_depth_levels = 10
+
+# Signal Generation
+min_confidence_for_trade = 0.6
+signal_decay_rate = 0.9
+ensemble_voting = true
+model_uncertainty = true
+
+# Position Management
+position_sizing_factor = 0.1
+max_positions_per_side = 1
+position_rotation_enabled = true
+quick_exit_threshold = 0.002
+
+# Advanced Features
+use_spread_arbitrage = true
+use_order_flow_arbitrage = true
+use_liquidity_arbitrage = true
+use_cross_exchange_arbitrage = false
+use_latency_arbitrage = false
+
+# Model Training
+online_learning = true
+retrain_frequency = 500
+feature_selection = true
+cross_validation = false
+early_stopping = true
+
+# Performance Optimization
+prediction_cache_size = 50
+feature_cache_size = 25
+model_update_frequency = 5
+memory_efficient = true

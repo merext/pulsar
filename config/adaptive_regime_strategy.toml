@@ -1,0 +1,35 @@
+# Adaptive Regime Strategy Configuration
+
+[regime_detection]
+volatility_threshold = 0.01
+trend_strength_threshold = 0.002
+mean_reversion_threshold = 0.005
+momentum_threshold = 0.003
+volume_trend_threshold = 0.5
+regime_change_threshold = 0.7
+
+[windows]
+volatility_window = 20
+trend_window = 50
+momentum_window = 10
+regime_history_window = 20
+
+[strategy_weights]
+trending_weight = 0.8
+mean_reversion_weight = 0.7
+volatile_weight = 0.6
+breakout_weight = 0.9
+sideways_weight = 0.5
+consolidation_weight = 0.0
+
+[risk_management]
+max_position_size = 100.0
+max_drawdown = 0.1
+stop_loss = 0.02
+take_profit = 0.05
+max_consecutive_losses = 5
+
+[performance_tracking]
+track_regime_changes = true
+track_strategy_performance = true
+track_volatility_regimes = true

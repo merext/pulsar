@@ -1,0 +1,42 @@
+# Neural Network Strategy Configuration
+
+[network_architecture]
+input_size = 20
+hidden_size = 10
+output_size = 1
+learning_rate = 0.01
+
+[training]
+training_frequency = 50
+training_samples = 100
+max_training_data = 1000
+prediction_horizon = 5
+
+[feature_extraction]
+input_window = 20
+price_features = 10
+volume_features = 10
+normalization_window = 20
+
+[prediction]
+prediction_threshold = 0.01
+confidence_threshold = 0.3
+prediction_history_window = 50
+
+[signal_generation]
+buy_threshold = 0.01
+sell_threshold = -0.01
+confidence_multiplier = 0.8
+min_confidence = 0.3
+
+[risk_management]
+max_position_size = 100.0
+max_drawdown = 0.1
+stop_loss = 0.02
+take_profit = 0.05
+max_consecutive_losses = 5
+
+[performance_tracking]
+track_predictions = true
+track_confidence_levels = true
+track_training_performance = true

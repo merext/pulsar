@@ -1,0 +1,87 @@
+# Multi-Timeframe Momentum Strategy Configuration
+
+# Timeframe Parameters
+short_period = 5
+medium_period = 15
+long_period = 60
+ultra_short_period = 2
+
+# Momentum Parameters
+momentum_threshold = 0.001
+momentum_decay_rate = 0.95
+momentum_weight_short = 0.3
+momentum_weight_medium = 0.4
+momentum_weight_long = 0.3
+
+# Trend Parameters
+trend_threshold = 0.7
+trend_strength_window = 20
+trend_confirmation_periods = 3
+
+# Convergence Parameters
+convergence_threshold = 0.8
+divergence_threshold = 0.002
+alignment_weight = 0.6
+
+# Risk Management
+max_position_size = 1000.0
+stop_loss_threshold = 0.005
+take_profit_threshold = 0.008
+max_consecutive_losses = 3
+min_win_rate_threshold = 0.55
+
+# Volume Analysis
+volume_momentum_window = 10
+volume_trend_window = 20
+volume_confirmation_threshold = 1.5
+
+# Performance Tracking
+track_momentum_accuracy = true
+track_convergence_profitability = true
+track_divergence_accuracy = true
+adaptive_thresholds = true
+
+# Signal Generation
+min_confidence_for_trade = 0.6
+signal_decay_rate = 0.9
+ensemble_voting = true
+model_uncertainty = true
+
+# Position Management
+position_sizing_factor = 0.1
+max_positions_per_side = 1
+position_rotation_enabled = true
+quick_exit_threshold = 0.002
+
+# Advanced Features
+use_momentum_convergence = true
+use_trend_continuation = true
+use_momentum_divergence = true
+use_volume_confirmation = true
+use_timeframe_alignment = true
+
+# Model Training
+online_learning = true
+retrain_frequency = 500
+feature_selection = true
+cross_validation = false
+early_stopping = true
+
+# Performance Optimization
+prediction_cache_size = 50
+feature_cache_size = 25
+model_update_frequency = 5
+memory_efficient = true
+
+# Timeframe Analysis
+use_ultra_short_timeframe = false
+use_short_timeframe = true
+use_medium_timeframe = true
+use_long_timeframe = true
+use_volume_timeframe = true
+
+# Momentum Calculation
+use_simple_momentum = true
+use_weighted_momentum = false
+use_exponential_momentum = false
+use_adaptive_momentum = false
