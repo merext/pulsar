@@ -28,25 +28,25 @@ pub struct SentimentMetrics {
 }
 
 pub struct SentimentAnalysisStrategy {
-    config: StrategyConfig,
+    _config: StrategyConfig,
     price_history: VecDeque<f64>,
     volume_history: VecDeque<f64>,
     sentiment_history: VecDeque<SentimentData>,
     sentiment_metrics: SentimentMetrics,
     sentiment_weights: HashMap<String, f64>,
-    sentiment_thresholds: HashMap<String, f64>,
+    _sentiment_thresholds: HashMap<String, f64>,
     short_window: usize,
     medium_window: usize,
     long_window: usize,
-    max_position_size: f64,
-    sentiment_decay_factor: f64,
+    _max_position_size: f64,
+    _sentiment_decay_factor: f64,
 }
 
 impl SentimentAnalysisStrategy {
     pub fn new() -> Self {
         let mut sentiment_weights = HashMap::new();
-        sentiment_weights.insert("social".to_string(), 0.3);
-        sentiment_weights.insert("news".to_string(), 0.25);
+        sentiment_weights.insert("social".to_string(), 0.25);
+        sentiment_weights.insert("news".to_string(), 0.3);
         sentiment_weights.insert("volume".to_string(), 0.25);
         sentiment_weights.insert("price".to_string(), 0.2);
 
@@ -57,7 +57,7 @@ impl SentimentAnalysisStrategy {
         sentiment_thresholds.insert("strong_sell_threshold".to_string(), -0.6);
 
         Self {
-            config: StrategyConfig::load_trading_config().expect("Failed to load trading configuration"),
+            _config: StrategyConfig::load_trading_config().expect("Failed to load trading configuration"),
             price_history: VecDeque::with_capacity(200),
             volume_history: VecDeque::with_capacity(200),
             sentiment_history: VecDeque::with_capacity(100),
@@ -70,12 +70,12 @@ impl SentimentAnalysisStrategy {
                 sentiment_trend: 0.0,
             },
             sentiment_weights,
-            sentiment_thresholds,
+            _sentiment_thresholds: sentiment_thresholds,
             short_window: 10,
             medium_window: 30,
             long_window: 60,
-            max_position_size: 100.0,
-            sentiment_decay_factor: 0.95,
+            _max_position_size: 100.0,
+            _sentiment_decay_factor: 0.95,
         }
     }
 
@@ -302,32 +302,32 @@ impl SentimentAnalysisStrategy {
         let weighted_sentiment = short_sentiment * 0.5 + medium_sentiment * 0.3 + long_sentiment * 0.2;
         
         // Strong buy signal: positive sentiment with momentum
-        if weighted_sentiment > 0.2 && sentiment_momentum > 0.05 && sentiment_volatility < 0.8 {
-            return (Signal::Buy, 0.7);
+        if weighted_sentiment > 0.3 && sentiment_momentum > 0.08 && sentiment_volatility < 0.6 {
+            return (Signal::Buy, 0.8);
         }
         
         // Strong sell signal: negative sentiment with momentum
-        if weighted_sentiment < -0.2 && sentiment_momentum < -0.05 && sentiment_volatility < 0.8 {
-            return (Signal::Sell, 0.7);
+        if weighted_sentiment < -0.3 && sentiment_momentum < -0.08 && sentiment_volatility < 0.6 {
+            return (Signal::Sell, 0.8);
         }
         
         // Moderate buy signal
-        if weighted_sentiment > 0.1 && sentiment_momentum > 0.02 {
-            return (Signal::Buy, 0.5);
+        if weighted_sentiment > 0.2 && sentiment_momentum > 0.05 && sentiment_volatility < 0.7 {
+            return (Signal::Buy, 0.65);
         }
         
         // Moderate sell signal
-        if weighted_sentiment < -0.1 && sentiment_momentum < -0.02 {
-            return (Signal::Sell, 0.5);
+        if weighted_sentiment < -0.2 && sentiment_momentum < -0.05 && sentiment_volatility < 0.7 {
+            return (Signal::Sell, 0.65);
         }
         
         // Weak signals for very strong sentiment
-        if weighted_sentiment > 0.3 {
-            return (Signal::Buy, 0.4);
+        if weighted_sentiment > 0.35 && sentiment_volatility < 0.5 {
+            return (Signal::Buy, 0.55);
         }
         
-        if weighted_sentiment < -0.3 {
-            return (Signal::Sell, 0.4);
+        if weighted_sentiment < -0.35 && sentiment_volatility < 0.5 {
+            return (Signal::Sell, 0.55);
         }
         
         (Signal::Hold, 0.0)

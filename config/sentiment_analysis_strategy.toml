@@ -1,16 +1,16 @@
 # Sentiment Analysis Strategy Configuration
 
 [sentiment_weights]
-social_sentiment_weight = 0.3
-news_sentiment_weight = 0.25
+social_sentiment_weight = 0.25
+news_sentiment_weight = 0.3
 volume_sentiment_weight = 0.25
 price_sentiment_weight = 0.2
 
 [sentiment_thresholds]
-buy_threshold = 0.3
-sell_threshold = -0.3
-strong_buy_threshold = 0.6
-strong_sell_threshold = -0.6
+buy_threshold = 0.25
+sell_threshold = -0.25
+strong_buy_threshold = 0.5
+strong_sell_threshold = -0.5
 
 [windows]
 short_window = 10
@@ -25,16 +25,16 @@ volatility_window = 20
 trend_window = 20
 
 [confidence_calculation]
-min_confidence = 0.3
-confidence_decay_factor = 0.95
-sentiment_agreement_threshold = 0.5
+min_confidence = 0.4
+confidence_decay_factor = 0.97
+sentiment_agreement_threshold = 0.55
 
 [risk_management]
-max_position_size = 100.0
-max_drawdown = 0.1
-stop_loss = 0.02
-take_profit = 0.05
-max_consecutive_losses = 5
+max_position_size = 30.0
+max_drawdown = 0.03
+stop_loss = 0.012
+take_profit = 0.025
+max_consecutive_losses = 2
 
 [performance_tracking]
 track_sentiment_sources = true

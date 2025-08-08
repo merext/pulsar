@@ -1,0 +1,150 @@
+# Code Quality Standards
+
+## File Creation Guidelines
+
+### ❌ **NEVER Create These Files Unless Explicitly Requested:**
+- **Bash scripts** (`.sh` files) - Only create if user explicitly asks for bash files
+- **Markdown files** (`.md` files) - Only create if user explicitly asks for markdown documentation
+- **Configuration files** - Only create if user explicitly requests them
+- **Test files** - Only create if user explicitly asks for tests
+
+### ✅ **Always Create These Files When Appropriate:**
+- **Rust source files** (`.rs`) - When implementing new functionality
+- **TOML configuration files** - When user asks for configuration
+- **Cursor rules** (`.mdc`) - When documenting patterns and guidelines
+
+## Code Quality Requirements
+
+### 🔧 **Always Fix Compilation Issues:**
+- **Compilation errors** - Must be fixed immediately
+- **Compilation warnings** - Must be addressed and resolved
+- **Type errors** - Must be corrected
+- **Import errors** - Must be resolved
+
+### 🧹 **Always Clean Up Code:**
+- **Unused variables** - Must be removed or prefixed with `_` if intentionally unused
+- **Unused functions** - Must be removed if not needed
+- **Unused imports** - Must be removed
+- **Dead code** - Must be eliminated
+- **Unused fields** - Must be removed from structs
+
+### 📝 **Code Style Standards:**
+- **Consistent formatting** - Use `cargo fmt` standards
+- **Clear naming** - Use descriptive variable and function names
+- **Proper documentation** - Add comments for complex logic
+- **Error handling** - Implement proper error handling
+
+## Implementation Guidelines
+
+### 🚫 **What NOT to Do:**
+```rust
+// ❌ DON'T leave unused variables
+let unused_var = 42; // This will cause a warning
+
+// ❌ DON'T leave unused imports
+use std::collections::HashMap; // If not used
+
+// ❌ DON'T leave unused functions
+fn unused_function() {
+    // This should be removed
+}
+```
+
+### ✅ **What TO Do:**
+```rust
+// ✅ DO prefix unused variables with underscore
+let _unused_var = 42; // This suppresses the warning
+
+// ✅ DO remove unused imports
+// Only import what you actually use
+
+// ✅ DO remove unused functions
+// Delete functions that are not called anywhere
+
+// ✅ DO fix compilation warnings immediately
+// Address all warnings before proceeding
+```
+
+## Workflow Requirements
+
+### 🔍 **Before Submitting Code:**
+1. **Check compilation** - Ensure `cargo check` passes without warnings
+2. **Remove unused code** - Clean up any unused variables, functions, or imports
+3. **Test functionality** - Ensure the code works as intended
+4. **Follow user requests** - Only create files that were explicitly requested
+
+### 📋 **Code Review Checklist:**
+- [ ] No compilation errors
+- [ ] No compilation warnings
+- [ ] No unused variables (or properly prefixed with `_`)
+- [ ] No unused functions
+- [ ] No unused imports
+- [ ] No dead code
+- [ ] Only requested files were created
+- [ ] Code follows Rust best practices
+
+## Examples
+
+### ❌ **Bad Example:**
+```rust
+use std::collections::HashMap; // Unused import
+use std::collections::VecDeque; // Unused import
+
+pub struct MyStruct {
+    unused_field: String, // Unused field
+}
+
+impl MyStruct {
+    pub fn new() -> Self {
+        let unused_var = 42; // Unused variable
+        Self {
+            unused_field: "hello".to_string(),
+        }
+    }
+    
+    fn unused_method() { // Unused method
+        println!("This is never called");
+    }
+}
+```
+
+### ✅ **Good Example:**
+```rust
+// Only import what we actually use
+use std::collections::VecDeque;
+
+pub struct MyStruct {
+    // Only include fields that are actually used
+    used_field: String,
+}
+
+impl MyStruct {
+    pub fn new() -> Self {
+        // Either use the variable or prefix with _
+        let _unused_var = 42; // Intentionally unused
+        Self {
+            used_field: "hello".to_string(),
+        }
+    }
+    
+    // Only include methods that are actually called
+    pub fn used_method(&self) {
+        println!("This is called somewhere");
+    }
+}
+```
+
+## Summary
+
+**Core Principles:**
+1. **Never create bash or markdown files unless explicitly requested**
+2. **Always fix compilation warnings immediately**
+3. **Always remove unused code**
+4. **Keep code clean and maintainable**
+5. **Follow Rust best practices**
+
+**Remember:** Quality code is clean code. Always prioritize code quality over quick solutions.
+description: Code quality standards that must always be followed
+globs: ["**/*.rs", "**/*.toml", "**/*.md", "**/*.sh"]
+alwaysApply: true
+---

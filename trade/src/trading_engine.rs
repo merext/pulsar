@@ -400,7 +400,17 @@ impl TradingEngine {
 
         // Check signal strength
         if confidence < self.config.risk_management.min_signal_strength {
+            if self.metrics.total_trades % 100 == 0 {
+                println!("DEBUG: Trading engine rejecting trade - confidence {:.3} < min_signal_strength {:.3}", 
+                    confidence, self.config.risk_management.min_signal_strength);
+            }
             return false;
+        }
+        
+        // Debug logging for successful trade approval
+        if self.metrics.total_trades % 100 == 0 {
+            println!("DEBUG: Trading engine approving trade - confidence {:.3} >= min_signal_strength {:.3}", 
+                confidence, self.config.risk_management.min_signal_strength);
         }
 
         // Check consecutive losses
@@ -631,6 +641,10 @@ impl Trader for TradingEngine {
     }
 
     async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) {
+        // Debug logging for trade execution
+        println!("DEBUG: on_emulate called - Signal: {:?}, Price: {:.6}, Quantity: {:.6}", 
+            signal, price, quantity);
+        
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
