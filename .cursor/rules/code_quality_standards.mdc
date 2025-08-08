@@ -15,11 +15,15 @@
 
 ## Code Quality Requirements
 
-### 🔧 **Always Fix Compilation Issues:**
+### 🔧 **ALWAYS Fix Compilation Issues IMMEDIATELY:**
 - **Compilation errors** - Must be fixed immediately
-- **Compilation warnings** - Must be addressed and resolved
+- **Compilation warnings** - Must be addressed and resolved BEFORE proceeding
 - **Type errors** - Must be corrected
 - **Import errors** - Must be resolved
+- **Unused variable warnings** - Must prefix with `_` or remove
+- **Unused function warnings** - Must prefix with `_` or remove
+- **Unused import warnings** - Must remove unused imports
+- **Dead code warnings** - Must remove unused code
 
 ### 🧹 **Always Clean Up Code:**
 - **Unused variables** - Must be removed or prefixed with `_` if intentionally unused
@@ -69,9 +73,11 @@ let _unused_var = 42; // This suppresses the warning
 
 ### 🔍 **Before Submitting Code:**
 1. **Check compilation** - Ensure `cargo check` passes without warnings
-2. **Remove unused code** - Clean up any unused variables, functions, or imports
-3. **Test functionality** - Ensure the code works as intended
-4. **Follow user requests** - Only create files that were explicitly requested
+2. **Fix ALL warnings** - Address every single compilation warning before proceeding
+3. **Remove unused code** - Clean up any unused variables, functions, or imports
+4. **Test functionality** - Ensure the code works as intended
+5. **Follow user requests** - Only create files that were explicitly requested
+6. **Verify clean build** - Run `cargo check` again to confirm no warnings remain
 
 ### 📋 **Code Review Checklist:**
 - [ ] No compilation errors
@@ -138,12 +144,13 @@ impl MyStruct {
 
 **Core Principles:**
 1. **Never create bash or markdown files unless explicitly requested**
-2. **Always fix compilation warnings immediately**
+2. **ALWAYS fix compilation warnings IMMEDIATELY - NO EXCEPTIONS**
 3. **Always remove unused code**
 4. **Keep code clean and maintainable**
 5. **Follow Rust best practices**
+6. **Verify clean compilation before proceeding**
 
-**Remember:** Quality code is clean code. Always prioritize code quality over quick solutions.
+**Remember:** Quality code is clean code. Always prioritize code quality over quick solutions. **NEVER submit code with compilation warnings.**
 description: Code quality standards that must always be followed
 globs: ["**/*.rs", "**/*.toml", "**/*.md", "**/*.sh"]
 alwaysApply: true

@@ -1,7 +1,9 @@
 pub mod config;
 pub mod sentiment_analysis_strategy;
-pub mod strategy_factory;
+pub mod mean_reversion_strategy;
+pub mod pulsar_alpha_strategy;
 pub mod strategy;
 
 pub use sentiment_analysis_strategy::SentimentAnalysisStrategy;
-pub use strategy_factory::{StrategyFactory, StrategyType};
+pub use mean_reversion_strategy::MeanReversionStrategy;
+pub use pulsar_alpha_strategy::PulsarAlphaStrategy;

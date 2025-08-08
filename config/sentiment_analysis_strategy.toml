@@ -25,9 +25,9 @@ volatility_window = 20
 trend_window = 20
 
 [confidence_calculation]
-min_confidence = 0.4
-confidence_decay_factor = 0.97
-sentiment_agreement_threshold = 0.55
+min_confidence = 0.3
+confidence_decay_factor = 0.95
+sentiment_agreement_threshold = 0.5
 
 [risk_management]
 max_position_size = 30.0

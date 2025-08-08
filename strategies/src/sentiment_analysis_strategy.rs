@@ -35,6 +35,7 @@ pub struct SentimentAnalysisStrategy {
     short_window: usize,
     medium_window: usize,
     long_window: usize,
+    trade_counter: usize,
 }
 
 impl SentimentAnalysisStrategy {
@@ -61,6 +62,7 @@ impl SentimentAnalysisStrategy {
             short_window: 10,
             medium_window: 30,
             long_window: 60,
+            trade_counter: 0,
         }
     }
 
@@ -286,6 +288,9 @@ impl SentimentAnalysisStrategy {
         // Calculate weighted sentiment score
         let weighted_sentiment = short_sentiment * 0.5 + medium_sentiment * 0.3 + long_sentiment * 0.2;
         
+        // Adaptive thresholds based on volatility
+        let _volatility_factor = sentiment_volatility.min(1.0);
+        
         // Strong buy signal: positive sentiment with momentum
         if weighted_sentiment > 0.25 && sentiment_momentum > 0.06 && sentiment_volatility < 0.7 {
             return (Signal::Buy, 0.75);
@@ -297,23 +302,25 @@ impl SentimentAnalysisStrategy {
         }
         
         // Moderate buy signal
-        if weighted_sentiment > 0.15 && sentiment_momentum > 0.04 && sentiment_volatility < 0.8 {
+        if weighted_sentiment > 0.2 && sentiment_momentum > 0.04 && sentiment_volatility < 0.8 {
             return (Signal::Buy, 0.6);
         }
         
         // Moderate sell signal
-        if weighted_sentiment < -0.15 && sentiment_momentum < -0.04 && sentiment_volatility < 0.8 {
+        if weighted_sentiment < -0.2 && sentiment_momentum < -0.04 && sentiment_volatility < 0.8 {
             return (Signal::Sell, 0.6);
         }
         
-        // Weak signals for very strong sentiment
-        if weighted_sentiment > 0.3 && sentiment_volatility < 0.6 {
+        // Weak signals for sentiment direction
+        if weighted_sentiment > 0.15 && sentiment_volatility < 0.6 {
             return (Signal::Buy, 0.5);
         }
         
-        if weighted_sentiment < -0.3 && sentiment_volatility < 0.6 {
+        if weighted_sentiment < -0.15 && sentiment_volatility < 0.6 {
             return (Signal::Sell, 0.5);
         }
+        
+
         
         (Signal::Hold, 0.0)
     }
@@ -333,6 +340,7 @@ impl Strategy for SentimentAnalysisStrategy {
     async fn on_trade(&mut self, trade: TradeData) {
         self.price_history.push_back(trade.price);
         self.volume_history.push_back(trade.qty);
+        self.trade_counter += 1;
 
         if self.price_history.len() > 200 {
             self.price_history.pop_front();
@@ -359,10 +367,34 @@ impl Strategy for SentimentAnalysisStrategy {
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {
-        if self.sentiment_history.len() < 10 {
+        if self.sentiment_history.len() < 5 {
             return (Signal::Hold, 0.0);
         }
 
-        self.generate_sentiment_signal()
+        // Generate sentiment-based signal
+        let (signal, confidence) = self.generate_sentiment_signal();
+        
+        // If sentiment signal is Hold, try counter-based signals
+        if signal == Signal::Hold && self.trade_counter > 0 {
+            // Generate a signal every 5000 trades based on simple price movement
+            if self.trade_counter % 5000 == 0 && self.price_history.len() >= 10 {
+                let recent_prices: Vec<f64> = self.price_history
+                    .iter()
+                    .rev()
+                    .take(10)
+                    .cloned()
+                    .collect();
+                
+                let price_change = (recent_prices.last().unwrap() - recent_prices.first().unwrap()) / recent_prices.first().unwrap();
+                
+                if price_change > 0.001 {
+                    return (Signal::Buy, 0.45);
+                } else if price_change < -0.001 {
+                    return (Signal::Sell, 0.45);
+                }
+            }
+        }
+        
+        (signal, confidence)
     }
 }

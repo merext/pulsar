@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
 use strategies::config::StrategyConfig;
-use strategies::SentimentAnalysisStrategy;
+use strategies::PulsarAlphaStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
 
@@ -46,8 +46,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
-    // Create Sentiment Analysis strategy instance
-    let strategy = SentimentAnalysisStrategy::new();
+    // Create Pulsar-Alpha HFT strategy instance
+    let strategy = PulsarAlphaStrategy::new();
     
     // Load trading configuration
     let trading_config =
