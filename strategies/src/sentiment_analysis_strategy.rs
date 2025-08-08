@@ -1,5 +1,4 @@
 use crate::strategy::Strategy;
-use crate::config::StrategyConfig;
 use trade::models::TradeData;
 use trade::trader::Position;
 use trade::signal::Signal;
@@ -28,18 +27,14 @@ pub struct SentimentMetrics {
 }
 
 pub struct SentimentAnalysisStrategy {
-    _config: StrategyConfig,
     price_history: VecDeque<f64>,
     volume_history: VecDeque<f64>,
     sentiment_history: VecDeque<SentimentData>,
     sentiment_metrics: SentimentMetrics,
     sentiment_weights: HashMap<String, f64>,
-    _sentiment_thresholds: HashMap<String, f64>,
     short_window: usize,
     medium_window: usize,
     long_window: usize,
-    _max_position_size: f64,
-    _sentiment_decay_factor: f64,
 }
 
 impl SentimentAnalysisStrategy {
@@ -50,14 +45,7 @@ impl SentimentAnalysisStrategy {
         sentiment_weights.insert("volume".to_string(), 0.25);
         sentiment_weights.insert("price".to_string(), 0.2);
 
-        let mut sentiment_thresholds = HashMap::new();
-        sentiment_thresholds.insert("buy_threshold".to_string(), 0.3);
-        sentiment_thresholds.insert("sell_threshold".to_string(), -0.3);
-        sentiment_thresholds.insert("strong_buy_threshold".to_string(), 0.6);
-        sentiment_thresholds.insert("strong_sell_threshold".to_string(), -0.6);
-
         Self {
-            _config: StrategyConfig::load_trading_config().expect("Failed to load trading configuration"),
             price_history: VecDeque::with_capacity(200),
             volume_history: VecDeque::with_capacity(200),
             sentiment_history: VecDeque::with_capacity(100),
@@ -70,12 +58,9 @@ impl SentimentAnalysisStrategy {
                 sentiment_trend: 0.0,
             },
             sentiment_weights,
-            _sentiment_thresholds: sentiment_thresholds,
             short_window: 10,
             medium_window: 30,
             long_window: 60,
-            _max_position_size: 100.0,
-            _sentiment_decay_factor: 0.95,
         }
     }
 
@@ -302,32 +287,32 @@ impl SentimentAnalysisStrategy {
         let weighted_sentiment = short_sentiment * 0.5 + medium_sentiment * 0.3 + long_sentiment * 0.2;
         
         // Strong buy signal: positive sentiment with momentum
-        if weighted_sentiment > 0.3 && sentiment_momentum > 0.08 && sentiment_volatility < 0.6 {
-            return (Signal::Buy, 0.8);
+        if weighted_sentiment > 0.25 && sentiment_momentum > 0.06 && sentiment_volatility < 0.7 {
+            return (Signal::Buy, 0.75);
         }
         
         // Strong sell signal: negative sentiment with momentum
-        if weighted_sentiment < -0.3 && sentiment_momentum < -0.08 && sentiment_volatility < 0.6 {
-            return (Signal::Sell, 0.8);
+        if weighted_sentiment < -0.25 && sentiment_momentum < -0.06 && sentiment_volatility < 0.7 {
+            return (Signal::Sell, 0.75);
         }
         
         // Moderate buy signal
-        if weighted_sentiment > 0.2 && sentiment_momentum > 0.05 && sentiment_volatility < 0.7 {
-            return (Signal::Buy, 0.65);
+        if weighted_sentiment > 0.15 && sentiment_momentum > 0.04 && sentiment_volatility < 0.8 {
+            return (Signal::Buy, 0.6);
         }
         
         // Moderate sell signal
-        if weighted_sentiment < -0.2 && sentiment_momentum < -0.05 && sentiment_volatility < 0.7 {
-            return (Signal::Sell, 0.65);
+        if weighted_sentiment < -0.15 && sentiment_momentum < -0.04 && sentiment_volatility < 0.8 {
+            return (Signal::Sell, 0.6);
         }
         
         // Weak signals for very strong sentiment
-        if weighted_sentiment > 0.35 && sentiment_volatility < 0.5 {
-            return (Signal::Buy, 0.55);
+        if weighted_sentiment > 0.3 && sentiment_volatility < 0.6 {
+            return (Signal::Buy, 0.5);
         }
         
-        if weighted_sentiment < -0.35 && sentiment_volatility < 0.5 {
-            return (Signal::Sell, 0.55);
+        if weighted_sentiment < -0.3 && sentiment_volatility < 0.6 {
+            return (Signal::Sell, 0.5);
         }
         
         (Signal::Hold, 0.0)
