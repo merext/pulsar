@@ -30,7 +30,7 @@ min_memory_size = 40
 
 [mpc]
 decision_interval_ms = 1
-execution_threshold = 0.00008
+execution_threshold = 0.000005
 bootstrap_samples = 12
 candidate_offsets = [0.25, 0.5, 1.0, 2.0]
 candidate_sizes = [0.5, 1.0, 1.5, 2.0]
@@ -39,12 +39,23 @@ inventory_penalty = 0.008
 
 [signals]
 # require some recent activity to participate
-min_event_intensity = 3.0
+min_event_intensity = 0.0
 # take-profit and stop-loss bands (as return fraction)
-tp_bps = 0.0006
+tp_bps = 0.001
 sl_bps = 0.00015
 # require aggression alignment with score
-aggression_align = true
+aggression_align = false
+aggr_min_abs = 0.0
+require_dual_momentum = false
+mode = "momentum"
+min_score_mult = 0.05
+vol_k = 0.0
+vol_window = 12
+r2_w = 0.6
+r5_w = 0.3
+aggr_w = 0.1
+ei_w = 0.0
+conf_gain = 5.0
 
 [features]
 normalization_window = 240
