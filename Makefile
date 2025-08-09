@@ -8,3 +8,6 @@ test:
 
 trade:
 	RUST_LOG=info cargo run trade
+
+emulate:
+	RUST_LOG=info cargo run emulate

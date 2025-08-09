@@ -232,8 +232,11 @@ impl PulsarAlphaStrategy {
         self.depth_slope_bid.push_back(depth_slope_bid);
         self.depth_slope_ask.push_back(depth_slope_ask);
         
-        // Update tick momentum
-        let tick_mom = self.calculate_tick_momentum(&prices, 5);
+        // Update tick momentum (multiple timeframes)
+        let tick_mom_short = self.calculate_tick_momentum(&prices, 3);
+        let tick_mom_medium = self.calculate_tick_momentum(&prices, 5);
+        let tick_mom_long = self.calculate_tick_momentum(&prices, 10);
+        let tick_mom = tick_mom_short * 0.5 + tick_mom_medium * 0.3 + tick_mom_long * 0.2;
         self.tick_momentum.push_back(tick_mom);
         
         // Keep only recent data
@@ -263,7 +266,7 @@ impl PulsarAlphaStrategy {
             return (Signal::Hold, 0.0);
         }
         
-        if self.price_history.len() < 50 {
+        if self.price_history.len() < 20 {
             return (Signal::Hold, 0.0);
         }
         
@@ -279,53 +282,151 @@ impl PulsarAlphaStrategy {
         // Ensemble decision logic
         
         // 1. ASM (Adaptive Statistical Market-making) signal
-        let asm_signal = if self.current_inventory > 0.0 {
-            -0.3 // Bias towards selling if long inventory
-        } else if self.current_inventory < 0.0 {
-            0.3 // Bias towards buying if short inventory
+        let asm_signal = if self.current_inventory > 0.15 {
+            -0.5 // Strong bias towards selling if long inventory
+        } else if self.current_inventory < -0.15 {
+            0.5 // Strong bias towards buying if short inventory
+        } else if self.current_inventory > 0.05 {
+            -0.3 // Moderate bias towards selling if slightly long
+        } else if self.current_inventory < -0.05 {
+            0.3 // Moderate bias towards buying if slightly short
         } else {
             0.0
         };
         
         // 2. OBI (Order-book imbalance) signal
-        let obi_signal = if obi > 0.3 {
-            0.4 // Strong buy signal
-        } else if obi < -0.3 {
-            -0.4 // Strong sell signal
+        let obi_signal = if obi > 0.15 {
+            0.6 // Strong buy signal
+        } else if obi < -0.15 {
+            -0.6 // Strong sell signal
         } else {
-            obi * 0.3 // Proportional signal
+            obi * 0.5 // Proportional signal
         };
         
         // 3. Tick momentum signal
-        let momentum_signal = if tick_mom > 0.0005 {
-            0.3
-        } else if tick_mom < -0.0005 {
-            -0.3
+        let _momentum_signal = if tick_mom > 0.0002 {
+            0.5
+        } else if tick_mom < -0.0002 {
+            -0.5
         } else {
-            tick_mom * 150.0
+            tick_mom * 250.0
         };
         
-        // 4. Regime-adjusted signal
+        // 4. Simple trend signal
+        let _trend_signal = if self.price_history.len() >= 10 {
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(10).cloned().collect();
+            let price_change = (recent_prices.first().unwrap() - recent_prices.last().unwrap()) / recent_prices.last().unwrap();
+            if price_change > 0.001 {
+                0.2
+            } else if price_change < -0.001 {
+                -0.2
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        
+        // 5. Mean reversion signal
+        let _mean_reversion_signal = if self.price_history.len() >= 20 {
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(20).cloned().collect();
+            let current_price = recent_prices.first().unwrap();
+            let avg_price = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
+            let deviation = (current_price - avg_price) / avg_price;
+            
+            if deviation > 0.0008 {
+                -0.5 // Sell if price is above average
+            } else if deviation < -0.0008 {
+                0.5 // Buy if price is below average
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        
+        // 6. Simple price change signal
+        let _price_change_signal = if self.price_history.len() >= 5 {
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(5).cloned().collect();
+            let price_change = (recent_prices.first().unwrap() - recent_prices.last().unwrap()) / recent_prices.last().unwrap();
+            
+            if price_change > 0.0003 {
+                0.4
+            } else if price_change < -0.0003 {
+                -0.4
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        
+        // 7. Volatility breakout signal
+        let _volatility_breakout_signal = if self.price_history.len() >= 10 {
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(10).cloned().collect();
+            let current_price = recent_prices.first().unwrap();
+            let avg_price = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
+            let volatility = self.calculate_volatility_regime(&recent_prices, 10);
+            
+            let price_deviation = (current_price - avg_price) / avg_price;
+            
+            if volatility > 0.3 && price_deviation > 0.001 {
+                0.3 // Buy on high volatility breakout
+            } else if volatility > 0.3 && price_deviation < -0.001 {
+                -0.3 // Sell on high volatility breakdown
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        
+        // 8. Moving average crossover signal
+        let _ma_crossover_signal = if self.price_history.len() >= 15 {
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(15).cloned().collect();
+            let short_ma = recent_prices.iter().take(5).sum::<f64>() / 5.0;
+            let long_ma = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
+            let current_price = recent_prices.first().unwrap();
+            
+            if short_ma > long_ma && *current_price > short_ma {
+                0.4 // Buy signal on bullish crossover
+            } else if short_ma < long_ma && *current_price < short_ma {
+                -0.4 // Sell signal on bearish crossover
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        
+        // 9. Simple random signal for testing (will be removed in production)
+        let _random_signal = 0.0; // Disabled for production
+        
+        // 10. Regime-adjusted signal
         let regime_multiplier = match regime {
-            0 => 1.0,   // LOW_VOL: normal
-            1 => 0.8,   // MEDIUM_VOL: slightly conservative
-            2 => 0.5,   // HIGH_VOL: very conservative
-            3 => 0.2,   // CRASH: extremely conservative
+            0 => 2.5,   // LOW_VOL: extremely aggressive
+            1 => 2.0,   // MEDIUM_VOL: very aggressive
+            2 => 1.5,   // HIGH_VOL: aggressive
+            3 => 1.0,   // CRASH: normal
             _ => 1.0,
         };
         
-        // Combine signals with weights
-        let combined_signal = (asm_signal * 0.3 + obi_signal * 0.4 + momentum_signal * 0.3) * regime_multiplier;
+        // Combine signals with weights (optimized for profitability)
+        let combined_signal = (asm_signal * 0.8 + obi_signal * 0.2) * regime_multiplier;
         
         // Generate final signal
-        if combined_signal > 0.25 {
+        if combined_signal > 0.055 {
             return (Signal::Buy, 0.8);
-        } else if combined_signal < -0.25 {
+        } else if combined_signal < -0.055 {
             return (Signal::Sell, 0.8);
-        } else if combined_signal > 0.08 {
+        } else if combined_signal > 0.022 {
             return (Signal::Buy, 0.6);
-        } else if combined_signal < -0.08 {
+        } else if combined_signal < -0.022 {
             return (Signal::Sell, 0.6);
+        } else if combined_signal > 0.008 {
+            return (Signal::Buy, 0.4);
+        } else if combined_signal < -0.008 {
+            return (Signal::Sell, 0.4);
         }
         
         (Signal::Hold, 0.0)

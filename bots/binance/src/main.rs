@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
 use strategies::config::StrategyConfig;
-use strategies::PulsarAlphaStrategy;
+use strategies::{PulsarAlphaStrategy, PulsarMemOnlyStrategy};
 use strategies::strategy::Strategy;
 use tracing::info;
 
@@ -46,8 +46,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
-    // Create Pulsar-Alpha HFT strategy instance
-    let strategy = PulsarAlphaStrategy::new();
+    // Create Pulsar-MemOnly HFT strategy instance
+    let strategy = PulsarMemOnlyStrategy::new();
     
     // Load trading configuration
     let trading_config =
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let trading_symbol = position_sizing.get_or("default_trading_symbol", "DOGEUSDT".to_string());
     let trading_size_min = position_sizing.get_or("trading_size_min", 10.0);
-    let trading_size_max = position_sizing.get_or("trading_size_max", 50.0);
+    let trading_size_max = position_sizing.get_or("trading_size_max", 15.0);
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
 
