@@ -49,6 +49,8 @@ aggr_min_abs = 0.0
 require_dual_momentum = false
 mode = "momentum"
 min_score_mult = 0.05
+# minimum confidence threshold for real trades (0.0 to 1.0)
+confidence_min = 0.5
 vol_k = 0.0
 vol_window = 12
 r2_w = 0.6

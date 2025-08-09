@@ -38,6 +38,7 @@ pub struct PulsarMemOnlyStrategy {
     is_contrarian: bool,
     // Threshold modulation
     min_score_mult: f64,
+    confidence_min: f64,
     vol_k: f64,
     vol_window: usize,
     // Score weights (unused in current simplified implementation)
@@ -94,6 +95,7 @@ struct Signals {
     require_dual_momentum: Option<bool>,
     mode: Option<String>,
     min_score_mult: Option<f64>,
+    confidence_min: Option<f64>,
     vol_k: Option<f64>,
     vol_window: Option<usize>,
     r2_w: Option<f64>,
@@ -134,6 +136,7 @@ impl PulsarMemOnlyStrategy {
             require_dual_momentum: sig.and_then(|s| s.require_dual_momentum).unwrap_or(false),
             is_contrarian: sig.and_then(|s| s.mode.clone()).unwrap_or_else(|| "momentum".to_string()) == "contrarian",
             min_score_mult: sig.and_then(|s| s.min_score_mult).unwrap_or(3.0),
+            confidence_min: sig.and_then(|s| s.confidence_min).unwrap_or(0.3),
             vol_k: sig.and_then(|s| s.vol_k).unwrap_or(1.0),
             vol_window: sig.and_then(|s| s.vol_window).unwrap_or(12).max(3),
             _r2_w: sig.and_then(|s| s.r2_w).unwrap_or(0.5),
@@ -305,6 +308,11 @@ impl Strategy for PulsarMemOnlyStrategy {
                     conf = (conf + 0.2).min(1.0);
                 }
             }
+        }
+
+        // Apply confidence threshold - only execute trades if confidence is high enough
+        if !matches!(signal, Signal::Hold) && conf < self.confidence_min {
+            signal = Signal::Hold;  // Override signal if confidence is too low
         }
 
         (signal, conf)
