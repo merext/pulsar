@@ -1,0 +1,29 @@
+[general]
+strategy_name = "PulsarTradingStrategy"
+enabled = true
+base_size = 1.0
+max_position = 10.0
+max_drawdown = 0.05
+
+[timing]
+signal_cooldown_ms = 50
+min_holding_time_ms = 100
+max_order_age_ms = 500
+
+[risk]
+max_consecutive_losses = 5
+stop_loss_bps = 10
+take_profit_bps = 20
+position_sizing_factor = 1.0
+
+[signals]
+min_confidence = 0.1
+require_momentum_alignment = false
+momentum_window = 20
+volatility_window = 50
+
+[execution]
+aggressive_fill_threshold = 0.001
+passive_fill_threshold = 0.0005
+max_slippage_bps = 5
+

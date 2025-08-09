@@ -2,8 +2,8 @@
 # This file contains the complete trading configuration used by the trading bot
 
 [position_sizing]
-trading_size_min = 75.0
-trading_size_max = 100.0
+trading_size_min = 15.0
+trading_size_max = 35.0
 trading_symbol = "DOGEUSDT"
 
 [exchange]
@@ -13,7 +13,7 @@ maker_rebate = 0.00005
 tick_size = 0.00001
 min_notional = 10.0
 max_order_size = 1000000.0
-step_size = 0.1
+step_size = 0.5
 
 [slippage]
 min_slippage = 0.00005

@@ -101,13 +101,14 @@ pub async fn run_trade(
         };
 
         // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
+        // Use proper trading config values instead of hardcoded zeros
         let quantity_to_trade = binance_trader.calculate_trade_size(
             &trading_symbol,
             trade_price,
             confidence,
-            0.0,
-            0.0,
-            0.0,
+            config.position_sizing.trading_size_min,
+            config.position_sizing.trading_size_max,
+            1.0, // trading_size_step - use 1.0 for DOGEUSDT
         );
 
         // Log BUY/SELL signals at info level with structured format

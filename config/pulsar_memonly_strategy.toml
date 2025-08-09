@@ -48,10 +48,10 @@ aggression_align = false
 aggr_min_abs = 0.0
 require_dual_momentum = false
 mode = "momentum"
-min_score_mult = 0.05
+min_score_mult = 0.01
 # minimum confidence threshold for real trades (0.0 to 1.0)
-confidence_min = 0.5
-vol_k = 0.0
+confidence_min = 0.03
+vol_k = 1.5
 vol_window = 12
 r2_w = 0.6
 r5_w = 0.3

@@ -643,10 +643,6 @@ impl Trader for TradingEngine {
     }
 
     async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) {
-        // Debug logging for trade execution
-        println!("DEBUG: on_emulate called - Signal: {:?}, Price: {:.6}, Quantity: {:.6}", 
-            signal, price, quantity);
-        
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

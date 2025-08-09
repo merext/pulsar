@@ -83,12 +83,35 @@ impl BinanceTrader {
     }
 
     pub fn calculate_trade_size_impl(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
-        // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
-        // This is the core logic that both live trading and emulation use
+        // Enhanced dynamic sizing with multiple factors
         
-        // Simple linear interpolation between min and max quantities based on confidence
-        // 0% confidence = trading_size_min, 100% confidence = trading_size_max
-        let dynamic_quantity = trading_size_min + (confidence * (trading_size_max - trading_size_min));
+        // Base size from linear confidence scaling
+        let confidence_factor = trading_size_min + (confidence * (trading_size_max - trading_size_min));
+        
+        // Volatility adjustment - reduce size in high volatility
+        let volatility = self.estimate_volatility(price);
+        let volatility_factor = if volatility > 0.02 { // If volatility > 2%
+            0.7 // Reduce size by 30%
+        } else if volatility > 0.01 { // If volatility > 1%
+            0.85 // Reduce size by 15%
+        } else {
+            1.0 // No adjustment for low volatility
+        };
+        
+        // Risk adjustment based on confidence
+        let risk_factor = if confidence > 0.7 {
+            1.2 // Increase size for high confidence
+        } else if confidence < 0.3 {
+            0.8 // Reduce size for low confidence
+        } else {
+            1.0
+        };
+        
+        // Kelly Criterion-inspired sizing (simplified)
+        let kelly_factor = self.estimate_kelly_fraction();
+        
+        // Combine all factors
+        let dynamic_quantity = confidence_factor * volatility_factor * risk_factor * kelly_factor;
         
         // Apply step size rounding (round down to nearest step)
         let quantity_to_trade = (dynamic_quantity / trading_size_step).floor() * trading_size_step;
@@ -96,7 +119,7 @@ impl BinanceTrader {
         // Ensure we stay within the min/max bounds after rounding
         let final_quantity = quantity_to_trade.max(trading_size_min).min(trading_size_max);
         
-        debug!(
+                debug!(
             exchange = "binance",
             action = "calculate_trade_size",
             symbol = %symbol,
@@ -105,12 +128,30 @@ impl BinanceTrader {
             trading_size_min = trading_size_min,
             trading_size_max = trading_size_max,
             trading_size_step = trading_size_step,
+            volatility = volatility,
+            volatility_factor = volatility_factor,
+            risk_factor = risk_factor,
+            kelly_factor = kelly_factor,
             dynamic_quantity = dynamic_quantity,
             quantity_to_trade = quantity_to_trade,
             final_quantity = final_quantity
         );
-        
+
         final_quantity
+    }
+    
+    fn estimate_volatility(&self, _current_price: f64) -> f64 {
+        // Simple volatility estimation based on recent price movements
+        // In a real implementation, this would track price history
+        // For now, use a conservative estimate
+        0.015 // 1.5% default volatility
+    }
+    
+    fn estimate_kelly_fraction(&self) -> f64 {
+        // Kelly Criterion estimation
+        // In practice, this would be calculated from historical performance
+        // For now, use a conservative multiplier
+        0.8 // Reduce position size to 80% of base calculation
     }
 }
 

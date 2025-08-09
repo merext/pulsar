@@ -34,30 +34,18 @@ pub async fn run_backtest(
         let (signal, confidence) =
             strategy.get_signal(trade_price, trade_time, trader.position());
 
-        // Debug logging for signal flow
-        if trade_count % 100 == 0 {
-            println!("DEBUG: Backtest - Trade count: {}, Signal: {:?}, Confidence: {:.3}", 
-                trade_count, signal, confidence);
-        }
-
         // Check if we should trade based on signal strength and risk management
         let should_trade = trader.should_trade(&signal, confidence, trade_price, trade_time);
-        
-        // Debug logging for trade decision
-        if trade_count % 100 == 0 {
-            println!("DEBUG: Trade decision - should_trade: {}, signal: {:?}, confidence: {:.3}", 
-                should_trade, signal, confidence);
-        }
         
         if should_trade {
             // Use central TradingConfig-based size calculation
             let quantity_to_trade = trader.calculate_trade_size(symbol, trade_price, confidence, 0.0, 0.0, 0.0);
             
             // Debug logging for trade execution
-            if trade_count % 100 == 0 {
-                println!("DEBUG: Executing trade - Signal: {:?}, Price: {:.6}, Quantity: {:.6}", 
-                    signal, trade_price, quantity_to_trade);
-            }
+            tracing::debug!(
+                "TRADE EXECUTION - Signal: {:?}, Confidence: {:.6}, Price: {:.6}, Qty: {:.6}, Time: {:.3}",
+                signal, confidence, trade_price, quantity_to_trade, trade_time
+            );
             
             trader.on_emulate(signal, trade_price, quantity_to_trade).await;
         }
