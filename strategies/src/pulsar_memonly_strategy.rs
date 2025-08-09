@@ -27,6 +27,12 @@ pub struct PulsarMemOnlyStrategy {
     trade_buffer: VecDeque<TradeEvent>,
     snapshot_buffer: VecDeque<Snapshot>,
     last_snapshot_time: u64,
+
+    // Signal controls
+    min_event_intensity: f64,
+    tp_bps: f64,
+    sl_bps: f64,
+    aggression_align: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +55,7 @@ struct Snapshot {
 struct StrategySettings {
     mpc: Mpc,
     memory: Memory,
+    signals: Option<Signals>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +70,14 @@ struct Memory {
     trade_buffer_size: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct Signals {
+    min_event_intensity: Option<f64>,
+    tp_bps: Option<f64>,
+    sl_bps: Option<f64>,
+    aggression_align: Option<bool>,
+}
+
 impl PulsarMemOnlyStrategy {
     pub fn new() -> Self {
         // Strategy config
@@ -74,6 +89,7 @@ impl PulsarMemOnlyStrategy {
 
         let decision_interval_ns = settings.mpc.decision_interval_ms.max(1) * 1_000_000;
         let thresh = settings.mpc.execution_threshold.unwrap_or(0.0001).abs();
+        let sig = settings.signals.as_ref();
 
         Self {
             decision_interval_ns,
@@ -85,6 +101,10 @@ impl PulsarMemOnlyStrategy {
             trade_buffer: VecDeque::with_capacity(settings.memory.trade_buffer_size),
             snapshot_buffer: VecDeque::with_capacity(settings.memory.snapshot_buffer_size),
             last_snapshot_time: 0,
+            min_event_intensity: sig.and_then(|s| s.min_event_intensity).unwrap_or(2.0),
+            tp_bps: sig.and_then(|s| s.tp_bps).unwrap_or(0.0005),
+            sl_bps: sig.and_then(|s| s.sl_bps).unwrap_or(0.00018),
+            aggression_align: sig.and_then(|s| s.aggression_align).unwrap_or(true),
         }
     }
 
@@ -182,13 +202,13 @@ impl Strategy for PulsarMemOnlyStrategy {
             (last.aggression_ratio, last.event_intensity)
         } else { (0.0, 0.0) };
 
-        let ei_ok = ei > 1.0; // at least a couple trades in last second
+        let ei_ok = ei > self.min_event_intensity; // configurable activity gate
 
-        if score > self.buy_threshold && aggr > 0.0 && ei_ok {
+        if score > self.buy_threshold && (!self.aggression_align || aggr > 0.0) && ei_ok {
             if current_position.quantity == 0.0 {
                 signal = Signal::Buy;
             }
-        } else if score < -self.sell_threshold && aggr < 0.0 && ei_ok {
+        } else if score < -self.sell_threshold && (!self.aggression_align || aggr < 0.0) && ei_ok {
             if current_position.quantity > 0.0 {
                 signal = Signal::Sell;
             }
@@ -199,8 +219,8 @@ impl Strategy for PulsarMemOnlyStrategy {
             let entry = current_position.entry_price;
             if entry > 0.0 {
                 let pnl = (current_price - entry) / entry;
-                // Let winners run more; cut losers faster
-                if pnl >= 0.0003 || pnl <= -0.0002 {
+                // Configurable TP/SL
+                if pnl >= self.tp_bps || pnl <= -self.sl_bps {
                     signal = Signal::Sell;
                     conf = (conf + 0.2).min(1.0);
                 }

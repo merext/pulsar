@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
 use strategies::config::StrategyConfig;
-use strategies::{PulsarAlphaStrategy, PulsarMemOnlyStrategy};
+use strategies::PulsarMemOnlyStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
 
