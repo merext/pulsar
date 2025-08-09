@@ -4,7 +4,7 @@ use crate::config::StrategyConfig;
 use trade::models::TradeData;
 use trade::trader::Position;
 use trade::signal::Signal;
-use tracing::info;
+// use tracing::{info, debug};
 use async_trait::async_trait;
 
 /// Memory-based HFT strategy using ESN reservoir, online RLS readout, and MPC
@@ -264,7 +264,7 @@ impl PulsarMemOnlyStrategy {
     }
     
     fn predict_readout(&self) -> (Vec<f64>, f64) {
-        let reservoir_size = self.esn_state.len();
+        let _reservoir_size = self.esn_state.len();
         let output_size = self.w_out.len();
         
         // Add bias term
@@ -285,7 +285,7 @@ impl PulsarMemOnlyStrategy {
         (predictions, confidence)
     }
     
-    fn update_rls(&mut self, features: &[f64], label: f64, lambda: f64) {
+    fn update_rls(&mut self, _features: &[f64], label: f64, lambda: f64) {
         let reservoir_size = self.esn_state.len();
         let mut input = vec![1.0]; // bias
         input.extend_from_slice(&self.esn_state);
@@ -430,7 +430,7 @@ impl PulsarMemOnlyStrategy {
         }
     }
     
-    fn evaluate_candidate(&self, offset: f64, size: f64) -> f64 {
+    fn evaluate_candidate(&self, _offset: f64, size: f64) -> f64 {
         let features = self.extract_features();
         let (predictions, confidence) = self.predict_readout();
         
