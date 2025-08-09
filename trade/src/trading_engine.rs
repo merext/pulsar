@@ -599,21 +599,25 @@ impl Trader for TradingEngine {
         trading_size_max: f64,
         trading_size_step: f64,
     ) -> f64 {
-        // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
-        // This is the core logic that both live trading and emulation use
+        // If caller didn't pass limits, use config
+        let (min_sz, max_sz, step) = if trading_size_max <= 0.0 {
+            (
+                self.config.position_sizing.trading_size_min,
+                self.config.position_sizing.trading_size_max,
+                self.config.exchange.step_size,
+            )
+        } else {
+            (trading_size_min, trading_size_max, if trading_size_step > 0.0 { trading_size_step } else { self.config.exchange.step_size })
+        };
 
         // Simple linear interpolation between min and max quantities based on confidence
-        // 0% confidence = trading_size_min, 100% confidence = trading_size_max
-        let dynamic_quantity =
-            trading_size_min + (confidence * (trading_size_max - trading_size_min));
+        let dynamic_quantity = min_sz + (confidence * (max_sz - min_sz));
 
         // Apply step size rounding (round down to nearest step)
-        let quantity_to_trade = (dynamic_quantity / trading_size_step).floor() * trading_size_step;
+        let quantity_to_trade = (dynamic_quantity / step).floor() * step;
 
         // Ensure we stay within the min/max bounds after rounding
-        let final_quantity = quantity_to_trade
-            .max(trading_size_min)
-            .min(trading_size_max);
+        let final_quantity = quantity_to_trade.max(min_sz).min(max_sz);
 
         tracing::debug!(
             exchange = "trading_engine",
@@ -621,9 +625,9 @@ impl Trader for TradingEngine {
             symbol = %symbol,
             price = price,
             confidence = confidence,
-            trading_size_min = trading_size_min,
-            trading_size_max = trading_size_max,
-            trading_size_step = trading_size_step,
+            trading_size_min = min_sz,
+            trading_size_max = max_sz,
+            trading_size_step = step,
             dynamic_quantity = dynamic_quantity,
             quantity_to_trade = quantity_to_trade,
             final_quantity = final_quantity

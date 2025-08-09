@@ -1,52 +1,52 @@
 [general]
 strategy_name = "Pulsar-MemOnly"
 enabled = true
-base_size = 1.0
+base_size = 1.5
 max_position = 10.0
 max_drawdown = 0.05
 
 [memory]
 reservoir_size = 128
-snapshot_buffer_size = 10000
-trade_buffer_size = 25000
+snapshot_buffer_size = 12000
+trade_buffer_size = 30000
 book_events_buffer_size = 100000
-knn_memory_size = 5000
+knn_memory_size = 6000
 
 [esn]
-spectral_radius = 0.95
-leak_rate = 0.2
-connectivity = 0.15
-input_scale = 0.2
+spectral_radius = 0.96
+leak_rate = 0.25
+connectivity = 0.18
+input_scale = 0.25
 
 [rls]
-forgetting_factor = 0.99
+forgetting_factor = 0.992
 regularization = 100.0
-update_rate = 0.01
+update_rate = 0.02
 
 [knn]
-neighbors = 20
+neighbors = 24
 distance_threshold = 0.05
-min_memory_size = 50
+min_memory_size = 40
 
 [mpc]
 decision_interval_ms = 1
-execution_threshold = 0.0001
-bootstrap_samples = 12
-candidate_offsets = [0.5, 1.0, 2.0, 3.0, 5.0, 8.0]
-candidate_sizes = [0.5, 1.0, 2.0, 3.0]
-risk_penalty = 0.01
-inventory_penalty = 0.01
+execution_threshold = 0.00005
+bootstrap_samples = 16
+candidate_offsets = [0.25, 0.5, 1.0, 2.0, 3.0, 5.0]
+candidate_sizes = [0.5, 1.0, 1.5, 2.5, 3.5]
+risk_penalty = 0.008
+inventory_penalty = 0.008
 
 [features]
-normalization_window = 300
+normalization_window = 240
 feature_count = 20
 depth_levels = 5
 
 [labels]
-horizon_ms = 500
-max_pending_labels = 500
+horizon_ms = 400
+max_pending_labels = 600
 
 [safety]
 max_order_churn_per_sec = 12
-cold_start_duration_ms = 1000
-confidence_threshold = 0.01
+cold_start_duration_ms = 800
+confidence_threshold = 0.008
