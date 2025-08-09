@@ -88,8 +88,12 @@ impl BinanceTrader {
 
 #[async_trait]
 impl Trader for BinanceTrader {
-    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
-        self.calculate_trade_size_impl(symbol, price, confidence, trading_size_min, trading_size_max, trading_size_step)
+    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, _trading_size_min: f64, _trading_size_max: f64, _trading_size_step: f64) -> f64 {
+        // Read limits from central TradingConfig rather than caller
+        let min = self.config.position_sizing.trading_size_min;
+        let max = self.config.position_sizing.trading_size_max;
+        let step = self.config.exchange.step_size.max(1.0); // default to 1 unit step for spot quantities
+        self.calculate_trade_size_impl(symbol, price, confidence, min, max, step)
     }
     
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {

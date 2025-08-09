@@ -13,6 +13,7 @@ pub struct PulsarMemOnlyStrategy {
     // Configuration
     config: StrategyConfig,
     
+    
     // Memory buffers (circular)
     book_events: VecDeque<BookEvent>,
     trade_buffer: VecDeque<TradeEvent>,
@@ -471,7 +472,12 @@ impl PulsarMemOnlyStrategy {
                 .unwrap_or_else(|_| include_str!("../../config/pulsar_memonly_strategy.toml").to_string())
         ).expect("Failed to parse strategy config");
         
-        let base_size = strategy_config["general"]["base_size"].as_float().unwrap_or(0.1);
+        // Use trading size limits from central trading config
+        let trading_config = StrategyConfig::load_trading_config().expect("Failed to load trading configuration");
+        let ps = trading_config.section("position_sizing").expect("Position sizing configuration not found");
+        let min_size = ps.get_or("trading_size_min", 10.0);
+        let max_size = ps.get_or("trading_size_max", 15.0);
+        let base_size = (min_size + max_size) / 2.0;
         
         // Parse candidate offsets and sizes from config
         let offsets = if let Some(offsets_array) = strategy_config["mpc"]["candidate_offsets"].as_array() {
@@ -489,7 +495,10 @@ impl PulsarMemOnlyStrategy {
         let mut candidates = Vec::new();
         for &offset in &offsets {
             for &size_mult in &sizes {
-                candidates.push((offset, base_size * size_mult));
+                let candidate_size = base_size * size_mult;
+                // Ensure candidate size is within trading limits
+                let clamped_size = candidate_size.clamp(min_size, max_size);
+                candidates.push((offset, clamped_size));
             }
         }
         
@@ -725,6 +734,10 @@ impl Strategy for PulsarMemOnlyStrategy {
         
         // Advanced memory-based strategy with multiple signals and risk management
         let current_price = trade_data.price;
+        // Central position sizing limits
+        let trading_cfg = StrategyConfig::load_trading_config().expect("Failed to load trading configuration");
+        let ps_cfg = trading_cfg.section("position_sizing").expect("Position sizing configuration not found");
+        let max_trade_size_cfg = ps_cfg.get_or("trading_size_max", 15.0);
         let signal = if strategy.snapshot_buffer.len() > 30 {
             // Use advanced multi-signal strategy with risk management
             let recent_prices: Vec<f64> = strategy.snapshot_buffer.iter()
@@ -779,8 +792,8 @@ impl Strategy for PulsarMemOnlyStrategy {
             // Combine signals with weights
             let total_signal = mean_reversion_signal * 0.6 + momentum_signal * 0.3 + trend_signal * 0.1;
             
-            // Risk management: check current position and recent performance
-            let position_limit = 5.0; // Maximum position size
+            // Risk management: check current position and trading size limits
+            let position_limit = max_trade_size_cfg * 0.5; // Maximum position size based on trading limits
             let current_position_abs = strategy.current_inventory.abs();
             
             // Decision based on combined signal strength and risk management
@@ -806,7 +819,7 @@ impl Strategy for PulsarMemOnlyStrategy {
             let long_deviation = (current_price - long_avg) / long_avg;
             
             let threshold = 0.0002;
-            let position_limit = 3.0;
+            let position_limit = max_trade_size_cfg * 0.3;
             let current_position_abs = strategy.current_inventory.abs();
             
             if short_deviation < -threshold && long_deviation < -threshold * 0.5 && current_position_abs < position_limit {
@@ -827,7 +840,7 @@ impl Strategy for PulsarMemOnlyStrategy {
             let avg_price = prev_prices.iter().sum::<f64>() / prev_prices.len() as f64;
             let price_change = (current_price - avg_price) / avg_price;
             let threshold = 0.0003;
-            let position_limit = 2.0;
+            let position_limit = max_trade_size_cfg * 0.2;
             let current_position_abs = strategy.current_inventory.abs();
             
             if price_change > threshold && current_position_abs < position_limit {

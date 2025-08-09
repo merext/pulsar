@@ -2,9 +2,9 @@
 # This file contains the complete trading configuration used by the trading bot
 
 [position_sizing]
-trading_size_min = 15.0
-trading_size_max = 75.0
-default_trading_symbol = "DOGEUSDT"
+trading_size_min = 10.0
+trading_size_max = 15.0
+trading_symbol = "DOGEUSDT"
 
 [exchange]
 taker_fee = 0.0001

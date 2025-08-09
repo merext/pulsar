@@ -46,9 +46,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
-    // Create Pulsar-MemOnly HFT strategy instance
-    let strategy = PulsarMemOnlyStrategy::new();
-    
     // Load trading configuration
     let trading_config =
         StrategyConfig::load_trading_config().expect("Failed to load trading configuration");
@@ -56,9 +53,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .section("position_sizing")
         .expect("Position sizing configuration not found");
 
-    let trading_symbol = position_sizing.get_or("default_trading_symbol", "DOGEUSDT".to_string());
-    let trading_size_min = position_sizing.get_or("trading_size_min", 10.0);
-    let trading_size_max = position_sizing.get_or("trading_size_max", 15.0);
+    let trading_symbol = position_sizing.get_or("trading_symbol", "DOGEUSDT".to_string());
+    
+    // Create Pulsar-MemOnly HFT strategy instance
+    let strategy = PulsarMemOnlyStrategy::new();
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
 
@@ -78,8 +76,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let config = TradeConfig {
                 trading_symbol: trading_symbol.clone(),
                 trade_mode: TradeMode::Real,
-                trading_size_min,
-                trading_size_max,
             };
 
             trade::run_trade(config, &api_key, &api_secret, strategy, &mut binance_trader).await?;
@@ -97,8 +93,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let config = TradeConfig {
                 trading_symbol: trading_symbol.clone(),
                 trade_mode: TradeMode::Emulated,
-                trading_size_min,
-                trading_size_max,
             };
 
             trade::run_trade(config, &api_key, &api_secret, strategy, &mut binance_trader).await?;
@@ -110,8 +104,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     &data_path,
                     strategy,
                     &trading_symbol,
-                    trading_size_min,
-                    trading_size_max,
                 )
                 .await?;
             } else if let Some(ws_url) = url {
@@ -120,8 +112,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     &ws_url,
                     strategy,
                     &trading_symbol,
-                    trading_size_min,
-                    trading_size_max,
                 )
                 .await?;
             } else {

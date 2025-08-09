@@ -8,6 +8,7 @@ use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingConfig {
+    pub position_sizing: PositionSizingConfig,
     pub exchange: ExchangeConfig,
     pub slippage: SlippageConfig,
     pub order_execution: OrderExecutionConfig,
@@ -15,6 +16,13 @@ pub struct TradingConfig {
     pub market_data: MarketDataConfig,
     pub performance_tracking: PerformanceTrackingConfig,
     pub backtest_settings: Option<BacktestSettingsConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionSizingConfig {
+    pub trading_size_min: f64,
+    pub trading_size_max: f64,
+    pub trading_symbol: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

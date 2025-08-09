@@ -9,8 +9,6 @@ use trade::trader::{TradeMode, Trader};
 pub struct TradeConfig {
     pub trading_symbol: String,
     pub trade_mode: TradeMode,
-    pub trading_size_min: f64,
-    pub trading_size_max: f64,
 }
 
 pub async fn run_trade(
@@ -109,9 +107,9 @@ pub async fn run_trade(
             &config.trading_symbol,
             trade_price,
             confidence,
-            config.trading_size_min,
-            config.trading_size_max,
-            1.0,
+            0.0,
+            0.0,
+            0.0,
         );
 
         // Log BUY/SELL signals at info level with structured format

@@ -10,8 +10,6 @@ pub async fn run_backtest(
     source: &str,
     mut strategy: impl Strategy + Send,
     symbol: &str,
-    trading_size_min: f64,
-    trading_size_max: f64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new().await?;
     let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin> =
@@ -50,8 +48,8 @@ pub async fn run_backtest(
         }
         
         if should_trade {
-            // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
-            let quantity_to_trade = trader.calculate_trade_size(symbol, trade_price, confidence, trading_size_min, trading_size_max, 1.0);
+            // Use central TradingConfig-based size calculation
+            let quantity_to_trade = trader.calculate_trade_size(symbol, trade_price, confidence, 0.0, 0.0, 0.0);
             
             // Debug logging for trade execution
             if trade_count % 100 == 0 {
