@@ -4,12 +4,13 @@ use tokio_stream::StreamExt;
 use tracing::info;
 use trade::models::Trade;
 use trade::trader::Trader;
-use trade::trading_engine::{TradingEngine, PerformanceMetrics};
+use trade::trading_engine::{TradingEngine, PerformanceMetrics, TradingConfig};
 
 pub async fn run_backtest(
     source: &str,
     mut strategy: impl Strategy + Send,
     symbol: &str,
+    config_path: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let binance_client = BinanceClient::new().await?;
     let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin> =
@@ -19,7 +20,8 @@ pub async fn run_backtest(
             Box::new(binance_client.trade_data_from_path(source).await?)
         };
 
-    let mut trader = TradingEngine::new(symbol)?;
+    let cfg = TradingConfig::from_file(config_path)?;
+    let mut trader = TradingEngine::new_with_config(symbol, cfg)?;
     let mut trade_count = 0;
     let mut last_metrics_print = 0;
 

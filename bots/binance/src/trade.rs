@@ -5,14 +5,11 @@ use tokio_stream::StreamExt;
 use tracing::{debug, info};
 use trade::signal::Signal;
 use trade::trader::{TradeMode, Trader};
-
-pub struct TradeConfig {
-    pub trading_symbol: String,
-    pub trade_mode: TradeMode,
-}
+use trade::trading_engine::TradingConfig;
 
 pub async fn run_trade(
-    config: TradeConfig,
+    config: TradingConfig,
+    trade_mode: TradeMode,
     _api_key: &str,
     _api_secret: &str,
     mut strategy: impl Strategy + Send,
@@ -22,14 +19,15 @@ pub async fn run_trade(
         .await
         .expect("Failed to create Binance client");
 
+    let trading_symbol = config.position_sizing.trading_symbol.clone();
     let mut trade_stream = binance_client
-        .trade_stream(&config.trading_symbol)
+        .trade_stream(&trading_symbol)
         .await
         .expect("Failed to get trade stream");
 
     info!(
         "Starting to consume trade stream for {}",
-        config.trading_symbol
+        trading_symbol
     );
     let mut last_position_change_time = 0.0;
     let mut last_position_quantity = 0.0;
@@ -104,7 +102,7 @@ pub async fn run_trade(
 
         // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
         let quantity_to_trade = binance_trader.calculate_trade_size(
-            &config.trading_symbol,
+            &trading_symbol,
             trade_price,
             confidence,
             0.0,
@@ -135,7 +133,7 @@ pub async fn run_trade(
             }
         }
 
-        match config.trade_mode {
+        match trade_mode {
             TradeMode::Real => {
                 binance_trader
                     .on_signal(final_signal, trade_price, quantity_to_trade)

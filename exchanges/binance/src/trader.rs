@@ -40,7 +40,35 @@ impl BinanceTrader {
             None
         };
 
-        let trading_config = TradingConfig::load()?;
+        let trading_config = TradingConfig::load()?; // Keep backward compat; will add explicit ctor below
+
+        Ok(BinanceTrader {
+            connection,
+            position: Position {
+                symbol: symbol.to_string(),
+                quantity: 0.0,
+                entry_price: 0.0,
+            },
+            realized_pnl: 0.0,
+            config: trading_config,
+        })
+    }
+
+    pub async fn new_with_config(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode, config_path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let connection = if mode == TradeMode::Real {
+            let cfg = ConfigurationWebsocketApi::builder()
+                .api_key(api_key)
+                .api_secret(api_secret)
+                .build()
+                .expect("Failed to build Binance API configuration");
+
+            let client = SpotWsApi::production(cfg);
+            Some(client.connect().await.expect("Failed to connect to WebSocket API"))
+        } else {
+            None
+        };
+
+        let trading_config = TradingConfig::from_file(config_path)?;
 
         Ok(BinanceTrader {
             connection,

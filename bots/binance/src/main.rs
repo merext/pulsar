@@ -10,7 +10,7 @@ use tracing::info;
 mod backtest;
 mod trade;
 
-use trade::TradeConfig;
+use ::trade::TradingConfig;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -73,12 +73,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             )
             .await?;
 
-            let config = TradeConfig {
-                trading_symbol: trading_symbol.clone(),
-                trade_mode: TradeMode::Real,
-            };
-
-            trade::run_trade(config, &api_key, &api_secret, strategy, &mut binance_trader).await?;
+            let config = TradingConfig::from_file("config/trading_config.toml")?;
+            trade::run_trade(config, TradeMode::Real, &api_key, &api_secret, strategy, &mut binance_trader).await?;
         }
         Commands::Emulate => {
             info!("Starting emulated trading...");
@@ -90,29 +86,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             )
             .await?;
 
-            let config = TradeConfig {
-                trading_symbol: trading_symbol.clone(),
-                trade_mode: TradeMode::Emulated,
-            };
-
-            trade::run_trade(config, &api_key, &api_secret, strategy, &mut binance_trader).await?;
+            let config = TradingConfig::from_file("config/trading_config.toml")?;
+            trade::run_trade(config, TradeMode::Emulated, &api_key, &api_secret, strategy, &mut binance_trader).await?;
         }
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {
                 info!("Starting backtest with data from: {}", data_path);
-                backtest::run_backtest(
-                    &data_path,
-                    strategy,
-                    &trading_symbol,
-                )
+                backtest::run_backtest(&data_path, strategy, &trading_symbol, "config/trading_config.toml")
                 .await?;
             } else if let Some(ws_url) = url {
                 info!("Starting backtest with WebSocket data from: {}", ws_url);
-                backtest::run_backtest(
-                    &ws_url,
-                    strategy,
-                    &trading_symbol,
-                )
+                backtest::run_backtest(&ws_url, strategy, &trading_symbol, "config/trading_config.toml")
                 .await?;
             } else {
                 return Err("No data source specified for backtest".into());

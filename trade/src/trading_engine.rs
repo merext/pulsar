@@ -188,22 +188,14 @@ pub struct BacktestSettingsConfig {
 
 impl TradingConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Try multiple possible paths for the config file
-        let possible_paths = [
-            "config/trading_config.toml",
-            "../../config/trading_config.toml",
-            "../config/trading_config.toml",
-        ];
+        // Deprecated implicit loader; prefer from_file
+        Self::from_file("config/trading_config.toml")
+    }
 
-        for config_path in &possible_paths {
-            if let Ok(config_content) = fs::read_to_string(config_path) {
-                if let Ok(config) = toml::from_str(&config_content) {
-                    return Ok(config);
-                }
-            }
-        }
-
-        Err("Could not find or parse trading_config.toml".into())
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let config_content = fs::read_to_string(path)?;
+        let config: TradingConfig = toml::from_str(&config_content)?;
+        Ok(config)
     }
 }
 
@@ -335,9 +327,7 @@ pub struct TradingEngine {
 }
 
 impl TradingEngine {
-    pub fn new(symbol: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let config = TradingConfig::load()?;
-
+    pub fn new_with_config(symbol: &str, config: TradingConfig) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
             position: Position {
                 symbol: symbol.to_string(),
