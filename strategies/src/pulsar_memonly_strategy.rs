@@ -182,18 +182,24 @@ impl PulsarMemOnlyStrategy {
 
     fn compute_score(&self) -> (f64, f64) {
         let len = self.snapshot_buffer.len();
-        if len < 2 { return (0.0, 0.0); }  // Much lower requirement
+        if len < 3 { return (0.0, 0.0); }  // Need 3 for trend
 
         let last = &self.snapshot_buffer[len - 1];
         let prev = &self.snapshot_buffer[len - 2];
+        let prev2 = &self.snapshot_buffer[len - 3];
         
-        // Simple momentum based on last price change
+        // Enhanced momentum with trend confirmation
         let r1 = (last.p - prev.p) / prev.p;
+        let r2 = (prev.p - prev2.p) / prev2.p;
+        let trend_confirm = if r1 * r2 > 0.0 { 1.2 } else { 0.9 }; // Boost if trend continues
+        
         let aggr = last.aggression_ratio;
         let ei = last.event_intensity;
         
-        // Very simple score - just momentum + aggression, very conservative
-        let score = r1 * 105.0 + aggr * 0.11 + ei * 0.0011;  // Very conservative for profitability
+        // Score with trend confirmation and volatility adjustment
+        let vol_factor = if r1.abs() > 0.0005 { 1.1 } else { 1.0 }; // Boost high volatility moves
+        let base_score = r1 * 105.0 + aggr * 0.11 + ei * 0.0011;
+        let score = base_score * trend_confirm * vol_factor;
         let conf = score.abs().min(1.0);
         (score, conf)
     }

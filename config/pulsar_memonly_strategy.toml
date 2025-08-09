@@ -41,8 +41,8 @@ inventory_penalty = 0.008
 # require some recent activity to participate
 min_event_intensity = 0.0
 # take-profit and stop-loss bands (as return fraction)
-tp_bps = 0.001
-sl_bps = 0.00015
+tp_bps = 0.0015
+sl_bps = 0.0001
 # require aggression alignment with score
 aggression_align = false
 aggr_min_abs = 0.0
