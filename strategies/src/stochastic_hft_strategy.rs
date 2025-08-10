@@ -281,6 +281,8 @@ impl StochasticHftStrategy {
         let prev_k = self.stochastic_k.get(self.stochastic_k.len() - 2).unwrap();
         let prev_d = self.stochastic_d.get(self.stochastic_d.len() - 2).unwrap();
         
+
+        
         let mut buy_signals = Vec::new();
         let mut sell_signals = Vec::new();
         
@@ -328,18 +330,33 @@ impl StochasticHftStrategy {
         // Apply trend and volatility adjustments to confidence
         let mut adjusted_confidence = base_confidence;
         
-        // Trend confirmation
+        // Trend confirmation - only boost if trend is strong
         #[allow(clippy::cast_precision_loss)]
         let avg_trend = self.trend_strength.iter().sum::<f64>() / self.trend_strength.len().max(1) as f64;
-        if avg_trend > 0.3 {
-            adjusted_confidence *= 1.2; // Boost confidence in trending markets
+        if avg_trend > 0.5 {
+            adjusted_confidence *= 1.1; // Moderate boost for strong trends
+        } else if avg_trend < 0.2 {
+            adjusted_confidence *= 0.7; // Reduce confidence in weak trends
         }
         
-        // Volatility adjustment
+        // Volatility adjustment - balanced
         #[allow(clippy::cast_precision_loss)]
         let avg_volatility = self.volatility_history.iter().sum::<f64>() / self.volatility_history.len().max(1) as f64;
-        if avg_volatility > 0.01 {
-            adjusted_confidence *= 0.8; // Reduce confidence in high volatility
+        if avg_volatility > 0.008 {
+            adjusted_confidence *= 0.7; // Moderate reduction in very high volatility
+        } else if avg_volatility < 0.002 {
+            adjusted_confidence *= 1.05; // Slight boost in low volatility
+        }
+        
+        // Additional signal quality checks
+        let signal_strength = (current_k - current_d).abs();
+        if signal_strength < 5.0 {
+            adjusted_confidence *= 0.5; // Weak signal strength
+        }
+        
+        // Stochastic range check - avoid signals near middle
+        if current_k > 45.0 && current_k < 55.0 {
+            adjusted_confidence *= 0.5; // Lower confidence in middle range
         }
         
         let final_confidence = adjusted_confidence.min(1.0);
@@ -394,10 +411,8 @@ impl Strategy for StochasticHftStrategy {
         #[allow(clippy::cast_precision_loss)]
         self.update_pnl(trade.price, trade.time as f64);
         
-        // Generate and execute signal
-        let (signal, confidence) = self.generate_signal();
-        #[allow(clippy::cast_precision_loss)]
-        self.execute_trade(signal, trade.price, trade.time as f64, confidence);
+        // Note: Trade execution is handled by the backtest system, not here
+        // The strategy only updates its internal state and indicators
     }
     
     fn get_signal(
@@ -456,6 +471,7 @@ impl StochasticHftStrategy {
         }
     }
     
+    #[allow(dead_code)]
     fn execute_trade(&mut self, signal: Signal, current_price: f64, current_time: f64, confidence: f64) {
         // Use trading_config position sizing: min + (confidence * (max - min))
         // These should ideally be read from trading_config.toml, but for now using reasonable defaults
@@ -499,6 +515,7 @@ impl StochasticHftStrategy {
         }
     }
     
+    #[allow(dead_code)]
     fn close_position(&mut self, exit_price: f64, exit_time: f64) {
         if self.current_position != 0.0 {
             let pnl = if self.current_position > 0.0 {

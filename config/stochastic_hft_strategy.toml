@@ -2,22 +2,22 @@
 strategy_name = "StochasticHftStrategy"
 
 [stochastic]
-# Very conservative Stochastic settings for maximum signal quality
-k_period = 50
-d_period = 15
-oversold = 25.0
-overbought = 75.0
+# Conservative Stochastic settings for high-quality signals
+k_period = 21
+d_period = 7
+oversold = 15.0
+overbought = 85.0
 # Increased buffer capacity for more stable calculations
 buffer_capacity = 2000
 
 [signals]
-# Maximum confidence thresholds for best signal quality
-min = 0.90
-# Maximum confidence weights for most reliable signals
-oversold = 0.98
-overbought = 0.98
-crossover = 0.95
+# High confidence thresholds for quality signals
+min = 0.7
+# High confidence weights for reliable signals
+oversold = 0.9
+overbought = 0.9
+crossover = 0.85
 
 [risk]
-max_consecutive_losses = 3
-signal_cooldown_ms = 1000
+max_consecutive_losses = 2
+signal_cooldown_ms = 100

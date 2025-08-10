@@ -40,12 +40,13 @@ pub async fn run_backtest(
         
         if should_trade {
             // Use central TradingConfig-based size calculation
-            let quantity_to_trade = trader.calculate_trade_size(symbol, trade_price, confidence, 0.0, 0.0, 0.0);
-            
-            // Debug logging for trade execution
-            tracing::debug!(
-                "TRADE EXECUTION - Signal: {:?}, Confidence: {:.6}, Price: {:.6}, Qty: {:.6}, Time: {:.3}",
-                signal, confidence, trade_price, quantity_to_trade, trade_time
+            let quantity_to_trade = trader.calculate_trade_size(
+                symbol, 
+                trade_price, 
+                confidence, 
+                trader.config.position_sizing.trading_size_min,
+                trader.config.position_sizing.trading_size_max,
+                trader.config.exchange.step_size
             );
             
             trader.on_emulate(signal, trade_price, quantity_to_trade).await;

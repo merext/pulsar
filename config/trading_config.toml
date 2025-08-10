@@ -2,8 +2,8 @@
 # This file contains the complete trading configuration used by the trading bot
 
 [position_sizing]
-trading_size_min = 20.0
-trading_size_max = 30.0
+trading_size_min = 5.0
+trading_size_max = 15.0
 trading_symbol = "DOGEUSDT"
 
 [exchange]
@@ -28,10 +28,10 @@ max_position_size = 1000000.0
 max_daily_loss = 800.0
 max_drawdown = 0.06
 max_leverage = 1.0
-min_signal_strength = 0.1
-max_consecutive_losses = 3
+min_signal_strength = 0.7
+max_consecutive_losses = 2
 cooldown_period = 10
-max_trades_per_hour = 50
+max_trades_per_hour = 30
 initial_margin = 0.1
 maintenance_margin = 0.05
 
