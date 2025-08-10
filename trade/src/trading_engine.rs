@@ -312,7 +312,78 @@ impl PerformanceMetrics {
     }
 
     pub fn net_pnl_after_costs(&self) -> f64 {
-        self.trade_history.iter().map(|t| t.pnl).sum::<f64>() - self.total_fees + self.total_rebates
+        self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
+    }
+
+    pub fn gross_pnl(&self) -> f64 {
+        self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
+    }
+
+    pub fn total_costs(&self) -> f64 {
+        self.total_fees - self.total_rebates + self.total_slippage
+    }
+
+    pub fn profit_factor(&self) -> f64 {
+        let gross_profit: f64 = self.trade_history.iter()
+            .filter(|t| t.pnl > 0.0)
+            .map(|t| t.pnl)
+            .sum();
+        
+        let gross_loss: f64 = self.trade_history.iter()
+            .filter(|t| t.pnl < 0.0)
+            .map(|t| t.pnl.abs())
+            .sum();
+        
+        if gross_loss > 0.0 {
+            gross_profit / gross_loss
+        } else {
+            0.0
+        }
+    }
+
+    pub fn average_win(&self) -> f64 {
+        let winning_trades: Vec<&TradeRecord> = self.trade_history.iter()
+            .filter(|t| t.pnl > 0.0)
+            .collect();
+        
+        if !winning_trades.is_empty() {
+            winning_trades.iter().map(|t| t.pnl).sum::<f64>() / winning_trades.len() as f64
+        } else {
+            0.0
+        }
+    }
+
+    pub fn average_loss(&self) -> f64 {
+        let losing_trades: Vec<&TradeRecord> = self.trade_history.iter()
+            .filter(|t| t.pnl < 0.0)
+            .collect();
+        
+        if !losing_trades.is_empty() {
+            losing_trades.iter().map(|t| t.pnl.abs()).sum::<f64>() / losing_trades.len() as f64
+        } else {
+            0.0
+        }
+    }
+
+    pub fn sharpe_ratio(&self) -> f64 {
+        if self.trade_history.len() < 2 {
+            return 0.0;
+        }
+        
+        let returns: Vec<f64> = self.trade_history.iter()
+            .map(|t| t.pnl)
+            .collect();
+        
+        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
+        let variance = returns.iter()
+            .map(|r| (r - mean_return).powi(2))
+            .sum::<f64>() / (returns.len() - 1) as f64;
+        
+        if variance > 0.0 {
+            mean_return / variance.sqrt()
+        } else {
+            0.0
+        }
     }
 }
 
@@ -343,25 +414,30 @@ impl TradingEngine {
         })
     }
 
-    pub fn calculate_slippage(&self, _price: f64, quantity: f64, volatility: f64) -> f64 {
+    pub fn calculate_slippage(&self, price: f64, quantity: f64, volatility: f64) -> f64 {
         let base_slippage = self.config.slippage.min_slippage;
         let max_slippage = self.config.slippage.max_slippage;
 
-        // Calculate volatility-adjusted slippage
-        let volatility_factor = volatility.min(1.0);
+        // Calculate volatility-adjusted slippage with more realistic modeling
+        let volatility_factor = volatility.min(2.0); // Allow higher volatility impact
         let volatility_slippage = base_slippage
             + (max_slippage - base_slippage)
-                * volatility_factor
+                * (volatility_factor / 2.0).min(1.0)
                 * self.config.slippage.volatility_multiplier;
 
-        // Calculate size-adjusted slippage
+        // Calculate size-adjusted slippage with non-linear scaling
         let size_factor = (quantity / self.config.exchange.max_order_size).min(1.0);
         let size_slippage = base_slippage
-            + (max_slippage - base_slippage) * size_factor * self.config.slippage.size_multiplier;
+            + (max_slippage - base_slippage) 
+                * (size_factor * size_factor) // Quadratic scaling for more realistic impact
+                * self.config.slippage.size_multiplier;
 
-        // Combine volatility and size effects
-        let total_slippage = (volatility_slippage + size_slippage) / 2.0;
-        total_slippage.min(max_slippage)
+        // Add price-level adjustment (higher prices = lower relative slippage)
+        let price_level_factor = (0.1 / price).min(1.0);
+        let price_adjusted_slippage = (volatility_slippage + size_slippage) / 2.0 * price_level_factor;
+
+        // Ensure minimum slippage for market orders
+        price_adjusted_slippage.max(base_slippage).min(max_slippage)
     }
 
     pub fn calculate_fees(&self, price: f64, quantity: f64, is_maker: bool) -> f64 {
@@ -557,13 +633,52 @@ impl TradingEngine {
         confidence: f64,
         max_trade_size: f64,
     ) -> f64 {
-        // Calculate dynamic position size based on confidence
-        // Higher confidence = larger position, but never exceed max_trade_size
-        let base_quantity = max_trade_size * 0.1; // Start with 10% of max limit
-        let confidence_multiplier = 0.5 + (confidence * 0.5); // 0.5x to 1.0x based on confidence
-        let dynamic_quantity = base_quantity * confidence_multiplier;
+        // Enhanced dynamic position sizing with multiple factors
+        let base_quantity = max_trade_size * 0.15; // Start with 15% of max limit
+        
+        // Enhanced confidence scaling with non-linear relationship
+        let confidence_multiplier = if confidence > 0.8 {
+            // High confidence gets exponential boost
+            0.6 + 0.4 * (confidence - 0.8) * 5.0
+        } else if confidence > 0.6 {
+            // Medium confidence gets linear scaling
+            0.4 + 0.2 * (confidence - 0.6) * 5.0
+        } else {
+            // Low confidence gets reduced size
+            confidence * 0.6
+        };
 
-        // Ensure we never exceed the maximum trade size limit
+        // Volatility-adjusted sizing (higher volatility = smaller positions)
+        let volatility_factor = if let Some(last_trade) = self.metrics.trade_history.back() {
+            let recent_volatility = (last_trade.price - price).abs() / price;
+            (1.0 - recent_volatility * 20.0).max(0.2)
+        } else {
+            1.0
+        };
+
+        // Drawdown-adjusted sizing (reduce size during drawdowns)
+        let drawdown_factor = if self.metrics.max_drawdown > 0.03 {
+            (1.0 - self.metrics.max_drawdown * 3.0).max(0.1)
+        } else {
+            1.0
+        };
+
+        // Performance-adjusted sizing (increase size when profitable)
+        let performance_factor = if self.metrics.total_trades > 10 {
+            let recent_win_rate = self.metrics.win_rate();
+            if recent_win_rate > 0.6 {
+                1.2 // Boost size when winning
+            } else if recent_win_rate < 0.3 {
+                0.5 // Reduce size when losing
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
+
+        // Calculate final size with all adjustments
+        let dynamic_quantity = base_quantity * confidence_multiplier * volatility_factor * drawdown_factor * performance_factor;
         let quantity = dynamic_quantity.min(max_trade_size);
 
         // Apply exchange minimum notional requirement
@@ -691,10 +806,14 @@ impl Trader for TradingEngine {
             Signal::Sell => {
                 if self.position.quantity > 0.0 && fill_quantity > 0.0 {
                     let sell_quantity = fill_quantity.min(self.position.quantity);
-                    let revenue = fill_price * sell_quantity - fees + rebates;
+                    
+                    // More accurate PnL calculation including all costs
+                    let gross_revenue = fill_price * sell_quantity;
+                    let net_revenue = gross_revenue - fees + rebates;
                     let cost = self.position.entry_price * sell_quantity;
-                    let pnl = revenue - cost;
+                    let pnl = net_revenue - cost;
 
+                    // Update realized PnL
                     self.realized_pnl += pnl;
                     self.position.quantity -= sell_quantity;
 
@@ -718,8 +837,8 @@ impl Trader for TradingEngine {
                     self.metrics.update_equity(self.realized_pnl);
 
                     info!(
-                        "SELL: price={:.6}, qty={:.6}, pnl={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}",
-                        fill_price, sell_quantity, pnl, fees, rebates, slippage
+                        "SELL: price={:.6}, qty={:.6}, pnl={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}, net_revenue={:.6}",
+                        fill_price, sell_quantity, pnl, fees, rebates, slippage, net_revenue
                     );
                 }
             }

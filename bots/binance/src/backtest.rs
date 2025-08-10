@@ -67,16 +67,25 @@ pub async fn run_backtest(
 }
 
 fn print_metrics(metrics: &PerformanceMetrics, total_trades: usize) {
+    let profit_factor = metrics.profit_factor();
+    let avg_win = metrics.average_win();
+    let avg_loss = metrics.average_loss();
+    let sharpe = metrics.sharpe_ratio();
+    let total_costs = metrics.total_costs();
+    
     info!(
-        "Metrics - Trades: {}/{} ({}%), Win Rate: {:.2}%, Net PnL: {:.6}, Fees: {:.6}, Rebates: {:.6}, Slippage: {:.6}, Max Drawdown: {:.2}%",
+        "Metrics - Trades: {}/{} ({}%), Win Rate: {:.2}%, Net PnL: {:.6}, Gross PnL: {:.6}, Total Costs: {:.6}, Profit Factor: {:.2}, Avg Win: {:.6}, Avg Loss: {:.6}, Sharpe: {:.3}, Max DD: {:.2}%",
         metrics.total_trades,
         total_trades,
         if total_trades > 0 { (metrics.total_trades * 100) / total_trades } else { 0 },
         metrics.win_rate() * 100.0,
         metrics.net_pnl_after_costs(),
-        metrics.total_fees,
-        metrics.total_rebates,
-        metrics.total_slippage,
+        metrics.gross_pnl(),
+        total_costs,
+        profit_factor,
+        avg_win,
+        avg_loss,
+        sharpe,
         metrics.max_drawdown * 100.0
     );
 }

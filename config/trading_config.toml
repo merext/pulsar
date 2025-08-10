@@ -7,31 +7,31 @@ trading_size_max = 35.0
 trading_symbol = "DOGEUSDT"
 
 [exchange]
-taker_fee = 0.0001
-maker_fee = 0.0001
-maker_rebate = 0.00005
+taker_fee = 0.00005
+maker_fee = 0.00005
+maker_rebate = 0.000025
 tick_size = 0.00001
 min_notional = 10.0
 max_order_size = 1000000.0
 step_size = 0.5
 
 [slippage]
-min_slippage = 0.00005
-max_slippage = 0.005
-volatility_multiplier = 1.2
-size_multiplier = 1.1
-market_order_volatility = 0.001
-taker_order_volatility = 0.0005
+min_slippage = 0.00001
+max_slippage = 0.001
+volatility_multiplier = 1.5
+size_multiplier = 1.2
+market_order_volatility = 0.002
+taker_order_volatility = 0.001
 
 [risk_management]
 max_position_size = 1000000.0
-max_daily_loss = 1500.0
-max_drawdown = 0.12
+max_daily_loss = 1000.0
+max_drawdown = 0.08
 max_leverage = 1.0
-min_signal_strength = 0.5
-max_consecutive_losses = 6
-cooldown_period = 5
-max_trades_per_hour = 500
+min_signal_strength = 0.6
+max_consecutive_losses = 4
+cooldown_period = 3
+max_trades_per_hour = 300
 initial_margin = 0.1
 maintenance_margin = 0.05
 
