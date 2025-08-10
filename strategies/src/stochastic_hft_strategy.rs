@@ -57,6 +57,10 @@ pub struct StochasticHftStrategy {
     stochastic_k: VecDeque<f64>,
     stochastic_d: VecDeque<f64>,
     
+    // Enhanced indicators
+    volatility_history: VecDeque<f64>,
+    trend_strength: VecDeque<f64>,
+    
     // Strategy state
     trade_counter: usize,
     last_signal_time: f64,
@@ -108,6 +112,8 @@ impl StochasticHftStrategy {
             price_history: VecDeque::with_capacity(buffer_capacity),
             stochastic_k: VecDeque::with_capacity(buffer_capacity),
             stochastic_d: VecDeque::with_capacity(buffer_capacity),
+            volatility_history: VecDeque::with_capacity(100),
+            trend_strength: VecDeque::with_capacity(100),
             trade_counter: 0,
             last_signal_time: 0.0,
             consecutive_losses: 0,
@@ -168,6 +174,81 @@ impl StochasticHftStrategy {
         }
     }
     
+    fn calculate_volatility(&mut self) -> f64 {
+        if self.price_history.len() < 20 {
+            return 0.0;
+        }
+        
+        let returns: Vec<f64> = self.price_history.iter()
+            .rev()
+            .take(20)
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|w| (w[0] - w[1]) / w[1])
+            .collect();
+        
+        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
+        let variance = returns.iter()
+            .map(|r| (r - mean_return).powi(2))
+            .sum::<f64>() / returns.len() as f64;
+        
+        let volatility = variance.sqrt();
+        self.volatility_history.push_back(volatility);
+        if self.volatility_history.len() > 50 {
+            self.volatility_history.pop_front();
+        }
+        
+        volatility
+    }
+    
+    fn calculate_trend_strength(&mut self) -> f64 {
+        if self.price_history.len() < 50 {
+            return 0.0;
+        }
+        
+        let recent_prices: Vec<f64> = self.price_history.iter()
+            .rev()
+            .take(50)
+            .cloned()
+            .collect();
+        
+        // Calculate linear regression R-squared
+        let n = recent_prices.len() as f64;
+        let x_mean = (n - 1.0) / 2.0;
+        let y_mean = recent_prices.iter().sum::<f64>() / n;
+        
+        let numerator: f64 = recent_prices.iter().enumerate()
+            .map(|(i, &y)| (i as f64 - x_mean) * (y - y_mean))
+            .sum();
+        
+        let denominator_x: f64 = (0..recent_prices.len())
+            .map(|i| (i as f64 - x_mean).powi(2))
+            .sum();
+        
+        let denominator_y: f64 = recent_prices.iter()
+            .map(|y| (y - y_mean).powi(2))
+            .sum();
+        
+        let trend_strength = if denominator_x > 0.0 && denominator_y > 0.0 {
+            (numerator.powi(2) / (denominator_x * denominator_y)).abs()
+        } else {
+            0.0
+        };
+        
+        self.trend_strength.push_back(trend_strength);
+        if self.trend_strength.len() > 20 {
+            self.trend_strength.pop_front();
+        }
+        
+        trend_strength
+    }
+    
+    fn update_indicators(&mut self) {
+        self.update_stochastic();
+        self.calculate_volatility();
+        self.calculate_trend_strength();
+    }
+    
     fn generate_signal(&self) -> (Signal, f64) {
         if self.stochastic_k.len() < 2 || self.stochastic_d.len() < 2 {
             return (Signal::Hold, 0.0);
@@ -180,19 +261,16 @@ impl StochasticHftStrategy {
         let prev_k = self.stochastic_k.get(self.stochastic_k.len() - 2).unwrap();
         let prev_d = self.stochastic_d.get(self.stochastic_d.len() - 2).unwrap();
         
-        let mut signals = Vec::new();
-        let mut confidences = Vec::new();
+        let mut signal_strength = 0.0;
+        let mut signal_count = 0;
         
-        // Oversold condition (potential buy signal)
+        // Stochastic oversold/overbought signals
         if current_k < self.config.stochastic.oversold && current_d < self.config.stochastic.oversold {
-            signals.push(Signal::Buy);
-            confidences.push(self.config.signals.oversold_confidence);
-        }
-        
-        // Overbought condition (potential sell signal)
-        if current_k > self.config.stochastic.overbought && current_d > self.config.stochastic.overbought {
-            signals.push(Signal::Sell);
-            confidences.push(self.config.signals.overbought_confidence);
+            signal_strength += self.config.signals.oversold_confidence;
+            signal_count += 1;
+        } else if current_k > self.config.stochastic.overbought && current_d > self.config.stochastic.overbought {
+            signal_strength -= self.config.signals.overbought_confidence;
+            signal_count += 1;
         }
         
         // K/D crossover signals
@@ -200,27 +278,35 @@ impl StochasticHftStrategy {
         let k_d_cross_down = current_k < current_d && *prev_k >= *prev_d;
         
         if k_d_cross_up {
-            signals.push(Signal::Buy);
-            confidences.push(self.config.signals.crossover_confidence);
+            signal_strength += self.config.signals.crossover_confidence;
+            signal_count += 1;
         } else if k_d_cross_down {
-            signals.push(Signal::Sell);
-            confidences.push(self.config.signals.crossover_confidence);
+            signal_strength -= self.config.signals.crossover_confidence;
+            signal_count += 1;
         }
         
-        // Combine signals
-        if signals.is_empty() {
-            return (Signal::Hold, 0.0);
+        // Trend confirmation
+        let avg_trend = self.trend_strength.iter().sum::<f64>() / self.trend_strength.len().max(1) as f64;
+        if avg_trend > 0.3 {
+            signal_strength *= 1.2; // Boost signal in trending markets
         }
         
-        let buy_signals = signals.iter().filter(|&&s| s == Signal::Buy).count();
-        let sell_signals = signals.iter().filter(|&&s| s == Signal::Sell).count();
+        // Volatility adjustment
+        let avg_volatility = self.volatility_history.iter().sum::<f64>() / self.volatility_history.len().max(1) as f64;
+        if avg_volatility > 0.01 {
+            signal_strength *= 0.8; // Reduce signal strength in high volatility
+        }
         
-        let avg_confidence = confidences.iter().sum::<f64>() / confidences.len() as f64;
+        let final_confidence = (signal_strength.abs() / signal_count.max(1) as f64).min(1.0);
         
-        if buy_signals > sell_signals && avg_confidence >= self.config.signals.min_confidence {
-            (Signal::Buy, avg_confidence)
-        } else if sell_signals > buy_signals && avg_confidence >= self.config.signals.min_confidence {
-            (Signal::Sell, avg_confidence)
+        if final_confidence >= self.config.signals.min_confidence {
+            if signal_strength > 0.0 {
+                (Signal::Buy, final_confidence)
+            } else if signal_strength < 0.0 {
+                (Signal::Sell, final_confidence)
+            } else {
+                (Signal::Hold, 0.0)
+            }
         } else {
             (Signal::Hold, 0.0)
         }
@@ -256,8 +342,8 @@ impl Strategy for StochasticHftStrategy {
             self.price_history.pop_front();
         }
         
-        // Update Stochastic Oscillator
-        self.update_stochastic();
+        // Update all indicators
+        self.update_indicators();
         
         // Update PnL for current position
         self.update_pnl(trade.price, trade.time as f64);

@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let trading_symbol = get_config_value(&trading_config, "position_sizing.trading_symbol")
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
-    // Create Stochastic HFT strategy instance
+    // Create StochasticHftStrategy strategy instance
     let strategy = StochasticHftStrategy::new();
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
