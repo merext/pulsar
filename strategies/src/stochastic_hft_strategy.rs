@@ -324,9 +324,9 @@ impl StochasticHftStrategy {
         let final_confidence = adjusted_confidence.min(1.0);
         
         if final_confidence >= self.config.signals.min_confidence {
-            if signal_strength > 0.0 {
+            if signal_direction > 0.0 {
                 (Signal::Buy, final_confidence)
-            } else if signal_strength < 0.0 {
+            } else if signal_direction < 0.0 {
                 (Signal::Sell, final_confidence)
             } else {
                 (Signal::Hold, 0.0)
