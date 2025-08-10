@@ -2,4 +2,4 @@
 .zed
 binance-connector-rust
 /target
-/data
+data
