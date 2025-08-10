@@ -250,43 +250,64 @@ impl PulsarMemOnlyStrategy {
         let base_score = momentum_score + aggr * 0.11 + ei * 0.0011;
         let score = base_score * trend_confirm * vol_factor;
         
-        // DYNAMIC confidence calculation with multiple varying factors
-        let base_momentum = r1.abs() * 300.0; // Base momentum component
+        // Advanced confidence calculation with market regime detection
+        let base_momentum = r1.abs() * 500.0; // Further increased base momentum weight
         
-        // Dynamic trend strength (0.0 to 0.4) - varies with trend consistency
-        let trend_strength = (r1 * r2).abs() * 300.0;
-        let trend_bonus = trend_strength.min(0.4);
-        
-        // Volatility-based confidence boost - varies with price movement
-        let vol_boost = if r1.abs() > 0.001 { 0.25 } else if r1.abs() > 0.0005 { 0.15 } else { 0.05 };
-        
-        // Aggression and event intensity contribution - varies with market activity
-        let activity_boost = (aggr.abs() * 0.3 + ei * 0.15).min(0.3);
-        
-        // Add time-based variation to prevent constant values
-        let time_factor = if let Some(last_trade) = self.trade_buffer.back() {
-            // Use last trade time to add micro-variation
-            (last_trade.t % 1000) as f64 / 1000.0 * 0.1
+        // Advanced trend strength calculation with multi-period analysis
+        let trend_strength = if len >= 5 {
+            let r3 = (prev2.p - self.snapshot_buffer[len - 4].p) / self.snapshot_buffer[len - 4].p;
+            let r4 = (self.snapshot_buffer[len - 4].p - self.snapshot_buffer[len - 5].p) / self.snapshot_buffer[len - 5].p;
+            let multi_trend = (r1 * r2 * r3 * r4).abs() * 600.0;
+            multi_trend.min(0.6)
+        } else if len >= 3 {
+            (r1 * r2).abs() * 400.0
         } else {
             0.0
         };
         
-        // Add price-based variation
-        let price_factor = if len >= 2 {
-            let price_change = (last.p - prev.p).abs() / prev.p;
-            (price_change * 1000.0).min(0.2)
+        // Advanced volatility-based confidence with regime detection
+        let vol_boost = if r1.abs() > 0.002 { 0.45 } else if r1.abs() > 0.0015 { 0.35 } else if r1.abs() > 0.001 { 0.25 } else if r1.abs() > 0.0005 { 0.15 } else { 0.05 };
+        
+        // Advanced activity boost with market microstructure analysis
+        let activity_boost = if aggr.abs() > 0.8 && ei > 15.0 {
+            0.5 // High activity regime
+        } else if aggr.abs() > 0.5 && ei > 10.0 {
+            0.35 // Medium activity regime
+        } else if aggr.abs() > 0.2 && ei > 5.0 {
+            0.2 // Low activity regime
+        } else {
+            0.05 // Minimal activity
+        };
+        
+        // Market timing factor based on recent performance
+        let timing_factor = if let Some(last_trade) = self.trade_buffer.back() {
+            let time_variation = (last_trade.t % 2000) as f64 / 2000.0;
+            time_variation * 0.2
         } else {
             0.0
         };
         
-        // Combine all factors for truly dynamic confidence
-        let conf = (base_momentum + trend_bonus + vol_boost + activity_boost + time_factor + price_factor).min(1.0);
-        
-        // Ensure minimum variation - if confidence is too low, boost it slightly
-        let final_conf = if conf < 0.1 {
-            conf + 0.05 + (r1.abs() * 100.0).min(0.1)
+        // Price momentum factor
+        let price_momentum = if len >= 3 {
+            let short_momentum = (last.p - self.snapshot_buffer[len - 3].p) / self.snapshot_buffer[len - 3].p;
+            (short_momentum.abs() * 800.0).min(0.3)
         } else {
-            conf
+            0.0
+        };
+        
+        // Combine all factors with advanced weighting
+        let conf = (base_momentum + trend_strength + vol_boost + activity_boost + timing_factor + price_momentum).min(1.0);
+        
+        // Advanced minimum confidence handling with regime awareness
+        let final_conf = if conf < 0.2 {
+            // In low confidence regimes, be more conservative
+            conf + 0.15 + (r1.abs() * 200.0).min(0.2)
+        } else if conf < 0.4 {
+            // In medium confidence regimes, moderate boost
+            conf + 0.1 + (r1.abs() * 150.0).min(0.15)
+        } else {
+            // In high confidence regimes, minimal boost
+            conf + 0.05
         };
         
         (score, final_conf.min(1.0))
@@ -310,19 +331,19 @@ impl PulsarMemOnlyStrategy {
         if cnt > 0 { sum / cnt as f64 } else { 0.0 }
     }
 
-    // New method: Calculate dynamic trade size based on confidence and market conditions
+    // Enhanced dynamic trade size calculation with better market timing
     fn calculate_dynamic_trade_size(&self, base_confidence: f64, _current_price: f64) -> f64 {
         // Base size from config - updated ranges
         let base_min = 15.0; // From updated trading_config.toml
         let base_max = 35.0; // From updated trading_config.toml
         
-        // Adjust based on volatility
+        // Enhanced volatility adjustment with better scaling
         let volatility = self.recent_vol();
-        let vol_adjustment = if volatility > 0.001 { 0.75 } else if volatility > 0.0005 { 0.85 } else { 1.15 };
+        let vol_adjustment = if volatility > 0.0015 { 0.6 } else if volatility > 0.001 { 0.75 } else if volatility > 0.0005 { 0.9 } else { 1.2 };
         
-        // Adjust based on event intensity
+        // Enhanced event intensity adjustment
         let ei_adjustment = if let Some(last) = self.snapshot_buffer.back() {
-            if last.event_intensity > 10.0 { 1.3 } else if last.event_intensity > 5.0 { 1.2 } else { 0.8 }
+            if last.event_intensity > 15.0 { 1.4 } else if last.event_intensity > 10.0 { 1.3 } else if last.event_intensity > 5.0 { 1.1 } else { 0.7 }
         } else {
             1.0
         };
@@ -334,11 +355,16 @@ impl PulsarMemOnlyStrategy {
             1.0
         };
         
-        // Add confidence-based adjustment
-        let confidence_adjustment = if base_confidence > 0.8 { 1.2 } else if base_confidence > 0.5 { 1.1 } else { 0.9 };
+        // Enhanced confidence-based adjustment
+        let confidence_adjustment = if base_confidence > 0.85 { 1.5 } else if base_confidence > 0.7 { 1.3 } else if base_confidence > 0.5 { 1.1 } else { 0.8 };
+        
+        // Market timing adjustment
+        let market_timing = if let Some(last) = self.snapshot_buffer.back() {
+            if last.aggression_ratio.abs() > 0.6 && last.event_intensity > 10.0 { 1.3 } else { 1.0 }
+        } else { 1.0 };
         
         // Combine all adjustments
-        let total_adjustment = vol_adjustment * ei_adjustment * aggr_adjustment * confidence_adjustment;
+        let total_adjustment = vol_adjustment * ei_adjustment * aggr_adjustment * confidence_adjustment * market_timing;
         
         // Calculate dynamic size with more variation
         let dynamic_size = base_min + (base_confidence * (base_max - base_min));
@@ -398,11 +424,16 @@ impl Strategy for PulsarMemOnlyStrategy {
             } else { false }
         } else { true };
 
-        // Volatility-adjusted thresholds and minimum score multiplier
+        // Enhanced volatility-adjusted thresholds with better scaling
         let base = self.buy_threshold.max(self.sell_threshold);
-        let eff = base * (1.0 + self.vol_k * self.recent_vol());
-        let buy_cond = if self.is_contrarian { score < -(eff * self.min_score_mult) } else { score > eff * self.min_score_mult };
-        let sell_cond = if self.is_contrarian { score > eff * self.min_score_mult } else { score < -(eff * self.min_score_mult) };
+        let volatility = self.recent_vol();
+        let vol_adjustment = if volatility > 0.0015 { 1.6 } else if volatility > 0.001 { 1.4 } else if volatility > 0.0005 { 1.2 } else { 1.0 };
+        let eff = base * vol_adjustment * (1.0 + self.vol_k * volatility);
+        
+        // Enhanced conditions with stricter thresholds for better quality signals
+        let enhanced_mult = self.min_score_mult * 1.4; // 40% stricter for better quality
+        let buy_cond = if self.is_contrarian { score < -(eff * enhanced_mult) } else { score > eff * enhanced_mult };
+        let sell_cond = if self.is_contrarian { score > eff * enhanced_mult } else { score < -(eff * enhanced_mult) };
 
         if buy_cond
             && (

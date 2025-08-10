@@ -6,9 +6,11 @@ pub mod trader;
 // (trading_engine already declared above)
 pub mod signal;
 pub mod models;
+pub mod portfolio_manager;
 
 // Re-export commonly used types
 pub use models::Trade;
 pub use trader::{Position, Trader, TradeMode};
 pub use trading_engine::{TradingEngine, PerformanceMetrics};
 pub use signal::Signal;
+pub use portfolio_manager::{PortfolioManager, PortfolioConfig, PortfolioMetrics, PortfolioSignal};

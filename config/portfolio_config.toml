@@ -1,0 +1,24 @@
+[general]
+max_strategies = 5
+max_positions_per_strategy = 3
+rebalance_frequency_hours = 24
+correlation_threshold = 0.7
+
+[risk_management]
+max_portfolio_drawdown = 0.08
+max_position_weight = 0.3
+max_strategy_weight = 0.5
+target_volatility = 0.15
+risk_free_rate = 0.02
+
+[allocation]
+allocation_method = "risk_parity"
+equal_weight = 0.2
+momentum_weight = 0.3
+volatility_weight = 0.3
+correlation_weight = 0.2
+
+[correlation]
+correlation_window = 100
+min_correlation_threshold = 0.1
+max_correlation_threshold = 0.8
