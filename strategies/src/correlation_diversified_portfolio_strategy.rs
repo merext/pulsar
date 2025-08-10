@@ -183,14 +183,14 @@ impl CorrelationDiversifiedPortfolioStrategy {
             let min_len = asset1.price_history.len().min(asset2.price_history.len());
             let returns1: Vec<f64> = asset1.price_history
                 .iter()
-                .take(min_len)
+                .take(min_len - 1)
                 .zip(asset1.price_history.iter().skip(1).take(min_len - 1))
                 .map(|(prev, curr)| (curr - prev) / prev)
                 .collect();
 
             let returns2: Vec<f64> = asset2.price_history
                 .iter()
-                .take(min_len)
+                .take(min_len - 1)
                 .zip(asset2.price_history.iter().skip(1).take(min_len - 1))
                 .map(|(prev, curr)| (curr - prev) / prev)
                 .collect();
@@ -236,13 +236,13 @@ impl CorrelationDiversifiedPortfolioStrategy {
 
                 self.correlation_matrix
                     .entry(symbol1.clone())
-                    .or_insert_with(HashMap::new)
+                    .or_default()
                     .insert(symbol2.clone(), correlation);
 
                 if i != j {
                     self.correlation_matrix
                         .entry(symbol2.clone())
-                        .or_insert_with(HashMap::new)
+                        .or_default()
                         .insert(symbol1.clone(), correlation);
                 }
             }
@@ -327,7 +327,7 @@ impl CorrelationDiversifiedPortfolioStrategy {
         }
 
         // Apply weight constraints
-        for (_symbol, weight) in &mut optimal_weights {
+        for weight in optimal_weights.values_mut() {
             *weight = weight.max(self.config.risk.min_portfolio_weight)
                 .min(self.config.risk.max_portfolio_weight);
         }
@@ -347,7 +347,7 @@ impl CorrelationDiversifiedPortfolioStrategy {
         let mut total_correlation = 0.0;
         let mut correlation_count = 0;
 
-        for (other_symbol, _asset) in &self.assets {
+        for other_symbol in self.assets.keys() {
             if other_symbol != symbol {
                 if let Some(correlation) = self.correlation_matrix
                     .get(symbol)

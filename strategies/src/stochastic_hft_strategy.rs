@@ -458,6 +458,7 @@ impl StochasticHftStrategy {
     
     fn execute_trade(&mut self, signal: Signal, current_price: f64, current_time: f64, confidence: f64) {
         // Use trading_config position sizing: min + (confidence * (max - min))
+        // These should ideally be read from trading_config.toml, but for now using reasonable defaults
         let trading_size_min = 20.0; // From trading_config.toml
         let trading_size_max = 30.0; // From trading_config.toml
         let position_size = confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);

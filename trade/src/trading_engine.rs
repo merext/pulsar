@@ -318,7 +318,7 @@ impl PerformanceMetrics {
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn average_trade_pnl(&self) -> f64 {
-        if self.total_trades == 0 {
+        if self.total_trades == 0 || self.trade_history.is_empty() {
             0.0
         } else {
             self.trade_history.iter().map(|t| t.pnl).sum::<f64>() / self.total_trades as f64
@@ -327,12 +327,23 @@ impl PerformanceMetrics {
 
     #[must_use]
     pub fn net_pnl_after_costs(&self) -> f64 {
-        self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
+        if self.trade_history.is_empty() {
+            0.0
+        } else {
+            self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
+        }
     }
 
     #[must_use]
     pub fn gross_pnl(&self) -> f64 {
-        self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
+        if self.trade_history.is_empty() {
+            0.0
+        } else {
+            // Gross PnL excludes costs (fees, slippage, rebates)
+            self.trade_history.iter()
+                .map(|t| t.pnl + t.fees - t.rebates + t.slippage)
+                .sum::<f64>()
+        }
     }
 
     #[must_use]
@@ -342,6 +353,10 @@ impl PerformanceMetrics {
 
     #[must_use]
     pub fn profit_factor(&self) -> f64 {
+        if self.trade_history.is_empty() {
+            return 0.0;
+        }
+
         let gross_profit: f64 = self.trade_history.iter()
             .filter(|t| t.pnl > 0.0)
             .map(|t| t.pnl)
@@ -354,14 +369,20 @@ impl PerformanceMetrics {
         
         if gross_loss > 0.0 {
             gross_profit / gross_loss
+        } else if gross_profit > 0.0 {
+            f64::INFINITY // All profitable trades
         } else {
-            0.0
+            0.0 // No profitable trades
         }
     }
 
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn average_win(&self) -> f64 {
+        if self.trade_history.is_empty() {
+            return 0.0;
+        }
+
         let winning_trades: Vec<&TradeRecord> = self.trade_history.iter()
             .filter(|t| t.pnl > 0.0)
             .collect();
@@ -376,6 +397,10 @@ impl PerformanceMetrics {
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn average_loss(&self) -> f64 {
+        if self.trade_history.is_empty() {
+            return 0.0;
+        }
+
         let losing_trades: Vec<&TradeRecord> = self.trade_history.iter()
             .filter(|t| t.pnl < 0.0)
             .collect();
@@ -445,41 +470,85 @@ impl TradingEngine {
     }
 
     #[must_use]
+    /// Calculate slippage based on order size and market volatility
+    /// 
+    /// # Arguments
+    /// * `price` - Current market price
+    /// * `quantity` - Order quantity
+    /// * `volatility` - Market volatility measure
+    /// 
+    /// # Returns
+    /// * `f64` - Calculated slippage amount
     pub fn calculate_slippage(&self, price: f64, quantity: f64, volatility: f64) -> f64 {
+        // Validate inputs
+        if price <= 0.0 || quantity <= 0.0 {
+            return self.config.slippage.min_slippage;
+        }
+
         let base_slippage = self.config.slippage.min_slippage;
         let max_slippage = self.config.slippage.max_slippage;
 
-        // Calculate volatility-adjusted slippage with more realistic modeling
-        let volatility_factor = volatility.min(2.0); // Allow higher volatility impact
-        let volatility_slippage = ((max_slippage - base_slippage) * (volatility_factor / 2.0).min(1.0)).mul_add(self.config.slippage.volatility_multiplier, base_slippage);
-
-        // Calculate size-adjusted slippage with non-linear scaling
+        // Size-based slippage (larger orders = more slippage)
         let size_factor = (quantity / self.config.exchange.max_order_size).min(1.0);
-        #[allow(clippy::suspicious_operation_groupings)]
-        let size_slippage = ((max_slippage - base_slippage) * (size_factor * size_factor)).mul_add(self.config.slippage.size_multiplier, base_slippage);
+        let size_slippage = base_slippage + (max_slippage - base_slippage) * size_factor;
 
-        // Add price-level adjustment (higher prices = lower relative slippage)
-        let price_level_factor = (0.1 / price).min(1.0);
-        let price_adjusted_slippage = f64::midpoint(volatility_slippage, size_slippage) * price_level_factor;
+        // Volatility adjustment (higher volatility = more slippage)
+        let volatility_factor = volatility.min(1.0);
+        let volatility_slippage = size_slippage * (1.0 + volatility_factor * self.config.slippage.volatility_multiplier);
 
-        // Ensure minimum slippage for market orders
-        price_adjusted_slippage.max(base_slippage).min(max_slippage)
+        // Price adjustment (higher prices = lower relative slippage)
+        let price_factor = (0.1 / price).min(1.0);
+        let final_slippage = volatility_slippage * price_factor;
+
+        // Ensure slippage is within bounds
+        final_slippage.clamp(base_slippage, max_slippage)
     }
 
+    /// Calculate trading fees based on order type and size
+    /// 
+    /// # Arguments
+    /// * `price` - Trade price
+    /// * `quantity` - Trade quantity
+    /// * `is_maker` - Whether this is a maker order
+    /// 
+    /// # Returns
+    /// * `f64` - Calculated fee amount
     #[must_use]
     pub fn calculate_fees(&self, price: f64, quantity: f64, is_maker: bool) -> f64 {
+        // Validate inputs
+        if price <= 0.0 || quantity <= 0.0 {
+            return 0.0;
+        }
+
         let fee_rate = if is_maker {
             self.config.exchange.maker_fee
         } else {
             self.config.exchange.taker_fee
         };
 
-        price * quantity * fee_rate
+        // Ensure fee rate is reasonable
+        let safe_fee_rate = fee_rate.clamp(0.0, 0.1); // Max 10% fee
+        price * quantity * safe_fee_rate
     }
 
+    /// Calculate rebates for maker orders
+    /// 
+    /// # Arguments
+    /// * `price` - Trade price
+    /// * `quantity` - Trade quantity
+    /// 
+    /// # Returns
+    /// * `f64` - Calculated rebate amount
     #[must_use]
     pub fn calculate_rebates(&self, price: f64, quantity: f64) -> f64 {
-        price * quantity * self.config.exchange.maker_rebate
+        // Validate inputs
+        if price <= 0.0 || quantity <= 0.0 {
+            return 0.0;
+        }
+
+        // Ensure rebate rate is reasonable
+        let safe_rebate_rate = self.config.exchange.maker_rebate.clamp(0.0, 0.01); // Max 1% rebate
+        price * quantity * safe_rebate_rate
     }
 
     pub fn should_trade(
@@ -489,6 +558,11 @@ impl TradingEngine {
         _current_price: f64,
         timestamp: f64,
     ) -> bool {
+        // Validate inputs
+        if !(0.0..=1.0).contains(&confidence) || timestamp < 0.0 {
+            return false;
+        }
+
         // Check circuit breaker
         if self.is_circuit_breaker_active {
             #[allow(clippy::cast_precision_loss)]
@@ -559,6 +633,11 @@ impl TradingEngine {
         confidence: f64,
         spread: f64,
     ) -> OrderType {
+        // Validate inputs
+        if !(0.0..=1.0).contains(&confidence) || spread < 0.0 {
+            return OrderType::Market; // Default to market order for invalid inputs
+        }
+
         // Use maker orders for high confidence signals or when spread is wide
         if confidence > self.config.risk_management.min_signal_strength
             || spread > self.config.exchange.tick_size * 100.0
@@ -576,6 +655,10 @@ impl TradingEngine {
         price: f64,
         quantity: f64,
     ) -> (f64, f64, f64) {
+        // Validate inputs
+        if price <= 0.0 || quantity <= 0.0 {
+            return (price, 0.0, 0.0); // Return zero fill for invalid inputs
+        }
         let (fill_price, slippage, fill_quantity) = match order_type {
             OrderType::Market => {
                 let slippage = self.calculate_slippage(
@@ -659,49 +742,70 @@ impl TradingEngine {
         })
     }
 
+    /// Calculate optimal position size based on confidence, risk factors, and exchange constraints
+    /// 
+    /// # Arguments
+    /// * `symbol` - Trading symbol (currently unused but kept for future use)
+    /// * `price` - Current market price
+    /// * `confidence` - Signal confidence (0.0 to 1.0)
+    /// * `trading_size_min` - Minimum trade size
+    /// * `trading_size_max` - Maximum trade size
+    /// * `trading_size_step` - Step size for rounding
+    /// 
+    /// # Returns
+    /// * `f64` - Calculated position size respecting all constraints
     #[must_use]
     pub fn calculate_position_size(
         &self,
         _symbol: &str,
         price: f64,
         confidence: f64,
-        max_trade_size: f64,
+        trading_size_min: f64,
+        trading_size_max: f64,
+        trading_size_step: f64,
     ) -> f64 {
-        // Enhanced dynamic position sizing with multiple factors
-        let base_quantity = max_trade_size * 0.15; // Start with 15% of max limit
+        // Validate inputs
+        if price <= 0.0 || !(0.0..=1.0).contains(&confidence) {
+            return trading_size_min;
+        }
+
+        // Base quantity using linear interpolation between min and max
+        let base_quantity = confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);
         
-        // Enhanced confidence scaling with non-linear relationship
+        // Confidence-based scaling
         let confidence_multiplier = if confidence > 0.8 {
-            // High confidence gets exponential boost
-            (0.4 * (confidence - 0.8)).mul_add(5.0, 0.6)
+            // High confidence gets boost
+            1.2
         } else if confidence > 0.6 {
-            // Medium confidence gets linear scaling
-            (0.2 * (confidence - 0.6)).mul_add(5.0, 0.4)
+            // Medium confidence gets standard scaling
+            1.0
         } else {
-            // Low confidence gets reduced size
-            confidence * 0.6
+            // Low confidence gets reduction
+            confidence * 0.8
         };
 
-        // Volatility-adjusted sizing (higher volatility = smaller positions)
-        let volatility_factor = self.metrics.trade_history.back().map_or(1.0, |last_trade| {
-            let recent_volatility = (last_trade.price - price).abs() / price;
-            recent_volatility.mul_add(-20.0, 1.0).max(0.2)
-        });
-
-        // Drawdown-adjusted sizing (reduce size during drawdowns)
-        let drawdown_factor = if self.metrics.max_drawdown > 0.03 {
-            self.metrics.max_drawdown.mul_add(-3.0, 1.0).max(0.1)
+        // Volatility adjustment (simplified)
+        let volatility_factor = if let Some(last_trade) = self.metrics.trade_history.back() {
+            let price_change = (last_trade.price - price).abs() / price;
+            (1.0 - price_change * 10.0).max(0.5) // Reduce size for high volatility
         } else {
             1.0
         };
 
-        // Performance-adjusted sizing (increase size when profitable)
+        // Drawdown adjustment
+        let drawdown_factor = if self.metrics.max_drawdown > 0.05 {
+            (1.0 - self.metrics.max_drawdown * 2.0).max(0.3) // Reduce size during drawdowns
+        } else {
+            1.0
+        };
+
+        // Performance adjustment
         let performance_factor = if self.metrics.total_trades > 10 {
-            let recent_win_rate = self.metrics.win_rate();
-            if recent_win_rate > 0.6 {
-                1.2 // Boost size when winning
-            } else if recent_win_rate < 0.3 {
-                0.5 // Reduce size when losing
+            let win_rate = self.metrics.win_rate();
+            if win_rate > 0.6 {
+                1.1 // Slight boost when winning
+            } else if win_rate < 0.3 {
+                0.7 // Reduce size when losing
             } else {
                 1.0
             }
@@ -711,27 +815,22 @@ impl TradingEngine {
 
         // Calculate final size with all adjustments
         let dynamic_quantity = base_quantity * confidence_multiplier * volatility_factor * drawdown_factor * performance_factor;
-        let quantity = dynamic_quantity.min(max_trade_size);
+        
+        // Apply step size rounding
+        let step_size = if trading_size_step > 0.0 { trading_size_step } else { self.config.exchange.step_size };
+        let rounded_quantity = if step_size > 0.0 {
+            (dynamic_quantity / step_size).floor() * step_size
+        } else {
+            dynamic_quantity
+        };
 
-        // Apply exchange minimum notional requirement
+        // Apply minimum notional requirement
         let min_notional = self.config.exchange.min_notional;
-        let position_value = quantity * price;
-        if position_value < min_notional {
-            let min_quantity = min_notional / price;
-            return min_quantity.min(max_trade_size); // Still respect max limit
-        }
-
-        // Apply step size rounding for lot size compliance
-        let step_size = self.config.exchange.step_size;
-        let rounded_quantity = (quantity / step_size).floor() * step_size;
-
-        // Ensure minimum quantity based on notional requirement
-        let min_notional = self.config.exchange.min_notional;
-        let min_qty = min_notional / price;
+        let min_qty = if price > 0.0 { min_notional / price } else { trading_size_min };
         let final_quantity = rounded_quantity.max(min_qty);
 
-        // Final check to ensure we don't exceed max trade size after rounding
-        final_quantity.min(max_trade_size)
+        // Final bounds check
+        final_quantity.clamp(trading_size_min, trading_size_max)
     }
 }
 
@@ -746,41 +845,8 @@ impl Trader for TradingEngine {
         trading_size_max: f64,
         trading_size_step: f64,
     ) -> f64 {
-        // If caller didn't pass limits, use config
-        let (min_sz, max_sz, step) = if trading_size_max <= 0.0 {
-            (
-                self.config.position_sizing.trading_size_min,
-                self.config.position_sizing.trading_size_max,
-                self.config.exchange.step_size,
-            )
-        } else {
-            (trading_size_min, trading_size_max, if trading_size_step > 0.0 { trading_size_step } else { self.config.exchange.step_size })
-        };
-
-        // Simple linear interpolation between min and max quantities based on confidence
-        let dynamic_quantity = confidence.mul_add(max_sz - min_sz, min_sz);
-
-        // Apply step size rounding (round down to nearest step)
-        let quantity_to_trade = (dynamic_quantity / step).floor() * step;
-
-        // Ensure we stay within the min/max bounds after rounding
-        let final_quantity = quantity_to_trade.max(min_sz).min(max_sz);
-
-        tracing::debug!(
-            exchange = "trading_engine",
-            action = "calculate_trade_size",
-            symbol = %symbol,
-            price = price,
-            confidence = confidence,
-            trading_size_min = min_sz,
-            trading_size_max = max_sz,
-            trading_size_step = step,
-            dynamic_quantity = dynamic_quantity,
-            quantity_to_trade = quantity_to_trade,
-            final_quantity = final_quantity
-        );
-
-        final_quantity
+        // Use the consolidated position sizing function
+        self.calculate_position_size(symbol, price, confidence, trading_size_min, trading_size_max, trading_size_step)
     }
 
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
@@ -790,6 +856,7 @@ impl Trader for TradingEngine {
     }
 
     async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) {
+        // Use current system time for backtesting (in real implementation, this would come from trade data)
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -881,7 +948,7 @@ impl Trader for TradingEngine {
     }
 
     fn unrealized_pnl(&self, current_price: f64) -> f64 {
-        if self.position.quantity > 0.0 {
+        if self.position.quantity > 0.0 && current_price > 0.0 && self.position.entry_price > 0.0 {
             (current_price - self.position.entry_price) * self.position.quantity
         } else {
             0.0
