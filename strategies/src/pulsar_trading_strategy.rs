@@ -1,3 +1,6 @@
+use std::fs;
+use std::path::Path;
+use toml::Value;
 use crate::strategy::Strategy;
 use trade::{Position, Signal};
 use trade::models::TradeData;
@@ -19,6 +22,25 @@ pub struct PulsarTradingStrategy {
 
 impl PulsarTradingStrategy {
     pub fn new() -> Self {
+        Self::from_file("config/pulsar_trading_strategy.toml").unwrap_or_else(|_| Self::default())
+    }
+    
+    pub fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let config = Self::load_config(config_path)?;
+        Ok(Self {
+            trade_counter: 0,
+            last_signal_time: 0.0,
+            signal_cooldown: Self::get_config_value(&config, "timing.signal_cooldown_ms").unwrap_or(50) as f64 / 1000.0,
+            
+            total_pnl: 0.0,
+            win_count: 0,
+            
+            base_size: Self::get_config_value(&config, "general.base_size").unwrap_or(1.0),
+            max_position: Self::get_config_value(&config, "general.max_position").unwrap_or(10.0),
+        })
+    }
+    
+    fn default() -> Self {
         Self {
             trade_counter: 0,
             last_signal_time: 0.0,
@@ -30,6 +52,16 @@ impl PulsarTradingStrategy {
             base_size: 1.0,
             max_position: 10.0,
         }
+    }
+    
+    fn load_config<P: AsRef<Path>>(config_path: P) -> Result<Value, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(config_path)?;
+        let config = content.parse::<Value>()?;
+        Ok(config)
+    }
+    
+    fn get_config_value<T: ConfigValue>(config: &Value, key: &str) -> Option<T> {
+        T::from_config_value(config, key)
     }
     
     // TODO: Implement strategy-specific logic here
@@ -76,5 +108,36 @@ impl Strategy for PulsarTradingStrategy {
         
         // TODO: Implement actual signal generation logic
         self.calculate_signal(current_price, current_timestamp)
+    }
+}
+
+/// Trait for converting TOML values to specific types
+trait ConfigValue: Sized {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self>;
+}
+
+impl ConfigValue for f64 {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self> {
+        let keys: Vec<&str> = key.split('.').collect();
+        let mut current = config;
+        
+        for key in keys {
+            current = current.get(key)?;
+        }
+        
+        current.as_float()
+    }
+}
+
+impl ConfigValue for usize {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self> {
+        let keys: Vec<&str> = key.split('.').collect();
+        let mut current = config;
+        
+        for key in keys {
+            current = current.get(key)?;
+        }
+        
+        current.as_integer().map(|v| v as usize)
     }
 }

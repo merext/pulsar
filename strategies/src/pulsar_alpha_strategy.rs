@@ -1,4 +1,7 @@
 use std::collections::VecDeque;
+use std::fs;
+use std::path::Path;
+use toml::Value;
 use async_trait::async_trait;
 use crate::strategy::Strategy;
 use trade::{Position, Signal};
@@ -55,6 +58,51 @@ pub struct PulsarAlphaStrategy {
 
 impl PulsarAlphaStrategy {
     pub fn new() -> Self {
+        Self::from_file("config/pulsar_alpha_strategy.toml").unwrap_or_else(|_| Self::default())
+    }
+    
+    pub fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let config = Self::load_config(config_path)?;
+        Ok(Self {
+            price_history: VecDeque::with_capacity(1000),
+            volume_history: VecDeque::with_capacity(1000),
+            mid_price_history: VecDeque::with_capacity(1000),
+            spread_history: VecDeque::with_capacity(1000),
+            book_imbalance: VecDeque::with_capacity(1000),
+            trade_momentum: VecDeque::with_capacity(1000),
+            volatility_regime: VecDeque::with_capacity(1000),
+            asm_bid_offset: VecDeque::with_capacity(1000),
+            asm_ask_offset: VecDeque::with_capacity(1000),
+            _inventory_skew: 0.0,
+            current_inventory: 0.0,
+            obi_signal: VecDeque::with_capacity(1000),
+            depth_slope_bid: VecDeque::with_capacity(1000),
+            depth_slope_ask: VecDeque::with_capacity(1000),
+            tick_momentum: VecDeque::with_capacity(1000),
+            regime_classifier: VecDeque::with_capacity(1000),
+            
+            // Conservative starting parameters
+            _base_spread_ticks: Self::get_config_value(&config, "general.base_spread_ticks").unwrap_or(3.0),
+            _participation_rate: Self::get_config_value(&config, "general.participation_rate").unwrap_or(0.001),
+            max_inventory: Self::get_config_value(&config, "general.max_inventory").unwrap_or(0.5),
+            _max_taker_size: Self::get_config_value(&config, "general.max_taker_size").unwrap_or(0.002),
+            inventory_scale: Self::get_config_value(&config, "general.inventory_scale").unwrap_or(0.1),
+            
+            trade_counter: 0,
+            last_signal_time: 0.0,
+            signal_cooldown: Self::get_config_value(&config, "timing.signal_cooldown_ms").unwrap_or(50) as f64 / 1000.0,
+            consecutive_losses: 0,
+            max_consecutive_losses: Self::get_config_value(&config, "risk.max_consecutive_losses").unwrap_or(3),
+            
+            total_pnl: 0.0,
+            win_count: 0,
+            loss_count: 0,
+            _fill_rate: 0.0,
+            _adverse_selection_rate: 0.0,
+        })
+    }
+    
+    fn default() -> Self {
         Self {
             price_history: VecDeque::with_capacity(1000),
             volume_history: VecDeque::with_capacity(1000),
@@ -92,6 +140,16 @@ impl PulsarAlphaStrategy {
             _fill_rate: 0.0,
             _adverse_selection_rate: 0.0,
         }
+    }
+    
+    fn load_config<P: AsRef<Path>>(config_path: P) -> Result<Value, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(config_path)?;
+        let config = content.parse::<Value>()?;
+        Ok(config)
+    }
+    
+    fn get_config_value<T: ConfigValue>(config: &Value, key: &str) -> Option<T> {
+        T::from_config_value(config, key)
     }
     
     fn calculate_mid_price(&self, current_price: f64) -> f64 {
@@ -509,5 +567,36 @@ impl Strategy for PulsarAlphaStrategy {
         }
         
         (signal, confidence)
+    }
+}
+
+/// Trait for converting TOML values to specific types
+trait ConfigValue: Sized {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self>;
+}
+
+impl ConfigValue for f64 {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self> {
+        let keys: Vec<&str> = key.split('.').collect();
+        let mut current = config;
+        
+        for key in keys {
+            current = current.get(key)?;
+        }
+        
+        current.as_float()
+    }
+}
+
+impl ConfigValue for usize {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self> {
+        let keys: Vec<&str> = key.split('.').collect();
+        let mut current = config;
+        
+        for key in keys {
+            current = current.get(key)?;
+        }
+        
+        current.as_integer().map(|v| v as usize)
     }
 }

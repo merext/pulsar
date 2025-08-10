@@ -2,7 +2,8 @@ use ::trade::trader::TradeMode;
 use clap::{Parser, Subcommand};
 use std::env;
 use std::error::Error;
-use strategies::config::StrategyConfig;
+use std::fs;
+use toml::Value;
 use strategies::PulsarMemOnlyStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
@@ -11,6 +12,46 @@ mod backtest;
 mod trade;
 
 use ::trade::TradingConfig;
+
+fn load_config<P: AsRef<std::path::Path>>(config_path: P) -> Result<Value, Box<dyn Error>> {
+    let content = fs::read_to_string(config_path)?;
+    let config = content.parse::<Value>()?;
+    Ok(config)
+}
+
+fn get_config_value<T: ConfigValue>(config: &Value, key: &str) -> Option<T> {
+    T::from_config_value(config, key)
+}
+
+trait ConfigValue: Sized {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self>;
+}
+
+impl ConfigValue for f64 {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self> {
+        let keys: Vec<&str> = key.split('.').collect();
+        let mut current = config;
+        
+        for key in keys {
+            current = current.get(key)?;
+        }
+        
+        current.as_float()
+    }
+}
+
+impl ConfigValue for String {
+    fn from_config_value(config: &Value, key: &str) -> Option<Self> {
+        let keys: Vec<&str> = key.split('.').collect();
+        let mut current = config;
+        
+        for key in keys {
+            current = current.get(key)?;
+        }
+        
+        current.as_str().map(|s| s.to_string())
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -47,13 +88,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
 
     // Load trading configuration
-    let trading_config =
-        StrategyConfig::load_trading_config().expect("Failed to load trading configuration");
-    let position_sizing = trading_config
-        .section("position_sizing")
-        .expect("Position sizing configuration not found");
-
-    let trading_symbol = position_sizing.get_or("trading_symbol", "DOGEUSDT".to_string());
+    let trading_config = load_config("config/trading_config.toml")
+        .expect("Failed to load trading configuration");
+    
+    let trading_symbol = get_config_value(&trading_config, "position_sizing.trading_symbol")
+        .unwrap_or_else(|| "DOGEUSDT".to_string());
     
     // Create Pulsar-MemOnly HFT strategy instance
     let strategy = PulsarMemOnlyStrategy::new();

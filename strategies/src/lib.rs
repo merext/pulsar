@@ -1,4 +1,3 @@
-pub mod config;
 pub mod sentiment_analysis_strategy;
 pub mod mean_reversion_strategy;
 pub mod pulsar_alpha_strategy;
