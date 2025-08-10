@@ -14,10 +14,6 @@ pub struct PulsarTradingStrategy {
     // Performance tracking
     total_pnl: f64,
     win_count: usize,
-    
-    // Strategy parameters (will be loaded from config)
-    base_size: f64,
-    max_position: f64,
 }
 
 impl PulsarTradingStrategy {
@@ -34,9 +30,6 @@ impl PulsarTradingStrategy {
             
             total_pnl: 0.0,
             win_count: 0,
-            
-            base_size: Self::get_config_value(&config, "general.base_size").unwrap_or(1.0),
-            max_position: Self::get_config_value(&config, "general.max_position").unwrap_or(10.0),
         })
     }
     
@@ -48,9 +41,6 @@ impl PulsarTradingStrategy {
             
             total_pnl: 0.0,
             win_count: 0,
-            
-            base_size: 1.0,
-            max_position: 10.0,
         }
     }
     

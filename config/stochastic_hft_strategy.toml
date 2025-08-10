@@ -1,0 +1,24 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+base_size = 1.0
+
+[stochastic]
+# Stochastic Oscillator settings
+k_period = 14
+d_period = 3
+oversold = 20.0
+overbought = 80.0
+# Buffer capacity for price and indicator history
+buffer_capacity = 1000
+
+[signals]
+# Minimum confidence required for signal generation
+min_confidence = 0.1
+# Confidence weights for different signal types
+oversold_confidence = 0.8
+overbought_confidence = 0.8
+crossover_confidence = 0.7
+
+[risk]
+max_consecutive_losses = 5
+signal_cooldown_ms = 50
