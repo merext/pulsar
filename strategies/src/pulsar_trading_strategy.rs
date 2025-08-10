@@ -17,15 +17,20 @@ pub struct PulsarTradingStrategy {
 }
 
 impl PulsarTradingStrategy {
+    #[must_use]
     pub fn new() -> Self {
         Self::from_file("config/pulsar_trading_strategy.toml").unwrap_or_else(|_| Self::default())
     }
     
+    /// # Errors
+    ///
+    /// Will return `Err` if the config file cannot be read or parsed.
     pub fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let config = Self::load_config(config_path)?;
         Ok(Self {
             trade_counter: 0,
             last_signal_time: 0.0,
+            #[allow(clippy::cast_precision_loss)]
             signal_cooldown: Self::get_config_value(&config, "timing.signal_cooldown_ms").unwrap_or(50) as f64 / 1000.0,
             
             total_pnl: 0.0,
@@ -33,7 +38,7 @@ impl PulsarTradingStrategy {
         })
     }
     
-    fn default() -> Self {
+    const fn default() -> Self {
         Self {
             trade_counter: 0,
             last_signal_time: 0.0,
@@ -43,7 +48,15 @@ impl PulsarTradingStrategy {
             win_count: 0,
         }
     }
-    
+}
+
+impl Default for PulsarTradingStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PulsarTradingStrategy {
     fn load_config<P: AsRef<Path>>(config_path: P) -> Result<Value, Box<dyn std::error::Error>> {
         let content = fs::read_to_string(config_path)?;
         let config = content.parse::<Value>()?;
@@ -55,7 +68,7 @@ impl PulsarTradingStrategy {
     }
     
     // TODO: Implement strategy-specific logic here
-    fn calculate_signal(&self, _current_price: f64, _current_timestamp: f64) -> (Signal, f64) {
+    const fn calculate_signal(_current_price: f64, _current_timestamp: f64) -> (Signal, f64) {
         // Placeholder implementation - replace with actual strategy logic
         (Signal::Hold, 0.0)
     }
@@ -63,6 +76,7 @@ impl PulsarTradingStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for PulsarTradingStrategy {
+    #[allow(clippy::cast_precision_loss)]
     fn get_info(&self) -> String {
         format!(
             "PulsarTradingStrategy - Trades: {}, PnL: {:.4}, Win Rate: {:.1}%",
@@ -97,7 +111,7 @@ impl Strategy for PulsarTradingStrategy {
         }
         
         // TODO: Implement actual signal generation logic
-        self.calculate_signal(current_price, current_timestamp)
+        Self::calculate_signal(current_price, current_timestamp)
     }
 }
 
@@ -128,6 +142,6 @@ impl ConfigValue for usize {
             current = current.get(key)?;
         }
         
-        current.as_integer().map(|v| v as usize)
+        current.as_integer().and_then(|v| Self::try_from(v).ok())
     }
 }

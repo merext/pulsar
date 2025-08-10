@@ -29,7 +29,7 @@ pub struct Trade {
 
 impl From<Trade> for TradeData {
     fn from(trade: Trade) -> Self {
-        TradeData {
+        Self {
             id: trade.trade_id,
             price: trade.price,
             qty: trade.quantity,

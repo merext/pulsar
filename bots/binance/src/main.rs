@@ -4,7 +4,7 @@ use std::env;
 use std::error::Error;
 use std::fs;
 use toml::Value;
-use strategies::StochasticHftStrategy;
+use strategies::CorrelationDiversifiedPortfolioStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
 
@@ -49,7 +49,7 @@ impl ConfigValue for String {
             current = current.get(key)?;
         }
         
-        current.as_str().map(|s| s.to_string())
+        current.as_str().map(std::string::ToString::to_string)
     }
 }
 
@@ -75,13 +75,10 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Configure logging with specific levels for different modules
-    let env_filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
-        // If RUST_LOG is set, use it but force binance_sdk to warn level
-        format!("{rust_log},binance_sdk=warn")
-    } else {
-        // Default configuration
-        "binance_bot=info,binance_sdk=warn,binance_exchange=info".to_string()
-    };
+    let env_filter = std::env::var("RUST_LOG").map_or_else(
+        |_| "binance_bot=info,binance_sdk=warn,binance_exchange=info".to_string(),
+        |rust_log| format!("{rust_log},binance_sdk=warn"),
+    );
 
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
@@ -94,8 +91,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let trading_symbol = get_config_value(&trading_config, "position_sizing.trading_symbol")
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
-    // Create StochasticHftStrategy strategy instance
-    let strategy = StochasticHftStrategy::new();
+    // Create CorrelationDiversifiedPortfolioStrategy strategy instance
+    let strategy = CorrelationDiversifiedPortfolioStrategy::new();
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
 

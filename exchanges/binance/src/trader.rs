@@ -20,6 +20,13 @@ pub struct BinanceTrader {
 }
 
 impl BinanceTrader {
+    /// # Panics
+    ///
+    /// Panics if the Binance API configuration cannot be built or if the WebSocket API connection fails.
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if the trading config cannot be loaded.
     pub async fn new(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let connection = if mode == TradeMode::Real {
             let config = ConfigurationWebsocketApi::builder()
@@ -42,7 +49,7 @@ impl BinanceTrader {
 
         let trading_config = TradingConfig::load()?; // Keep backward compat; will add explicit ctor below
 
-        Ok(BinanceTrader {
+        Ok(Self {
             connection,
             position: Position {
                 symbol: symbol.to_string(),
@@ -54,6 +61,13 @@ impl BinanceTrader {
         })
     }
 
+    /// # Panics
+    ///
+    /// Panics if the Binance API configuration cannot be built or if the WebSocket API connection fails.
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if the trading config cannot be loaded from the provided path.
     pub async fn new_with_config(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode, config_path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let connection = if mode == TradeMode::Real {
             let cfg = ConfigurationWebsocketApi::builder()
@@ -70,7 +84,7 @@ impl BinanceTrader {
 
         let trading_config = TradingConfig::from_file(config_path)?;
 
-        Ok(BinanceTrader {
+        Ok(Self {
             connection,
             position: Position {
                 symbol: symbol.to_string(),
@@ -86,10 +100,10 @@ impl BinanceTrader {
         // Enhanced dynamic sizing with multiple factors
         
         // Base size from linear confidence scaling
-        let confidence_factor = trading_size_min + (confidence * (trading_size_max - trading_size_min));
+        let confidence_factor = confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);
         
         // Volatility adjustment - reduce size in high volatility
-        let volatility = self.estimate_volatility(price);
+        let volatility = Self::estimate_volatility(price);
         let volatility_factor = if volatility > 0.02 { // If volatility > 2%
             0.7 // Reduce size by 30%
         } else if volatility > 0.01 { // If volatility > 1%
@@ -108,7 +122,7 @@ impl BinanceTrader {
         };
         
         // Kelly Criterion-inspired sizing (simplified)
-        let kelly_factor = self.estimate_kelly_fraction();
+        let kelly_factor = Self::estimate_kelly_fraction();
         
         // Combine all factors
         let dynamic_quantity = confidence_factor * volatility_factor * risk_factor * kelly_factor;
@@ -140,14 +154,14 @@ impl BinanceTrader {
         final_quantity
     }
     
-    fn estimate_volatility(&self, _current_price: f64) -> f64 {
+    const fn estimate_volatility(_current_price: f64) -> f64 {
         // Simple volatility estimation based on recent price movements
         // In a real implementation, this would track price history
         // For now, use a conservative estimate
         0.015 // 1.5% default volatility
     }
     
-    fn estimate_kelly_fraction(&self) -> f64 {
+    const fn estimate_kelly_fraction() -> f64 {
         // Kelly Criterion estimation
         // In practice, this would be calculated from historical performance
         // For now, use a conservative multiplier
@@ -165,21 +179,19 @@ impl Trader for BinanceTrader {
         self.calculate_trade_size_impl(symbol, price, confidence, min, max, step)
     }
     
+    #[allow(clippy::too_many_lines)]
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
         let symbol = self.position.symbol.clone();
         let quantity = Decimal::from_f64(quantity).expect("Failed to convert quantity to Decimal");
 
-        let connection = match &self.connection {
-            Some(c) => c,
-            None => {
-                error!(
-                    exchange = "binance",
-                    action = "on_signal",
-                    status = "connection_missing",
-                    symbol = %symbol
-                );
-                return;
-            }
+        let Some(connection) = &self.connection else {
+            error!(
+                exchange = "binance",
+                action = "on_signal",
+                status = "connection_missing",
+                symbol = %symbol
+            );
+            return;
         };
 
         match signal {
@@ -194,45 +206,36 @@ impl Trader for BinanceTrader {
                     .build()
                     .expect("Failed to build order parameters");
 
-                    let response = match connection.order_place(params).await {
-                        Ok(r) => r,
-                        Err(e) => {
-                            error!(
-                                exchange = "binance",
-                                action = "place_buy_order",
-                                status = "failed",
-                                symbol = %symbol,
-                                quantity = %quantity,
-                                error = %e
-                            );
-                            return;
-                        }
+                    let Ok(response) = connection.order_place(params).await else {
+                        error!(
+                            exchange = "binance",
+                            action = "place_buy_order",
+                            status = "failed",
+                            symbol = %symbol,
+                            quantity = %quantity,
+                            error = "Failed to place order"
+                        );
+                        return;
                     };
-                    let data = match response.data() {
-                        Ok(d) => d,
-                        Err(e) => {
-                            error!(
-                                exchange = "binance",
-                                action = "buy_order_data",
-                                status = "failed",
-                                symbol = %symbol,
-                                error = %e
-                            );
-                            return;
-                        }
+                    let Ok(data) = response.data() else {
+                        error!(
+                            exchange = "binance",
+                            action = "buy_order_data",
+                            status = "failed",
+                            symbol = %symbol,
+                            error = "Failed to get order data"
+                        );
+                        return;
                     };
 
-                    let fills = match data.fills.as_ref() {
-                        Some(f) => f,
-                        None => {
-                            error!(
-                                exchange = "binance",
-                                action = "buy_order_fills",
-                                status = "missing",
-                                symbol = %symbol
-                            );
-                            return;
-                        }
+                    let Some(fills) = data.fills.as_ref() else {
+                        error!(
+                            exchange = "binance",
+                            action = "buy_order_fills",
+                            status = "missing",
+                            symbol = %symbol
+                        );
+                        return;
                     };
 
                     self.position.quantity = data

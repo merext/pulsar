@@ -7,6 +7,7 @@ use trade::signal::Signal;
 use trade::trader::{TradeMode, Trader};
 use trade::trading_engine::TradingConfig;
 
+#[allow(clippy::too_many_lines)]
 pub async fn run_trade(
     config: TradingConfig,
     trade_mode: TradeMode,
@@ -55,12 +56,13 @@ pub async fn run_trade(
         strategy.on_trade(trade.clone().into()).await;
 
         let trade_price = trade.price;
+        #[allow(clippy::cast_precision_loss)]
         let trade_time = trade.trade_time as f64;
         let current_position = binance_trader.position();
 
         // Check if position has changed recently
         let time_since_position_change = trade_time - last_position_change_time;
-        let position_has_changed = current_position.quantity != last_position_quantity;
+        let position_has_changed = (current_position.quantity - last_position_quantity).abs() > f64::EPSILON;
 
         if position_has_changed {
             last_position_change_time = trade_time;

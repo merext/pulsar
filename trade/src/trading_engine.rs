@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::fs;
 use toml;
 use tracing::{info, warn};
+use rand::Rng;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingConfig {
@@ -77,6 +78,7 @@ pub struct RiskManagementConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct PerformanceTrackingConfig {
     pub track_fill_rate: bool,
     pub track_slippage: bool,
@@ -91,6 +93,7 @@ pub struct PerformanceTrackingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct BacktestSettingsConfig {
     // Simulation parameters
     pub initial_capital: f64,
@@ -187,14 +190,20 @@ pub struct BacktestSettingsConfig {
 }
 
 impl TradingConfig {
+    /// # Errors
+    ///
+    /// Will return `Err` if the config file cannot be read or parsed.
     pub fn load() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Deprecated implicit loader; prefer from_file
         Self::from_file("config/trading_config.toml")
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if the config file cannot be read or parsed.
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let config_content = fs::read_to_string(path)?;
-        let config: TradingConfig = toml::from_str(&config_content)?;
+        let config: Self = toml::from_str(&config_content)?;
         Ok(config)
     }
 }
@@ -243,7 +252,8 @@ impl Default for PerformanceMetrics {
 }
 
 impl PerformanceMetrics {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             total_trades: 0,
             winning_trades: 0,
@@ -295,6 +305,8 @@ impl PerformanceMetrics {
         }
     }
 
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn win_rate(&self) -> f64 {
         if self.total_trades == 0 {
             0.0
@@ -303,6 +315,8 @@ impl PerformanceMetrics {
         }
     }
 
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn average_trade_pnl(&self) -> f64 {
         if self.total_trades == 0 {
             0.0
@@ -311,18 +325,22 @@ impl PerformanceMetrics {
         }
     }
 
+    #[must_use]
     pub fn net_pnl_after_costs(&self) -> f64 {
         self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
     }
 
+    #[must_use]
     pub fn gross_pnl(&self) -> f64 {
         self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
     }
 
+    #[must_use]
     pub fn total_costs(&self) -> f64 {
         self.total_fees - self.total_rebates + self.total_slippage
     }
 
+    #[must_use]
     pub fn profit_factor(&self) -> f64 {
         let gross_profit: f64 = self.trade_history.iter()
             .filter(|t| t.pnl > 0.0)
@@ -341,30 +359,36 @@ impl PerformanceMetrics {
         }
     }
 
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn average_win(&self) -> f64 {
         let winning_trades: Vec<&TradeRecord> = self.trade_history.iter()
             .filter(|t| t.pnl > 0.0)
             .collect();
         
-        if !winning_trades.is_empty() {
-            winning_trades.iter().map(|t| t.pnl).sum::<f64>() / winning_trades.len() as f64
-        } else {
+        if winning_trades.is_empty() {
             0.0
+        } else {
+            winning_trades.iter().map(|t| t.pnl).sum::<f64>() / winning_trades.len() as f64
         }
     }
 
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn average_loss(&self) -> f64 {
         let losing_trades: Vec<&TradeRecord> = self.trade_history.iter()
             .filter(|t| t.pnl < 0.0)
             .collect();
         
-        if !losing_trades.is_empty() {
-            losing_trades.iter().map(|t| t.pnl.abs()).sum::<f64>() / losing_trades.len() as f64
-        } else {
+        if losing_trades.is_empty() {
             0.0
+        } else {
+            losing_trades.iter().map(|t| t.pnl.abs()).sum::<f64>() / losing_trades.len() as f64
         }
     }
 
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn sharpe_ratio(&self) -> f64 {
         if self.trade_history.len() < 2 {
             return 0.0;
@@ -380,7 +404,10 @@ impl PerformanceMetrics {
             .sum::<f64>() / (returns.len() - 1) as f64;
         
         if variance > 0.0 {
-            mean_return / variance.sqrt()
+            // Annualized risk-free rate (2% per year, adjusted for trade frequency)
+            let risk_free_rate = 0.02 / 252.0; // Assuming daily trading
+            let excess_return = mean_return - risk_free_rate;
+            excess_return / variance.sqrt()
         } else {
             0.0
         }
@@ -398,6 +425,9 @@ pub struct TradingEngine {
 }
 
 impl TradingEngine {
+    /// # Errors
+    ///
+    /// Will return `Err` if the config file cannot be read or parsed.
     pub fn new_with_config(symbol: &str, config: TradingConfig) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
             position: Position {
@@ -414,32 +444,29 @@ impl TradingEngine {
         })
     }
 
+    #[must_use]
     pub fn calculate_slippage(&self, price: f64, quantity: f64, volatility: f64) -> f64 {
         let base_slippage = self.config.slippage.min_slippage;
         let max_slippage = self.config.slippage.max_slippage;
 
         // Calculate volatility-adjusted slippage with more realistic modeling
         let volatility_factor = volatility.min(2.0); // Allow higher volatility impact
-        let volatility_slippage = base_slippage
-            + (max_slippage - base_slippage)
-                * (volatility_factor / 2.0).min(1.0)
-                * self.config.slippage.volatility_multiplier;
+        let volatility_slippage = ((max_slippage - base_slippage) * (volatility_factor / 2.0).min(1.0)).mul_add(self.config.slippage.volatility_multiplier, base_slippage);
 
         // Calculate size-adjusted slippage with non-linear scaling
         let size_factor = (quantity / self.config.exchange.max_order_size).min(1.0);
-        let size_slippage = base_slippage
-            + (max_slippage - base_slippage) 
-                * (size_factor * size_factor) // Quadratic scaling for more realistic impact
-                * self.config.slippage.size_multiplier;
+        #[allow(clippy::suspicious_operation_groupings)]
+        let size_slippage = ((max_slippage - base_slippage) * (size_factor * size_factor)).mul_add(self.config.slippage.size_multiplier, base_slippage);
 
         // Add price-level adjustment (higher prices = lower relative slippage)
         let price_level_factor = (0.1 / price).min(1.0);
-        let price_adjusted_slippage = (volatility_slippage + size_slippage) / 2.0 * price_level_factor;
+        let price_adjusted_slippage = f64::midpoint(volatility_slippage, size_slippage) * price_level_factor;
 
         // Ensure minimum slippage for market orders
         price_adjusted_slippage.max(base_slippage).min(max_slippage)
     }
 
+    #[must_use]
     pub fn calculate_fees(&self, price: f64, quantity: f64, is_maker: bool) -> f64 {
         let fee_rate = if is_maker {
             self.config.exchange.maker_fee
@@ -450,6 +477,7 @@ impl TradingEngine {
         price * quantity * fee_rate
     }
 
+    #[must_use]
     pub fn calculate_rebates(&self, price: f64, quantity: f64) -> f64 {
         price * quantity * self.config.exchange.maker_rebate
     }
@@ -463,6 +491,7 @@ impl TradingEngine {
     ) -> bool {
         // Check circuit breaker
         if self.is_circuit_breaker_active {
+            #[allow(clippy::cast_precision_loss)]
             if timestamp - self.circuit_breaker_start
                 > self.config.risk_management.cooldown_period as f64
             {
@@ -523,6 +552,7 @@ impl TradingEngine {
         true
     }
 
+    #[must_use]
     pub fn determine_order_type(
         &self,
         _signal: &Signal,
@@ -539,6 +569,7 @@ impl TradingEngine {
         }
     }
 
+    #[must_use]
     pub fn simulate_fill(
         &self,
         order_type: &OrderType,
@@ -557,20 +588,23 @@ impl TradingEngine {
             }
             OrderType::Limit => {
                 // Limit orders might not fill immediately
-                if let Some(ref backtest_settings) = self.config.backtest_settings {
-                    if rand::random::<f64>() < backtest_settings.limit_order_fill_rate {
-                        (price, 0.0, quantity)
-                    } else {
-                        (price, 0.0, quantity * backtest_settings.partial_fill_ratio)
-                    }
-                } else {
-                    // Default fallback
-                    if rand::random::<f64>() < 0.7 {
-                        (price, 0.0, quantity)
-                    } else {
-                        (price, 0.0, quantity * 0.5)
-                    }
-                }
+                self.config.backtest_settings.as_ref().map_or_else(
+                    || {
+                        // Default fallback
+                        if rand::thread_rng().gen_bool(0.7) {
+                            (price, 0.0, quantity)
+                        } else {
+                            (price, 0.0, quantity * 0.5)
+                        }
+                    },
+                    |backtest_settings| {
+                        if rand::thread_rng().gen_bool(backtest_settings.limit_order_fill_rate) {
+                            (price, 0.0, quantity)
+                        } else {
+                            (price, 0.0, quantity * backtest_settings.partial_fill_ratio)
+                        }
+                    },
+                )
             }
             OrderType::Maker => {
                 // Maker orders get better prices
@@ -591,9 +625,10 @@ impl TradingEngine {
         (fill_price, slippage, fill_quantity)
     }
 
+    #[must_use]
     pub fn calculate_latency(&self) -> f64 {
         // Check if we have backtest settings for latency simulation
-        if let Some(ref backtest_settings) = self.config.backtest_settings {
+        self.config.backtest_settings.as_ref().map_or(0.0, |backtest_settings| {
             if backtest_settings.account_for_latency_in_signals {
                 // Calculate total latency with 20ms base
                 let base_latency = backtest_settings.propagation_delay
@@ -608,7 +643,7 @@ impl TradingEngine {
                     + backtest_settings.risk_check_time;
 
                 // Add latency spikes (1% probability)
-                let latency = if rand::random::<f64>() < backtest_settings.latency_spike_probability
+                let latency = if rand::thread_rng().gen_bool(backtest_settings.latency_spike_probability)
                 {
                     base_latency * backtest_settings.latency_spike_multiplier
                 } else {
@@ -616,16 +651,15 @@ impl TradingEngine {
                 };
 
                 // Add jitter (±20% variation)
-                let jitter = latency * (rand::random::<f64>() * 0.4 - 0.2);
+                let jitter = latency * rand::thread_rng().gen_range(-0.2..0.2);
                 latency + jitter
             } else {
                 0.0 // No latency simulation
             }
-        } else {
-            0.0 // No backtest settings, no latency simulation
-        }
+        })
     }
 
+    #[must_use]
     pub fn calculate_position_size(
         &self,
         _symbol: &str,
@@ -639,26 +673,24 @@ impl TradingEngine {
         // Enhanced confidence scaling with non-linear relationship
         let confidence_multiplier = if confidence > 0.8 {
             // High confidence gets exponential boost
-            0.6 + 0.4 * (confidence - 0.8) * 5.0
+            (0.4 * (confidence - 0.8)).mul_add(5.0, 0.6)
         } else if confidence > 0.6 {
             // Medium confidence gets linear scaling
-            0.4 + 0.2 * (confidence - 0.6) * 5.0
+            (0.2 * (confidence - 0.6)).mul_add(5.0, 0.4)
         } else {
             // Low confidence gets reduced size
             confidence * 0.6
         };
 
         // Volatility-adjusted sizing (higher volatility = smaller positions)
-        let volatility_factor = if let Some(last_trade) = self.metrics.trade_history.back() {
+        let volatility_factor = self.metrics.trade_history.back().map_or(1.0, |last_trade| {
             let recent_volatility = (last_trade.price - price).abs() / price;
-            (1.0 - recent_volatility * 20.0).max(0.2)
-        } else {
-            1.0
-        };
+            recent_volatility.mul_add(-20.0, 1.0).max(0.2)
+        });
 
         // Drawdown-adjusted sizing (reduce size during drawdowns)
         let drawdown_factor = if self.metrics.max_drawdown > 0.03 {
-            (1.0 - self.metrics.max_drawdown * 3.0).max(0.1)
+            self.metrics.max_drawdown.mul_add(-3.0, 1.0).max(0.1)
         } else {
             1.0
         };
@@ -726,7 +758,7 @@ impl Trader for TradingEngine {
         };
 
         // Simple linear interpolation between min and max quantities based on confidence
-        let dynamic_quantity = min_sz + (confidence * (max_sz - min_sz));
+        let dynamic_quantity = confidence.mul_add(max_sz - min_sz, min_sz);
 
         // Apply step size rounding (round down to nearest step)
         let quantity_to_trade = (dynamic_quantity / step).floor() * step;
@@ -779,7 +811,7 @@ impl Trader for TradingEngine {
         match signal {
             Signal::Buy => {
                 if self.position.quantity == 0.0 && fill_quantity > 0.0 {
-                    let _cost = fill_price * fill_quantity + fees - rebates;
+                    let _cost = fill_price.mul_add(fill_quantity, fees - rebates);
                     self.position.quantity = fill_quantity;
                     self.position.entry_price = fill_price;
 
@@ -792,7 +824,7 @@ impl Trader for TradingEngine {
                         slippage,
                         rebates,
                         pnl: 0.0, // Will be calculated on sell
-                        order_type: order_type.clone(),
+                        order_type,
                     };
 
                     self.metrics.record_trade(record);
@@ -830,7 +862,7 @@ impl Trader for TradingEngine {
                         slippage,
                         rebates,
                         pnl,
-                        order_type: order_type.clone(),
+                        order_type,
                     };
 
                     self.metrics.record_trade(record);
@@ -870,24 +902,4 @@ impl Trader for TradingEngine {
     }
 }
 
-// Add rand dependency for random number generation - OPTIMIZED
-mod rand {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::sync::atomic::{AtomicU64, Ordering};
 
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    pub fn random<T>() -> T
-    where
-        T: std::ops::Rem<f64, Output = T> + From<f64>,
-    {
-        // Use atomic counter for faster random generation
-        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut hasher = DefaultHasher::new();
-        counter.hash(&mut hasher);
-        let hash = hasher.finish();
-        let random_f64 = (hash as f64) / (u64::MAX as f64);
-        T::from(random_f64)
-    }
-}

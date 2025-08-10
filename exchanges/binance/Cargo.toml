@@ -2,6 +2,12 @@
 name = "binance-exchange"
 version = "0.1.0"
 edition = "2024"
+description = "A Binance exchange integration for the Pulsar trading bot."
+license = "MIT"
+repository = "https://github.com/merext/pulsar"
+readme = "README.md"
+keywords = ["trading", "binance", "crypto"]
+categories = ["api-bindings"]
 
 [dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

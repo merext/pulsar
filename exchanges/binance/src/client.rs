@@ -20,6 +20,9 @@ pub struct BinanceClient {
 }
 
 impl BinanceClient {
+    /// # Errors
+    ///
+    /// Will return `Err` if the connection to Binance WebSocket Streams fails or times out.
     pub async fn new() -> Result<Self> {
         let config = ConfigurationWebsocketStreams::builder()
             .build()
@@ -34,9 +37,12 @@ impl BinanceClient {
             .map_err(|_| anyhow!("Connection timed out"))?
             .context("Failed to connect to WebSocket Streams")?;
 
-        Ok(BinanceClient { connection })
+        Ok(Self { connection })
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if the subscription to the trade stream fails.
     pub async fn trade_stream(
         self,
         symbol: &str,
@@ -57,13 +63,16 @@ impl BinanceClient {
         ws_stream.on_message(move |msg| {
             let trade = PulsarTrade {
                 event_type: msg.e.clone().unwrap_or_default(),
+                #[allow(clippy::cast_sign_loss)]
                 event_time: msg.e_uppercase.unwrap_or_default() as u64,
                 symbol: msg.s.clone().unwrap_or_default(),
+                #[allow(clippy::cast_sign_loss)]
                 trade_id: msg.t.unwrap_or_default() as u64,
                 price: msg.p.as_ref().and_then(|v| v.parse().ok()).unwrap_or(0.0),
                 quantity: msg.q.as_ref().and_then(|v| v.parse().ok()).unwrap_or(0.0),
                 buyer_order_id: None,
                 seller_order_id: None,
+                #[allow(clippy::cast_sign_loss)]
                 trade_time: msg.t_uppercase.unwrap_or_default() as u64,
                 is_buyer_market_maker: msg.m.unwrap_or_default(),
             };
@@ -76,17 +85,18 @@ impl BinanceClient {
         Ok(ReceiverStream::new(rx))
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if the HTTP request fails or the data cannot be parsed.
     pub async fn trade_data(
-        &self,
         url: &str,
     ) -> Result<impl Stream<Item = PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
         let response = reqwest::get(url).await?.bytes().await?;
-        let trades = self.parse_trade_data(response)?;
+        let trades = Self::parse_trade_data(response)?;
         Ok(stream::iter(trades))
     }
 
     fn parse_trade_data(
-        &self,
         data: Bytes,
     ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
         let cursor = Cursor::new(data);
@@ -162,12 +172,14 @@ impl BinanceClient {
         Ok(trades)
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if the file cannot be read or the data cannot be parsed.
     pub async fn trade_data_from_path(
-        &self,
         path: &str,
     ) -> Result<impl Stream<Item = PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
         let file_content = tokio::fs::read(path).await?;
-        let trades = self.parse_trade_data(Bytes::from(file_content))?;
+        let trades = Self::parse_trade_data(Bytes::from(file_content))?;
         Ok(stream::iter(trades))
     }
 }

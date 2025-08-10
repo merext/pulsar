@@ -12,12 +12,12 @@ pub async fn run_backtest(
     symbol: &str,
     config_path: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let binance_client = BinanceClient::new().await?;
-    let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin> =
+    let _binance_client = BinanceClient::new().await?;
+    let mut trade_stream: Box<dyn futures_util::Stream<Item = Trade> + Unpin + Send> =
         if source.starts_with("http") {
-            Box::new(binance_client.trade_data(source).await?)
+            Box::new(BinanceClient::trade_data(source).await?)
         } else {
-            Box::new(binance_client.trade_data_from_path(source).await?)
+            Box::new(BinanceClient::trade_data_from_path(source).await?)
         };
 
     let cfg = TradingConfig::from_file(config_path)?;
@@ -29,6 +29,7 @@ pub async fn run_backtest(
         strategy.on_trade(trade.clone().into()).await;
 
         let trade_price = trade.price;
+        #[allow(clippy::cast_precision_loss)]
         let trade_time = trade.trade_time as f64;
 
         let (signal, confidence) =

@@ -16,7 +16,6 @@ struct StochasticHftConfig {
 #[derive(serde::Deserialize)]
 struct GeneralConfig {
     strategy_name: String,
-    base_size: f64,
 }
 
 #[derive(serde::Deserialize)]
@@ -30,10 +29,10 @@ struct StochasticConfig {
 
 #[derive(serde::Deserialize)]
 struct SignalsConfig {
-    min_confidence: f64,
-    oversold_confidence: f64,
-    overbought_confidence: f64,
-    crossover_confidence: f64,
+    min: f64,
+    oversold: f64,
+    overbought: f64,
+    crossover: f64,
 }
 
 #[derive(serde::Deserialize)]
@@ -98,10 +97,25 @@ struct TradeRecord {
 }
 
 impl StochasticHftStrategy {
+    /// # Panics
+    ///
+    /// Panics if the configuration file cannot be loaded.
+    #[must_use]
     pub fn new() -> Self {
         Self::from_file("config/stochastic_hft_strategy.toml").expect("Failed to load configuration file")
     }
-    
+}
+
+impl Default for StochasticHftStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StochasticHftStrategy {
+    /// # Errors
+    ///
+    /// Will return `Err` if the config file cannot be read or parsed.
     pub fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let content = fs::read_to_string(config_path)?;
         let config: StochasticHftConfig = toml::from_str(&content)?;
@@ -134,18 +148,18 @@ impl StochasticHftStrategy {
     
 
     
-    fn calculate_stochastic(&mut self) -> Option<(f64, f64)> {
+    fn calculate_stochastic(&self) -> Option<(f64, f64)> {
         if self.price_history.len() < self.config.stochastic.k_period {
             return None;
         }
         
-        let prices: Vec<f64> = self.price_history.iter().rev().take(self.config.stochastic.k_period).cloned().collect();
+        let prices: Vec<f64> = self.price_history.iter().rev().take(self.config.stochastic.k_period).copied().collect();
         let current_price = *self.price_history.back().unwrap();
         
         let low_min = prices.iter().fold(f64::INFINITY, |a, &b| a.min(b));
         let high_max = prices.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
         
-        if high_max == low_min {
+        if (high_max - low_min).abs() < f64::EPSILON {
             return Some((50.0, 50.0));
         }
         
@@ -154,6 +168,7 @@ impl StochasticHftStrategy {
         Some((k, 0.0)) // %D will be calculated in update_stochastic
     }
     
+    #[allow(clippy::cast_precision_loss)]
     fn update_stochastic(&mut self) {
         if let Some((k, _)) = self.calculate_stochastic() {
             // Add new %K value first
@@ -161,7 +176,7 @@ impl StochasticHftStrategy {
             
             // Calculate %D from the updated %K buffer
             let d = if self.stochastic_k.len() >= self.config.stochastic.d_period {
-                let k_values: Vec<f64> = self.stochastic_k.iter().rev().take(self.config.stochastic.d_period).cloned().collect();
+                let k_values: Vec<f64> = self.stochastic_k.iter().rev().take(self.config.stochastic.d_period).copied().collect();
                 k_values.iter().sum::<f64>() / k_values.len() as f64
             } else {
                 k
@@ -177,6 +192,7 @@ impl StochasticHftStrategy {
         }
     }
     
+    #[allow(clippy::cast_precision_loss)]
     fn calculate_volatility(&mut self) -> f64 {
         if self.price_history.len() < 20 {
             return 0.0;
@@ -204,6 +220,7 @@ impl StochasticHftStrategy {
         volatility
     }
     
+    #[allow(clippy::cast_precision_loss)]
     fn calculate_trend_strength(&mut self) -> f64 {
         if self.price_history.len() < 50 {
             return 0.0;
@@ -212,7 +229,7 @@ impl StochasticHftStrategy {
         let recent_prices: Vec<f64> = self.price_history.iter()
             .rev()
             .take(50)
-            .cloned()
+            .copied()
             .collect();
         
         // Calculate linear regression R-squared
@@ -269,9 +286,9 @@ impl StochasticHftStrategy {
         
         // Stochastic oversold/overbought signals
         if current_k < self.config.stochastic.oversold && current_d < self.config.stochastic.oversold {
-            buy_signals.push(self.config.signals.oversold_confidence);
+            buy_signals.push(self.config.signals.oversold);
         } else if current_k > self.config.stochastic.overbought && current_d > self.config.stochastic.overbought {
-            sell_signals.push(self.config.signals.overbought_confidence);
+            sell_signals.push(self.config.signals.overbought);
         }
         
         // K/D crossover signals
@@ -279,22 +296,24 @@ impl StochasticHftStrategy {
         let k_d_cross_down = current_k < current_d && *prev_k >= *prev_d;
         
         if k_d_cross_up {
-            buy_signals.push(self.config.signals.crossover_confidence);
+            buy_signals.push(self.config.signals.crossover);
         } else if k_d_cross_down {
-            sell_signals.push(self.config.signals.crossover_confidence);
+            sell_signals.push(self.config.signals.crossover);
         }
         
         // Calculate signal direction and confidence
-        let buy_confidence = if !buy_signals.is_empty() {
-            buy_signals.iter().sum::<f64>() / buy_signals.len() as f64
-        } else {
+        #[allow(clippy::cast_precision_loss)]
+        let buy_confidence = if buy_signals.is_empty() {
             0.0
+        } else {
+            buy_signals.iter().sum::<f64>() / buy_signals.len() as f64
         };
         
-        let sell_confidence = if !sell_signals.is_empty() {
-            sell_signals.iter().sum::<f64>() / sell_signals.len() as f64
-        } else {
+        #[allow(clippy::cast_precision_loss)]
+        let sell_confidence = if sell_signals.is_empty() {
             0.0
+        } else {
+            sell_signals.iter().sum::<f64>() / sell_signals.len() as f64
         };
         
         // Determine final signal and confidence
@@ -310,12 +329,14 @@ impl StochasticHftStrategy {
         let mut adjusted_confidence = base_confidence;
         
         // Trend confirmation
+        #[allow(clippy::cast_precision_loss)]
         let avg_trend = self.trend_strength.iter().sum::<f64>() / self.trend_strength.len().max(1) as f64;
         if avg_trend > 0.3 {
             adjusted_confidence *= 1.2; // Boost confidence in trending markets
         }
         
         // Volatility adjustment
+        #[allow(clippy::cast_precision_loss)]
         let avg_volatility = self.volatility_history.iter().sum::<f64>() / self.volatility_history.len().max(1) as f64;
         if avg_volatility > 0.01 {
             adjusted_confidence *= 0.8; // Reduce confidence in high volatility
@@ -323,7 +344,7 @@ impl StochasticHftStrategy {
         
         let final_confidence = adjusted_confidence.min(1.0);
         
-        if final_confidence >= self.config.signals.min_confidence {
+        if final_confidence >= self.config.signals.min {
             if signal_direction > 0.0 {
                 (Signal::Buy, final_confidence)
             } else if signal_direction < 0.0 {
@@ -370,10 +391,12 @@ impl Strategy for StochasticHftStrategy {
         self.update_indicators();
         
         // Update PnL for current position
+        #[allow(clippy::cast_precision_loss)]
         self.update_pnl(trade.price, trade.time as f64);
         
         // Generate and execute signal
         let (signal, confidence) = self.generate_signal();
+        #[allow(clippy::cast_precision_loss)]
         self.execute_trade(signal, trade.price, trade.time as f64, confidence);
     }
     
@@ -384,6 +407,7 @@ impl Strategy for StochasticHftStrategy {
         _current_position: Position,
     ) -> (Signal, f64) {
         // Check cooldown
+        #[allow(clippy::cast_precision_loss)]
         let cooldown = self.config.risk.signal_cooldown_ms as f64 / 1000.0;
         if current_timestamp - self.last_signal_time < cooldown {
             return (Signal::Hold, 0.0);
@@ -406,6 +430,7 @@ impl Strategy for StochasticHftStrategy {
 
 impl StochasticHftStrategy {
     // PnL calculation methods for backtesting
+    #[allow(clippy::cast_precision_loss)]
     fn update_pnl(&mut self, current_price: f64, _current_time: f64) {
         if self.current_position != 0.0 {
             // Calculate unrealized PnL
@@ -432,7 +457,10 @@ impl StochasticHftStrategy {
     }
     
     fn execute_trade(&mut self, signal: Signal, current_price: f64, current_time: f64, confidence: f64) {
-        let position_size = self.config.general.base_size * confidence;
+        // Use trading_config position sizing: min + (confidence * (max - min))
+        let trading_size_min = 20.0; // From trading_config.toml
+        let trading_size_max = 30.0; // From trading_config.toml
+        let position_size = confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);
         
         match signal {
             Signal::Buy => {
@@ -512,6 +540,7 @@ impl StochasticHftStrategy {
     }
     
     // Get backtesting statistics
+    #[allow(clippy::cast_precision_loss)]
     fn get_backtest_stats(&self) -> BacktestStats {
         let total_trades = self.trades.len();
         let win_rate = if total_trades > 0 {
@@ -557,6 +586,7 @@ impl StochasticHftStrategy {
     }
     
     // Public method to get backtest statistics
+    #[must_use]
     pub fn get_stats(&self) -> BacktestStats {
         self.get_backtest_stats()
     }

@@ -2,6 +2,12 @@
 name = "strategies"
 version = "0.1.0"
 edition = "2024"
+description = "Trading strategies for the Pulsar trading framework."
+license = "MIT"
+repository = "https://github.com/merext/pulsar"
+readme = "README.md"
+keywords = ["trading", "strategies", "crypto"]
+categories = ["algorithms"]
 
 [dependencies]
 async-trait = "0.1"
