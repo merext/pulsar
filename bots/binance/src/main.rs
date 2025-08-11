@@ -17,48 +17,24 @@ use trade::trading_engine::TradingConfig;
 use std::time::Instant;
 use futures_util::StreamExt;
 
-// Unified trading loop that works for all modes
-async fn run_unified_trading(
-    strategy: Box<dyn Strategy>,
-    trading_symbol: &str,
-    trade_mode: TradeMode,
-    data_source: impl futures_util::Stream<Item = Trade> + Unpin + Send,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Create trader based on mode
-    let trader = match trade_mode {
-        TradeMode::Real => {
-            let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
-            let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
-            binance_exchange::trader::BinanceTrader::new(
-                trading_symbol,
-                &api_key,
-                &api_secret,
-                trade_mode,
-            ).await?
-        }
-        TradeMode::Emulated | TradeMode::Backtest => {
-            let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
-            let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
-            binance_exchange::trader::BinanceTrader::new(
-                trading_symbol,
-                &api_key,
-                &api_secret,
-                trade_mode,
-            ).await?
-        }
-    };
 
-    // Run the unified trading loop
-    run_trade_loop(strategy, trader, data_source, trade_mode).await
-}
 
 #[allow(clippy::too_many_lines)]
 async fn run_trade_loop(
     mut strategy: Box<dyn Strategy>,
-    mut binance_trader: BinanceTrader,
-    trade_data: impl futures_util::Stream<Item = trade::models::Trade> + Unpin,
+    trading_symbol: &str,
     trade_mode: TradeMode,
+    trade_data: impl futures_util::Stream<Item = trade::models::Trade> + Unpin,
+    api_key: &str,
+    api_secret: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Create trader based on mode
+    let mut binance_trader = BinanceTrader::new(
+        trading_symbol,
+        api_key,
+        api_secret,
+        trade_mode,
+    ).await?;
     let mut current_position = trade::trader::Position {
         symbol: "DOGEUSDT".to_string(),
         quantity: 0.0,
@@ -350,9 +326,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let trading_symbol = get_config_value(&trading_config, "position_sizing.trading_symbol")
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
-    // Create StochasticHftStrategy strategy instance
-    let strategy = StochasticHftStrategy::new();
-
+    // Create strategy and trader once
+    let strategy = Box::new(StochasticHftStrategy::new());
+    let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
+    let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
+    
     info!("Trading strategy: {}", strategy.get_info());
 
     match cli.command {
@@ -363,12 +341,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let binance_client = BinanceClient::new().await?;
             let live_trade_stream = binance_client.trade_stream(&trading_symbol).await?;
             
-            // Use unified trading loop with real mode
-            run_unified_trading(
-                Box::new(strategy), 
+            // Run trading loop directly
+            run_trade_loop(
+                strategy, 
                 &trading_symbol, 
                 TradeMode::Real.clone(), 
-                live_trade_stream
+                live_trade_stream,
+                &api_key,
+                &api_secret
             ).await?;
         }
         Commands::Emulate => {
@@ -378,31 +358,31 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let binance_client = BinanceClient::new().await?;
             let live_trade_stream = binance_client.trade_stream(&trading_symbol).await?;
             
-            // Use unified trading loop with emulated mode
-            run_unified_trading(
-                Box::new(strategy), 
+            // Run trading loop directly
+            run_trade_loop(
+                strategy, 
                 &trading_symbol, 
                 TradeMode::Emulated.clone(), 
-                live_trade_stream
+                live_trade_stream,
+                &api_key,
+                &api_secret
             ).await?;
         }
         Commands::Backtest { path, url } => {
-            let selected_strategy = create_strategy("stochastic");
-            
-            info!("Using strategy: {}", selected_strategy.get_info());
-            
             if let Some(data_path) = path {
                 info!("Starting BACKTEST with historical data from: {}", data_path);
                 
                 // Create historical data stream for backtesting
                 let historical_trade_stream = BinanceClient::trade_data_from_path(&data_path).await?;
                 
-                // Use unified trading loop with backtest mode
-                run_unified_trading(
-                    selected_strategy, 
+                // Run trading loop directly
+                run_trade_loop(
+                    strategy, 
                     &trading_symbol, 
                     TradeMode::Backtest.clone(), 
-                    historical_trade_stream
+                    historical_trade_stream,
+                    &api_key,
+                &api_secret
                 ).await?;
             } else if let Some(ws_url) = url {
                 info!("Starting BACKTEST with WebSocket data from: {}", ws_url);
@@ -410,12 +390,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 // Create WebSocket data stream for backtesting
                 let ws_trade_stream = BinanceClient::trade_data(&ws_url).await?;
                 
-                // Use unified trading loop with backtest mode
-                run_unified_trading(
-                    selected_strategy, 
+                // Run trading loop directly
+                run_trade_loop(
+                    strategy, 
                     &trading_symbol, 
                     TradeMode::Backtest.clone(), 
-                    ws_trade_stream
+                    ws_trade_stream,
+                    &api_key,
+                    &api_secret
                 ).await?;
             } else {
                 return Err("No data source specified for backtest".into());
