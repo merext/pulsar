@@ -299,9 +299,7 @@ enum Commands {
     Emulate,
     Backtest {
         #[arg(short, long)]
-        url: Option<String>,
-        #[arg(short, long)]
-        path: Option<String>,
+        uri: String,
     },
 }
 
@@ -370,39 +368,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ).await?;
         }
         Commands::Backtest { path, url } => {
-            if let Some(data_path) = path {
-                info!("Starting backtest with historical data from: {}", data_path);
-                
-                // Create historical data stream for backtesting
-                let historical_trade_stream = BinanceClient::trade_data_from_path(&data_path).await?;
-                
-                // Run trading loop directly
-                run_trade_loop(
-                    strategy, 
-                    &trading_symbol, 
-                    TradeMode::Backtest.clone(), 
-                    historical_trade_stream,
-                    &api_key,
+            let data_uri = path.or(url).ok_or("Either --path (local file) or --url (remote URL) must be specified for backtest")?;
+            
+            info!("Starting backtest with data from: {}", data_uri);
+            
+            // Create historical data stream for backtesting from URI (local file or remote URL)
+            let historical_trade_stream = BinanceClient::trade_data_from_uri(&data_uri).await?;
+            
+            // Run trading loop directly
+            run_trade_loop(
+                strategy, 
+                &trading_symbol, 
+                TradeMode::Backtest.clone(), 
+                historical_trade_stream,
+                &api_key,
                 &api_secret
-                ).await?;
-            } else if let Some(ws_url) = url {
-                info!("Starting backtest with WebSocket data from: {}", ws_url);
-                
-                // Create WebSocket data stream for backtesting
-                let ws_trade_stream = BinanceClient::trade_data(&ws_url).await?;
-                
-                // Run trading loop directly
-                run_trade_loop(
-                    strategy, 
-                    &trading_symbol, 
-                    TradeMode::Backtest.clone(), 
-                    ws_trade_stream,
-                    &api_key,
-                    &api_secret
-                ).await?;
-            } else {
-                return Err("No data source specified for backtest".into());
-            }
+            ).await?;
         }
     }
 
