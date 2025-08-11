@@ -3,9 +3,13 @@ use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
 use tokio_stream::StreamExt;
 use tracing::{debug, info};
-use trade::signal::Signal;
-use trade::trader::{TradeMode, Trader};
-use trade::trading_engine::TradingConfig;
+use trade::{
+    models::{Signal, TradeData},
+    trader::{Position, Trader},
+    trading_engine::TradingEngine,
+    TradingConfig,
+};
+use std::time::Instant;
 
 #[allow(clippy::too_many_lines)]
 pub async fn run_trade(
@@ -113,27 +117,13 @@ pub async fn run_trade(
             1.0, // trading_size_step - use 1.0 for DOGEUSDT
         );
 
-        // Log BUY/SELL signals at info level with structured format
-        match final_signal {
-            Signal::Buy | Signal::Sell => {
-                info!(
-                    signal = %final_signal,
-                    confidence = %format!("{:.2}", confidence),
-                    position = ?current_position,
-                    unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
-                    realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
-                );
-            }
-            Signal::Hold => {
-                // Only log HOLD at debug level
-                debug!(
-                    signal = %final_signal,
-                    confidence = %format!("{:.2}", confidence),
-                    position = ?current_position,
-                    unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
-                    realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
-                );
-            }
+        // Only log HOLD signals at debug level (no execution)
+        if matches!(final_signal, Signal::Hold) {
+            debug!(
+                signal = %final_signal,
+                confidence = %format!("{:.2}", confidence),
+                position = %current_position
+            );
         }
 
         match trade_mode {
@@ -143,9 +133,73 @@ pub async fn run_trade(
                     .await;
             }
             TradeMode::Emulated => {
-                binance_trader
-                    .on_emulate(final_signal, trade_price, quantity_to_trade)
-                    .await;
+                // Record execution start time for latency measurement
+                let execution_start = Instant::now();
+                
+                // Simulate realistic network latency (1-5ms typical for HFT)
+                let network_latency = if matches!(final_signal, Signal::Buy | Signal::Sell) {
+                    // Simulate variable latency based on market conditions
+                    let base_latency = 1.0; // 1ms base
+                    let volatility_factor = (trade_price - current_position.entry_price).abs() / trade_price;
+                    let latency_variance = (volatility_factor * 4.0).min(4.0); // 0-4ms additional
+                    std::time::Duration::from_millis((base_latency + latency_variance) as u64)
+                } else {
+                    std::time::Duration::from_millis(0)
+                };
+
+                // Simulate network delay
+                if !network_latency.is_zero() {
+                    tokio::time::sleep(network_latency).await;
+                }
+
+                // Use TradingEngine for realistic trade execution simulation
+                let trade_result = if let Some(engine) = &mut trading_engine {
+                    engine.on_emulate(final_signal, trade_price, quantity_to_trade).await
+                } else {
+                    // Fallback to BinanceTrader if TradingEngine not available
+                    binance_trader.on_emulate(final_signal, trade_price, quantity_to_trade).await
+                };
+
+                // Calculate total execution time including simulated latency
+                let total_execution_time = execution_start.elapsed();
+                let computational_latency = total_execution_time.saturating_sub(network_latency);
+
+                // Log executed trades with detailed execution metrics
+                if matches!(final_signal, Signal::Buy | Signal::Sell) {
+                    if let Some((fill_price, fees, slippage, rebates, order_type)) = trade_result {
+                        info!(
+                            signal = %final_signal,
+                            confidence = %format!("{:.2}", confidence),
+                            price = format!("{:.8}", trade_price),
+                            fill_price = format!("{:.8}", fill_price),
+                            quantity = format!("{:.2}", quantity_to_trade),
+                            order_type = %order_type,
+                            fees = format!("{:.8}", fees),
+                            slippage = format!("{:.8}", slippage),
+                            rebates = format!("{:.8}", rebates),
+                            computational_latency = format!("{:?}", computational_latency),
+                            network_latency = format!("{:?}", network_latency),
+                            total_latency = format!("{:?}", total_execution_time),
+                            position = %current_position,
+                            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+                            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
+                        );
+                    } else {
+                        // Fallback logging if trade_result is None
+                        info!(
+                            signal = %final_signal,
+                            confidence = %format!("{:.2}", confidence),
+                            price = format!("{:.8}", trade_price),
+                            quantity = format!("{:.2}", quantity_to_trade),
+                            computational_latency = format!("{:?}", computational_latency),
+                            network_latency = format!("{:?}", network_latency),
+                            total_latency = format!("{:?}", total_execution_time),
+                            position = %current_position,
+                            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+                            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
+                        );
+                    }
+                }
             }
         }
     }

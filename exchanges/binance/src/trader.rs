@@ -10,7 +10,7 @@ use rust_decimal_macros::dec;
 use tracing::{error, debug, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
-use trade::trading_engine::TradingConfig;
+use trade::trading_engine::{TradingConfig, OrderType};
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
@@ -306,7 +306,7 @@ impl Trader for BinanceTrader {
         }
     }
 
-    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) {
+    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) -> Option<(f64, f64, f64, f64, OrderType)> {
         let symbol = self.position.symbol.clone();
         let quantity = Decimal::from_f64(quantity).unwrap_or(dec!(0.0)); // Updated quantity conversion
 
@@ -323,6 +323,11 @@ impl Trader for BinanceTrader {
                     // Simulate a buy in emulated mode
                     self.position.quantity = quantity.to_f64().unwrap_or(0.0);
                     self.position.entry_price = price;
+                    
+                    // Return simulated trade details for logging
+                    Some((price, 0.0, 0.0, 0.0, OrderType::Market))
+                } else {
+                    None
                 }
             }
             Signal::Sell => {
@@ -340,10 +345,16 @@ impl Trader for BinanceTrader {
                     // Simulate a sell in emulated mode
                     self.position.quantity = 0.0;
                     self.position.entry_price = 0.0;
+                    
+                    // Return simulated trade details for logging
+                    Some((price, 0.0, 0.0, 0.0, OrderType::Market))
+                } else {
+                    None
                 }
             }
             Signal::Hold => {
                 // Do nothing
+                None
             }
         }
     }

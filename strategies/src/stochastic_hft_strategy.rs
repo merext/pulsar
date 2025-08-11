@@ -419,7 +419,7 @@ impl Strategy for StochasticHftStrategy {
         &self,
         _current_price: f64,
         current_timestamp: f64,
-        _current_position: Position,
+        current_position: Position,
     ) -> (Signal, f64) {
         // Check cooldown
         #[allow(clippy::cast_precision_loss)]
@@ -438,8 +438,35 @@ impl Strategy for StochasticHftStrategy {
             return (Signal::Hold, 0.0);
         }
         
-        // Generate signal based on Stochastic Oscillator
-        self.generate_signal()
+        // Generate base signal based on Stochastic Oscillator
+        let (base_signal, confidence) = self.generate_signal();
+        
+        // Position-aware signal filtering with minimum holding time
+        match base_signal {
+            Signal::Buy => {
+                // Only generate BUY if we don't have a long position
+                if current_position.quantity <= 0.0 {
+                    (Signal::Buy, confidence)
+                } else {
+                    (Signal::Hold, 0.0)
+                }
+            }
+            Signal::Sell => {
+                // Only generate SELL if we have a long position and have held it for minimum time
+                if current_position.quantity > 0.0 {
+                    // Minimum holding time of 30 seconds to avoid overtrading
+                    let min_hold_time = 30.0; // seconds
+                    if current_timestamp - self.entry_time >= min_hold_time {
+                        (Signal::Sell, confidence)
+                    } else {
+                        (Signal::Hold, 0.0)
+                    }
+                } else {
+                    (Signal::Hold, 0.0)
+                }
+            }
+            Signal::Hold => (Signal::Hold, 0.0),
+        }
     }
 }
 

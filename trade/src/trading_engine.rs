@@ -855,7 +855,7 @@ impl Trader for TradingEngine {
         self.on_emulate(signal, price, quantity).await;
     }
 
-    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) {
+    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) -> Option<(f64, f64, f64, f64, OrderType)> {
         // Use current system time for backtesting (in real implementation, this would come from trade data)
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -891,7 +891,7 @@ impl Trader for TradingEngine {
                         slippage,
                         rebates,
                         pnl: 0.0, // Will be calculated on sell
-                        order_type,
+                        order_type: order_type.clone(),
                     };
 
                     self.metrics.record_trade(record);
@@ -900,6 +900,10 @@ impl Trader for TradingEngine {
                         "BUY: price={:.6}, qty={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}",
                         fill_price, fill_quantity, fees, rebates, slippage
                     );
+                    
+                    Some((fill_price, fees, slippage, rebates, order_type))
+                } else {
+                    None
                 }
             }
             Signal::Sell => {
@@ -929,7 +933,7 @@ impl Trader for TradingEngine {
                         slippage,
                         rebates,
                         pnl,
-                        order_type,
+                        order_type: order_type.clone(),
                     };
 
                     self.metrics.record_trade(record);
@@ -939,10 +943,15 @@ impl Trader for TradingEngine {
                         "SELL: price={:.6}, qty={:.6}, pnl={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}, net_revenue={:.6}",
                         fill_price, sell_quantity, pnl, fees, rebates, slippage, net_revenue
                     );
+                    
+                    Some((fill_price, fees, slippage, rebates, order_type))
+                } else {
+                    None
                 }
             }
             Signal::Hold => {
                 // Do nothing
+                None
             }
         }
     }
