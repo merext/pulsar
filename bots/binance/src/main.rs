@@ -367,13 +367,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &api_secret
             ).await?;
         }
-        Commands::Backtest { path, url } => {
-            let data_uri = path.or(url).ok_or("Either --path (local file) or --url (remote URL) must be specified for backtest")?;
-            
-            info!("Starting backtest with data from: {}", data_uri);
+        Commands::Backtest { uri } => {
+            info!("Starting backtest with data from: {}", uri);
             
             // Create historical data stream for backtesting from URI (local file or remote URL)
-            let historical_trade_stream = BinanceClient::trade_data_from_uri(&data_uri).await?;
+            let historical_trade_stream = BinanceClient::trade_data_from_uri(&uri).await?;
             
             // Run trading loop directly
             run_trade_loop(
