@@ -129,7 +129,7 @@ impl StochasticHftStrategy {
             volatility_history: VecDeque::with_capacity(100),
             trend_strength: VecDeque::with_capacity(100),
             trade_counter: 0,
-            last_signal_time: 0.0,
+            last_signal_time: -1000.0, // Initialize to allow immediate signals
             consecutive_losses: 0,
             current_position: 0.0,
             entry_price: 0.0,
@@ -174,8 +174,18 @@ impl StochasticHftStrategy {
             // Add new %K value first
             self.stochastic_k.push_back(k);
             
-            // Calculate %D from the updated %K buffer
+            // Debug logging for stochastic values
+            if self.stochastic_k.len() % 50 == 0 {
+                tracing::info!(
+                    price_history_size = self.price_history.len(),
+                    stochastic_k = k,
+                    "Stochastic calculation update"
+                );
+            }
+            
+            // Calculate %D as a moving average of %K values
             let d = if self.stochastic_k.len() >= self.config.stochastic.d_period {
+                // Use the most recent d_period %K values for %D calculation
                 let k_values: Vec<f64> = self.stochastic_k.iter().rev().take(self.config.stochastic.d_period).copied().collect();
                 k_values.iter().sum::<f64>() / k_values.len() as f64
             } else {
@@ -271,6 +281,13 @@ impl StochasticHftStrategy {
     
     fn generate_signal(&self) -> (Signal, f64) {
         if self.stochastic_k.len() < 2 || self.stochastic_d.len() < 2 {
+            if self.stochastic_k.len() % 100 == 0 {
+                tracing::info!(
+                    k_buffer_size = self.stochastic_k.len(),
+                    d_buffer_size = self.stochastic_d.len(),
+                    "Not enough stochastic data for signal generation"
+                );
+            }
             return (Signal::Hold, 0.0);
         }
         
@@ -286,11 +303,57 @@ impl StochasticHftStrategy {
         let mut buy_signals = Vec::new();
         let mut sell_signals = Vec::new();
         
-        // Stochastic oversold/overbought signals
-        if current_k < self.config.stochastic.oversold && current_d < self.config.stochastic.oversold {
+        // Stochastic oversold/overbought signals - more sensitive for historical data
+        if current_k < self.config.stochastic.oversold {
             buy_signals.push(self.config.signals.oversold);
-        } else if current_k > self.config.stochastic.overbought && current_d > self.config.stochastic.overbought {
+            if self.stochastic_k.len() % 50 == 0 {
+                tracing::info!(
+                    stochastic_k = current_k,
+                    oversold_threshold = self.config.stochastic.oversold,
+                    "Buy signal generated from oversold condition"
+                );
+            }
+        } else if current_k > self.config.stochastic.overbought {
             sell_signals.push(self.config.signals.overbought);
+            if self.stochastic_k.len() % 50 == 0 {
+                tracing::info!(
+                    stochastic_k = current_k,
+                    overbought_threshold = self.config.stochastic.overbought,
+                    "Sell signal generated from overbought condition"
+                );
+            }
+        }
+        
+        // Alternative signals for low-volatility historical data
+        // When stochastic is at extremes (0 or 100), use momentum-based signals
+        if current_k <= 5.0 && self.price_history.len() >= 20 {
+            // Very oversold - check for price momentum reversal
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(20).copied().collect();
+            let price_momentum = (recent_prices[0] - recent_prices[19]) / recent_prices[19];
+            if price_momentum > 0.001 { // Slight upward momentum
+                buy_signals.push(self.config.signals.oversold * 0.8); // Lower confidence
+                if self.stochastic_k.len() % 50 == 0 {
+                    tracing::info!(
+                        stochastic_k = current_k,
+                        price_momentum = price_momentum,
+                        "Momentum buy signal generated"
+                    );
+                }
+            }
+        } else if current_k >= 95.0 && self.price_history.len() >= 20 {
+            // Very overbought - check for price momentum reversal
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(20).copied().collect();
+            let price_momentum = (recent_prices[0] - recent_prices[19]) / recent_prices[19];
+            if price_momentum < -0.001 { // Slight downward momentum
+                sell_signals.push(self.config.signals.overbought * 0.8); // Lower confidence
+                if self.stochastic_k.len() % 50 == 0 {
+                    tracing::info!(
+                        stochastic_k = current_k,
+                        price_momentum = price_momentum,
+                        "Momentum sell signal generated"
+                    );
+                }
+            }
         }
         
         // K/D crossover signals
@@ -361,6 +424,17 @@ impl StochasticHftStrategy {
         
         let final_confidence = adjusted_confidence.min(1.0);
         
+                // Debug logging for stochastic values
+        if self.stochastic_k.len() % 100 == 0 {
+            tracing::info!(
+                stochastic_k = current_k,
+                stochastic_d = current_d,
+                confidence = final_confidence,
+                direction = signal_direction,
+                "Stochastic signal calculation complete"
+            );
+        }
+        
         if final_confidence >= self.config.signals.min {
             if signal_direction > 0.0 {
                 (Signal::Buy, final_confidence)
@@ -425,29 +499,71 @@ impl Strategy for StochasticHftStrategy {
         #[allow(clippy::cast_precision_loss)]
         let cooldown = self.config.risk.signal_cooldown_ms as f64 / 1000.0;
         if current_timestamp - self.last_signal_time < cooldown {
+            if self.stochastic_k.len() % 100 == 0 {
+                tracing::info!(
+                    time_since_last_signal = current_timestamp - self.last_signal_time,
+                    cooldown_duration = cooldown,
+                    "Signal generation blocked by cooldown"
+                );
+            }
             return (Signal::Hold, 0.0);
         }
         
         // Check if we have enough data
         if self.price_history.len() < self.config.stochastic.k_period {
+            if self.stochastic_k.len() % 100 == 0 {
+                tracing::info!(
+                    current_price_count = self.price_history.len(),
+                    required_price_count = self.config.stochastic.k_period,
+                    "Not enough price data for signal generation"
+                );
+            }
             return (Signal::Hold, 0.0);
         }
         
         // Check risk management
         if self.consecutive_losses >= self.config.risk.max_consecutive_losses {
+            if self.stochastic_k.len() % 100 == 0 {
+                tracing::info!(
+                    consecutive_losses = self.consecutive_losses,
+                    max_consecutive_losses = self.config.risk.max_consecutive_losses,
+                    "Risk management triggered - consecutive losses limit reached"
+                );
+            }
             return (Signal::Hold, 0.0);
         }
         
         // Generate base signal based on Stochastic Oscillator
         let (base_signal, confidence) = self.generate_signal();
         
+        // Debug logging for signal generation
+        if self.stochastic_k.len() % 100 == 0 {
+            tracing::info!(
+                signal = format!("{:?}", base_signal),
+                confidence = confidence,
+                "Base signal generated"
+            );
+        }
+        
         // Position-aware signal filtering with minimum holding time
         match base_signal {
             Signal::Buy => {
                 // Only generate BUY if we don't have a long position
                 if current_position.quantity <= 0.0 {
+                    if self.stochastic_k.len() % 100 == 0 {
+                        tracing::info!(
+                            current_position = current_position.quantity,
+                            "BUY signal approved"
+                        );
+                    }
                     (Signal::Buy, confidence)
                 } else {
+                    if self.stochastic_k.len() % 100 == 0 {
+                        tracing::info!(
+                            "BUY signal rejected - already have position",
+                            current_position = current_position.quantity
+                        );
+                    }
                     (Signal::Hold, 0.0)
                 }
             }
@@ -456,12 +572,33 @@ impl Strategy for StochasticHftStrategy {
                 if current_position.quantity > 0.0 {
                     // Minimum holding time of 30 seconds to avoid overtrading
                     let min_hold_time = 30.0; // seconds
-                    if current_timestamp - self.entry_time >= min_hold_time {
+                    let holding_time = current_timestamp - self.entry_time;
+                    if holding_time >= min_hold_time {
+                        if self.stochastic_k.len() % 100 == 0 {
+                            tracing::info!(
+                                "SELL signal approved",
+                                holding_time = holding_time,
+                                min_hold_time = min_hold_time
+                            );
+                        }
                         (Signal::Sell, confidence)
                     } else {
+                        if self.stochastic_k.len() % 100 == 0 {
+                            tracing::info!(
+                                "SELL signal rejected - holding time too short",
+                                holding_time = holding_time,
+                                min_hold_time = min_hold_time
+                            );
+                        }
                         (Signal::Hold, 0.0)
                     }
                 } else {
+                    if self.stochastic_k.len() % 100 == 0 {
+                        tracing::info!(
+                            "SELL signal rejected - no position",
+                            current_position = current_position.quantity
+                        );
+                    }
                     (Signal::Hold, 0.0)
                 }
             }

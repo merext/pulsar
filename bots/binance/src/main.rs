@@ -1,17 +1,19 @@
-use ::trade::trader::TradeMode;
-use clap::{Parser, Subcommand};
-use std::env;
 use std::error::Error;
 use std::fs;
+use std::env;
 use toml::Value;
+use clap::{Parser, Subcommand};
 use strategies::StochasticHftStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
+use ::trade::trader::TradeMode;
+use binance_exchange::BinanceClient;
+
 
 mod backtest;
 mod trade;
 
-use ::trade::TradingConfig;
+
 
 fn load_config<P: AsRef<std::path::Path>>(config_path: P) -> Result<Value, Box<dyn Error>> {
     let content = fs::read_to_string(config_path)?;
@@ -100,30 +102,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     match cli.command {
         Commands::Trade => {
-            info!("Starting live trading...");
-            let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
+            let binance_trader = binance_exchange::trader::BinanceTrader::new(
                 &trading_symbol,
                 &api_key,
                 &api_secret,
                 TradeMode::Real,
-            )
-            .await?;
-
-            let config = TradingConfig::from_file("config/trading_config.toml")?;
-            trade::run_trade(config, TradeMode::Real, &api_key, &api_secret, strategy, &mut binance_trader).await?;
+            ).await?;
+            
+            info!("Starting LIVE TRADING with real WebSocket stream for {}...", trading_symbol);
+            
+            // Create live WebSocket trade stream for real trading
+            let binance_client = BinanceClient::new().await?;
+            let live_trade_stream = binance_client.trade_stream(&trading_symbol).await?;
+            
+            // Run live trading with real-time WebSocket stream
+            trade::run_trade_loop(Box::new(strategy), binance_trader, live_trade_stream, TradeMode::Real).await?;
         }
         Commands::Emulate => {
-            info!("Starting emulated trading...");
-            let mut binance_trader = binance_exchange::trader::BinanceTrader::new(
+            let binance_trader = binance_exchange::trader::BinanceTrader::new(
                 &trading_symbol,
                 &api_key,
                 &api_secret,
                 TradeMode::Emulated,
-            )
-            .await?;
-
-            let config = TradingConfig::from_file("config/trading_config.toml")?;
-            trade::run_trade(config, TradeMode::Emulated, &api_key, &api_secret, strategy, &mut binance_trader).await?;
+            ).await?;
+            
+            info!("Starting LIVE EMULATION with real WebSocket stream for {}...", trading_symbol);
+            
+            // Create live WebSocket trade stream for continuous emulation
+            let binance_client = BinanceClient::new().await?;
+            let live_trade_stream = binance_client.trade_stream(&trading_symbol).await?;
+            
+            // Run live emulation with real-time WebSocket stream
+            trade::run_trade_loop(Box::new(strategy), binance_trader, live_trade_stream, TradeMode::Emulated).await?;
         }
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {

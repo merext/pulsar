@@ -527,8 +527,12 @@ impl Strategy for CorrelationDiversifiedPortfolioStrategy {
         
         // Debug logging
         if self.trade_counter < 10 {
-            println!("DEBUG: Signal: {:?}, Confidence: {:.3}, Assets: {}", 
-                     signal, confidence, self.assets.len());
+                    tracing::info!(
+            "Portfolio signal generated",
+            signal = format!("{:?}", signal),
+            confidence = confidence,
+            asset_count = self.assets.len()
+        );
         }
         
         // Execute trade based on signal

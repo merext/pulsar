@@ -2,13 +2,13 @@
 strategy_name = "StochasticHftStrategy"
 
 [stochastic]
-# Conservative Stochastic settings for high-quality signals
-k_period = 21
-d_period = 7
-oversold = 15.0
-overbought = 85.0
-# Increased buffer capacity for more stable calculations
-buffer_capacity = 2000
+# More sensitive Stochastic settings for historical data
+k_period = 14
+d_period = 3
+oversold = 30.0
+overbought = 70.0
+# Reduced buffer capacity for faster response
+buffer_capacity = 1000
 
 [signals]
 # High confidence thresholds for quality signals

@@ -1,119 +1,69 @@
-use binance_exchange::client::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use strategies::strategy::Strategy;
-use tokio_stream::StreamExt;
 use tracing::{debug, info};
-use trade::{
-    models::{Signal, TradeData},
-    trader::{Position, Trader},
-    trading_engine::TradingEngine,
-    TradingConfig,
-};
+use trade::signal::Signal;
+use trade::trader::{TradeMode, Trader};
+use trade::trading_engine::TradingConfig;
 use std::time::Instant;
+use futures_util::StreamExt;
 
 #[allow(clippy::too_many_lines)]
-pub async fn run_trade(
-    config: TradingConfig,
+pub async fn run_trade_loop(
+    mut strategy: Box<dyn Strategy>,
+    mut binance_trader: BinanceTrader,
+    trade_data: impl futures_util::Stream<Item = trade::models::Trade> + Unpin,
     trade_mode: TradeMode,
-    _api_key: &str,
-    _api_secret: &str,
-    mut strategy: impl Strategy + Send,
-    binance_trader: &mut BinanceTrader,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let binance_client = BinanceClient::new()
-        .await
-        .expect("Failed to create Binance client");
+    let mut current_position = trade::trader::Position {
+        symbol: "DOGEUSDT".to_string(),
+        quantity: 0.0,
+        entry_price: 0.0,
+    };
 
-    let trading_symbol = config.position_sizing.trading_symbol.clone();
-    let mut trade_stream = binance_client
-        .trade_stream(&trading_symbol)
-        .await
-        .expect("Failed to get trade stream");
-
-    info!(
-        "Starting to consume trade stream for {}",
-        trading_symbol
-    );
-    let mut last_position_change_time = 0.0;
-    let mut last_position_quantity = 0.0;
-    let cooldown_period = 2.0; // 2 seconds cooldown after position change
-
-    // Process trade stream
-    loop {
-        let trade = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            trade_stream.next(),
-        )
-        .await
-        {
-            Ok(Some(trade)) => trade,
-            Ok(None) => {
-                // Stream ended, break the loop
-                break Ok(());
+    // Create TradingEngine for emulated mode with realistic calculations
+    let mut trading_engine = if matches!(trade_mode, TradeMode::Emulated) {
+        match TradingConfig::from_file("config/trading_config.toml") {
+            Ok(config) => {
+                match trade::trading_engine::TradingEngine::new_with_config("DOGEUSDT", config) {
+                    Ok(engine) => Some(engine),
+                    Err(_) => None,
+                }
             }
-            Err(_) => {
-                // Timeout occurred, continue to the next iteration
-                continue;
-            }
-        };
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
 
+    let mut trade_stream = trade_data;
+    let mut trade_count = 0;
+
+    while let Some(trade) = trade_stream.next().await {
+        trade_count += 1;
+        
+        // Update strategy with trade data
         strategy.on_trade(trade.clone().into()).await;
 
         let trade_price = trade.price;
-        #[allow(clippy::cast_precision_loss)]
-        let trade_time = trade.trade_time as f64;
-        let current_position = binance_trader.position();
+        let trade_time = trade.event_time as f64;
 
-        // Check if position has changed recently
-        let time_since_position_change = trade_time - last_position_change_time;
-        let position_has_changed = (current_position.quantity - last_position_quantity).abs() > f64::EPSILON;
-
-        if position_has_changed {
-            last_position_change_time = trade_time;
-            last_position_quantity = current_position.quantity;
-        }
-
-        // Skip signal generation if we're in cooldown period after position change
-        if time_since_position_change < cooldown_period && position_has_changed {
-            debug!(
-                "Skipping signal generation due to cooldown period. Time since position change: {:.2}s",
-                time_since_position_change
-            );
-            continue;
-        }
-
-        let (signal, confidence) =
+        // Get signal from strategy
+        let (final_signal, confidence) = 
             strategy.get_signal(trade_price, trade_time, current_position.clone());
 
-        // Additional position-aware signal filtering
-        let final_signal = match signal {
-            Signal::Buy => {
-                if current_position.quantity > 0.0 {
-                    debug!("Ignoring BUY signal - already have position");
-                    Signal::Hold
-                } else {
-                    Signal::Buy
-                }
-            }
-            Signal::Sell => {
-                if current_position.quantity == 0.0 {
-                    debug!("Ignoring SELL signal - no position to sell");
-                    Signal::Hold
-                } else {
-                    Signal::Sell
-                }
-            }
-            Signal::Hold => Signal::Hold,
-        };
+        // Debug logging to see what signals are being generated
+        debug!(
+            "Trade {}: Price: {:.8}, Signal: {:?}, Confidence: {:.3}",
+            trade.trade_id, trade_price, final_signal, confidence
+        );
 
-        // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
-        // Use proper trading config values instead of hardcoded zeros
+        // Calculate position size based on confidence and trading config
         let quantity_to_trade = binance_trader.calculate_trade_size(
-            &trading_symbol,
+            &current_position.symbol,
             trade_price,
             confidence,
-            config.position_sizing.trading_size_min,
-            config.position_sizing.trading_size_max,
+            binance_trader.config.position_sizing.trading_size_min,
+            binance_trader.config.position_sizing.trading_size_max,
             1.0, // trading_size_step - use 1.0 for DOGEUSDT
         );
 
@@ -131,6 +81,19 @@ pub async fn run_trade(
                 binance_trader
                     .on_signal(final_signal, trade_price, quantity_to_trade)
                     .await;
+                
+                // Log executed trades for live trading with PnL information
+                if matches!(final_signal, Signal::Buy | Signal::Sell) {
+                    info!(
+                        signal = %final_signal,
+                        confidence = %format!("{:.2}", confidence),
+                        price = format!("{:.8}", trade_price),
+                        quantity = format!("{:.2}", quantity_to_trade),
+                        position = %current_position,
+                        unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+                        realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
+                    );
+                }
             }
             TradeMode::Emulated => {
                 // Record execution start time for latency measurement
@@ -173,7 +136,7 @@ pub async fn run_trade(
                             price = format!("{:.8}", trade_price),
                             fill_price = format!("{:.8}", fill_price),
                             quantity = format!("{:.2}", quantity_to_trade),
-                            order_type = %order_type,
+                            order_type = ?order_type,
                             fees = format!("{:.8}", fees),
                             slippage = format!("{:.8}", slippage),
                             rebates = format!("{:.8}", rebates),
@@ -181,8 +144,8 @@ pub async fn run_trade(
                             network_latency = format!("{:?}", network_latency),
                             total_latency = format!("{:?}", total_execution_time),
                             position = %current_position,
-                            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
-                            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
+                            unrealized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.unrealized_pnl(trade_price) } else { 0.0 }),
+                            realized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.realized_pnl() } else { 0.0 })
                         );
                     } else {
                         // Fallback logging if trade_result is None
@@ -195,12 +158,51 @@ pub async fn run_trade(
                             network_latency = format!("{:?}", network_latency),
                             total_latency = format!("{:?}", total_execution_time),
                             position = %current_position,
-                            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
-                            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
+                            unrealized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.unrealized_pnl(trade_price) } else { 0.0 }),
+                            realized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.realized_pnl() } else { 0.0 })
                         );
                     }
                 }
             }
         }
+
+        // Update current position for display purposes
+        match trade_mode {
+            TradeMode::Real => {
+                current_position = binance_trader.position();
+            }
+            TradeMode::Emulated => {
+                if let Some(engine) = &trading_engine {
+                    current_position = engine.position();
+                }
+            }
+        }
     }
+
+    // Log completion message
+    match trade_mode {
+        TradeMode::Real => {
+            info!("Live trading completed - processed {} trades", trade_count);
+            info!("Final position: {}", current_position);
+            info!("Final PnL: {:.6}", binance_trader.realized_pnl());
+            let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
+            info!("Final Unrealized PnL: {:.6}", binance_trader.unrealized_pnl(last_price));
+        }
+        TradeMode::Emulated => {
+            info!("Emulation completed - processed {} trades", trade_count);
+            info!("Final position: {}", current_position);
+            
+            // Use TradingEngine PnL if available, otherwise fallback to BinanceTrader
+            if let Some(engine) = &trading_engine {
+                info!("Final PnL: {:.6}", engine.realized_pnl());
+                // For unrealized PnL, we need a current price - use the last known price or 0
+                let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
+                info!("Final Unrealized PnL: {:.6}", engine.unrealized_pnl(last_price));
+            } else {
+                info!("Final PnL: {:.6}", binance_trader.realized_pnl());
+            }
+        }
+    }
+
+    Ok(())
 }

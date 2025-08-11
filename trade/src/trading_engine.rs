@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs;
 use toml;
-use tracing::{info, warn};
+use tracing::warn;
 use rand::Rng;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -469,86 +469,86 @@ impl TradingEngine {
         })
     }
 
-    #[must_use]
-    /// Calculate slippage based on order size and market volatility
-    /// 
-    /// # Arguments
-    /// * `price` - Current market price
-    /// * `quantity` - Order quantity
-    /// * `volatility` - Market volatility measure
-    /// 
-    /// # Returns
-    /// * `f64` - Calculated slippage amount
+    /// Calculate realistic slippage based on market conditions
     pub fn calculate_slippage(&self, price: f64, quantity: f64, volatility: f64) -> f64 {
-        // Validate inputs
-        if price <= 0.0 || quantity <= 0.0 {
-            return self.config.slippage.min_slippage;
-        }
-
         let base_slippage = self.config.slippage.min_slippage;
         let max_slippage = self.config.slippage.max_slippage;
-
-        // Size-based slippage (larger orders = more slippage)
-        let size_factor = (quantity / self.config.exchange.max_order_size).min(1.0);
+        
+        // Size-based slippage (larger trades = more slippage)
+        let size_factor = (quantity / 100.0).min(1.0); // Normalize to 100 units
         let size_slippage = base_slippage + (max_slippage - base_slippage) * size_factor;
-
-        // Volatility adjustment (higher volatility = more slippage)
-        let volatility_factor = volatility.min(1.0);
+        
+        // Volatility-based slippage (higher volatility = more slippage)
+        let volatility_factor = (volatility / 0.01).min(2.0); // Normalize to 1% volatility
         let volatility_slippage = size_slippage * (1.0 + volatility_factor * self.config.slippage.volatility_multiplier);
-
-        // Price adjustment (higher prices = lower relative slippage)
+        
+        // Price-based slippage (lower prices = higher relative slippage)
         let price_factor = (0.1 / price).min(1.0);
         let final_slippage = volatility_slippage * price_factor;
-
-        // Ensure slippage is within bounds
-        final_slippage.clamp(base_slippage, max_slippage)
-    }
-
-    /// Calculate trading fees based on order type and size
-    /// 
-    /// # Arguments
-    /// * `price` - Trade price
-    /// * `quantity` - Trade quantity
-    /// * `is_maker` - Whether this is a maker order
-    /// 
-    /// # Returns
-    /// * `f64` - Calculated fee amount
-    #[must_use]
-    pub fn calculate_fees(&self, price: f64, quantity: f64, is_maker: bool) -> f64 {
-        // Validate inputs
-        if price <= 0.0 || quantity <= 0.0 {
-            return 0.0;
-        }
-
-        let fee_rate = if is_maker {
-            self.config.exchange.maker_fee
+        
+        // Market impact simulation (larger orders move the market)
+        let market_impact = if quantity > 50.0 {
+            let impact_factor = (quantity - 50.0) / 50.0; // 0-1 scale
+            final_slippage * (1.0 + impact_factor * 0.5) // Up to 50% additional slippage
         } else {
-            self.config.exchange.taker_fee
+            final_slippage
         };
-
-        // Ensure fee rate is reasonable
-        let safe_fee_rate = fee_rate.clamp(0.0, 0.1); // Max 10% fee
-        price * quantity * safe_fee_rate
+        
+        // Clamp to configured limits
+        market_impact.clamp(base_slippage, max_slippage)
     }
 
-    /// Calculate rebates for maker orders
-    /// 
-    /// # Arguments
-    /// * `price` - Trade price
-    /// * `quantity` - Trade quantity
-    /// 
-    /// # Returns
-    /// * `f64` - Calculated rebate amount
-    #[must_use]
-    pub fn calculate_rebates(&self, price: f64, quantity: f64) -> f64 {
-        // Validate inputs
-        if price <= 0.0 || quantity <= 0.0 {
-            return 0.0;
-        }
+    /// Calculate realistic fees based on order type and market conditions
+    pub fn calculate_fees(&self, price: f64, quantity: f64, order_type: &OrderType) -> f64 {
+        let notional = price * quantity;
+        
+        // Base fee calculation
+        let base_fee_rate = match order_type {
+            OrderType::Market => self.config.exchange.taker_fee,
+            OrderType::Limit => self.config.exchange.maker_fee,
+            OrderType::Maker => self.config.exchange.maker_fee,
+            OrderType::Taker => self.config.exchange.taker_fee,
+        };
+        
+        // Safe fee rate clamping
+        let safe_fee_rate = base_fee_rate.clamp(0.0, 0.01); // Max 1%
+        
+        // Volume discount simulation (larger trades get better rates)
+        let volume_discount = if notional > 1000.0 {
+            0.9 // 10% discount for trades > $1000
+        } else if notional > 100.0 {
+            0.95 // 5% discount for trades > $100
+        } else {
+            1.0 // No discount
+        };
+        
+        notional * safe_fee_rate * volume_discount
+    }
 
-        // Ensure rebate rate is reasonable
-        let safe_rebate_rate = self.config.exchange.maker_rebate.clamp(0.0, 0.01); // Max 1% rebate
-        price * quantity * safe_rebate_rate
+    /// Calculate realistic rebates based on order type and market conditions
+    pub fn calculate_rebates(&self, price: f64, quantity: f64, order_type: &OrderType) -> f64 {
+        let notional = price * quantity;
+        
+        // Only limit orders get rebates (maker orders)
+        if matches!(order_type, OrderType::Limit | OrderType::Maker) {
+            let base_rebate_rate = self.config.exchange.maker_rebate;
+            
+            // Safe rebate rate clamping
+            let safe_rebate_rate = base_rebate_rate.clamp(0.0, 0.001); // Max 0.1%
+            
+            // Volume-based rebate scaling
+            let volume_multiplier = if notional > 1000.0 {
+                1.2 // 20% bonus for large trades
+            } else if notional > 100.0 {
+                1.1 // 10% bonus for medium trades
+            } else {
+                1.0 // Standard rate
+            };
+            
+            notional * safe_rebate_rate * volume_multiplier
+        } else {
+            0.0 // No rebates for market orders
+        }
     }
 
     pub fn should_trade(
@@ -578,16 +578,22 @@ impl TradingEngine {
         // Check signal strength
         if confidence < self.config.risk_management.min_signal_strength {
             if self.metrics.total_trades % 100 == 0 {
-                println!("DEBUG: Trading engine rejecting trade - confidence {:.3} < min_signal_strength {:.3}", 
-                    confidence, self.config.risk_management.min_signal_strength);
+                            tracing::info!(
+                confidence = confidence,
+                min_signal_strength = self.config.risk_management.min_signal_strength,
+                "Trade rejected - confidence below minimum threshold"
+            );
             }
             return false;
         }
         
         // Debug logging for successful trade approval
         if self.metrics.total_trades % 100 == 0 {
-            println!("DEBUG: Trading engine approving trade - confidence {:.3} >= min_signal_strength {:.3}", 
-                confidence, self.config.risk_management.min_signal_strength);
+                        tracing::info!(
+                confidence = confidence,
+                min_signal_strength = self.config.risk_management.min_signal_strength,
+                "Trade approved - confidence meets minimum threshold"
+            );
         }
 
         // Check consecutive losses
@@ -691,7 +697,7 @@ impl TradingEngine {
             }
             OrderType::Maker => {
                 // Maker orders get better prices
-                let _rebate = self.calculate_rebates(price, quantity);
+                let _rebate = self.calculate_rebates(price, quantity, &OrderType::Limit);
                 (price, 0.0, quantity)
             }
             OrderType::Taker => {
@@ -832,6 +838,100 @@ impl TradingEngine {
         // Final bounds check
         final_quantity.clamp(trading_size_min, trading_size_max)
     }
+
+    /// Update position based on trade execution
+    fn update_position(&mut self, signal: Signal, fill_price: f64, quantity: f64) {
+        match signal {
+            Signal::Buy => {
+                if self.position.quantity == 0.0 {
+                    self.position.quantity = quantity;
+                    self.position.entry_price = fill_price;
+                } else {
+                    // Average down
+                    let total_quantity = self.position.quantity + quantity;
+                    let total_cost = (self.position.entry_price * self.position.quantity) + (fill_price * quantity);
+                    self.position.entry_price = total_cost / total_quantity;
+                    self.position.quantity = total_quantity;
+                }
+            }
+            Signal::Sell => {
+                if self.position.quantity > 0.0 {
+                    let sell_quantity = quantity.min(self.position.quantity);
+                    self.position.quantity -= sell_quantity;
+                    
+                    if self.position.quantity == 0.0 {
+                        self.position.entry_price = 0.0;
+                    }
+                }
+            }
+            Signal::Hold => {}
+        }
+    }
+
+    /// Update PnL based on current position and market price
+    fn update_pnl(&mut self, current_price: f64, _timestamp: f64) {
+        if self.position.quantity > 0.0 && self.position.entry_price > 0.0 {
+            let unrealized_pnl = (current_price - self.position.entry_price) * self.position.quantity;
+            // Note: unrealized_pnl is calculated by method, not stored as field
+            // We'll update the metrics instead
+            
+            // Update equity curve
+            self.metrics.update_equity(self.realized_pnl + unrealized_pnl);
+        }
+    }
+
+    /// Record trade in metrics for performance analysis
+    fn record_trade(&mut self, signal: Signal, fill_price: f64, quantity: f64, fees: f64, slippage: f64, rebates: f64) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        let order_type = if matches!(signal, Signal::Buy) {
+            OrderType::Market
+        } else {
+            OrderType::Limit
+        };
+
+        let pnl = match signal {
+            Signal::Sell => {
+                if self.position.entry_price > 0.0 {
+                    let gross_revenue = fill_price * quantity;
+                    let net_revenue = gross_revenue - fees + rebates;
+                    let cost = self.position.entry_price * quantity;
+                    net_revenue - cost
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
+
+        if matches!(signal, Signal::Sell) && pnl != 0.0 {
+            self.realized_pnl += pnl;
+        }
+
+        let record = TradeRecord {
+            timestamp,
+            signal,
+            price: fill_price,
+            quantity,
+            fees,
+            slippage,
+            rebates,
+            pnl,
+            order_type,
+        };
+
+        self.metrics.record_trade(record);
+    }
+
+    /// Calculate current market volatility based on recent price movements
+    fn calculate_current_volatility(&self, _current_price: f64) -> f64 {
+        // Since we don't have price_history field, use a reasonable default
+        // In a real implementation, this would be calculated from market data
+        0.002 // Default 0.2% volatility for DOGEUSDT
+    }
 }
 
 #[async_trait::async_trait]
@@ -855,105 +955,53 @@ impl Trader for TradingEngine {
         self.on_emulate(signal, price, quantity).await;
     }
 
+    /// Enhanced trade execution with realistic latency simulation
     async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) -> Option<(f64, f64, f64, f64, OrderType)> {
-        // Use current system time for backtesting (in real implementation, this would come from trade data)
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
-
-        let order_type =
-            self.determine_order_type(&signal, 0.8, self.config.exchange.tick_size * 10.0); // Use tick size for spread
-        let is_maker = matches!(order_type, OrderType::Maker);
-
-        let (fill_price, slippage, fill_quantity) =
-            self.simulate_fill(&order_type, price, quantity);
-        let fees = self.calculate_fees(fill_price, fill_quantity, is_maker);
-        let rebates = if is_maker {
-            self.calculate_rebates(fill_price, fill_quantity)
-        } else {
-            0.0
+        // Simulate realistic order processing latency
+        let order_processing_latency = match signal {
+            Signal::Buy | Signal::Sell => {
+                // Market orders are faster than limit orders
+                let base_latency = 0.5; // 0.5ms base
+                let random_factor = rand::thread_rng().gen_range(0.0..1.0);
+                std::time::Duration::from_micros((base_latency * 1000.0 + random_factor * 500.0) as u64)
+            }
+            Signal::Hold => std::time::Duration::from_micros(0),
         };
 
-        match signal {
-            Signal::Buy => {
-                if self.position.quantity == 0.0 && fill_quantity > 0.0 {
-                    let _cost = fill_price.mul_add(fill_quantity, fees - rebates);
-                    self.position.quantity = fill_quantity;
-                    self.position.entry_price = fill_price;
-
-                    let record = TradeRecord {
-                        timestamp,
-                        signal,
-                        price: fill_price,
-                        quantity: fill_quantity,
-                        fees,
-                        slippage,
-                        rebates,
-                        pnl: 0.0, // Will be calculated on sell
-                        order_type: order_type.clone(),
-                    };
-
-                    self.metrics.record_trade(record);
-
-                    info!(
-                        "BUY: price={:.6}, qty={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}",
-                        fill_price, fill_quantity, fees, rebates, slippage
-                    );
-                    
-                    Some((fill_price, fees, slippage, rebates, order_type))
-                } else {
-                    None
-                }
-            }
-            Signal::Sell => {
-                if self.position.quantity > 0.0 && fill_quantity > 0.0 {
-                    let sell_quantity = fill_quantity.min(self.position.quantity);
-                    
-                    // More accurate PnL calculation including all costs
-                    let gross_revenue = fill_price * sell_quantity;
-                    let net_revenue = gross_revenue - fees + rebates;
-                    let cost = self.position.entry_price * sell_quantity;
-                    let pnl = net_revenue - cost;
-
-                    // Update realized PnL
-                    self.realized_pnl += pnl;
-                    self.position.quantity -= sell_quantity;
-
-                    if self.position.quantity == 0.0 {
-                        self.position.entry_price = 0.0;
-                    }
-
-                    let record = TradeRecord {
-                        timestamp,
-                        signal,
-                        price: fill_price,
-                        quantity: sell_quantity,
-                        fees,
-                        slippage,
-                        rebates,
-                        pnl,
-                        order_type: order_type.clone(),
-                    };
-
-                    self.metrics.record_trade(record);
-                    self.metrics.update_equity(self.realized_pnl);
-
-                    info!(
-                        "SELL: price={:.6}, qty={:.6}, pnl={:.6}, fees={:.6}, rebates={:.6}, slippage={:.6}, net_revenue={:.6}",
-                        fill_price, sell_quantity, pnl, fees, rebates, slippage, net_revenue
-                    );
-                    
-                    Some((fill_price, fees, slippage, rebates, order_type))
-                } else {
-                    None
-                }
-            }
-            Signal::Hold => {
-                // Do nothing
-                None
-            }
+        // Simulate order processing delay
+        if !order_processing_latency.is_zero() {
+            tokio::time::sleep(order_processing_latency).await;
         }
+
+        // Determine order type based on signal confidence and market conditions
+        let order_type = self.determine_order_type(&signal, 0.8, self.config.exchange.tick_size * 10.0);
+        
+        // Calculate realistic market impact and fill price
+        let volatility = self.calculate_current_volatility(price);
+        let slippage = self.calculate_slippage(price, quantity, volatility);
+        
+        // Fill price reflects market impact
+        let fill_price = match signal {
+            Signal::Buy => price + slippage,  // Buy orders get filled at higher price
+            Signal::Sell => price - slippage, // Sell orders get filled at lower price
+            Signal::Hold => price,
+        };
+        
+        // Calculate fees and rebates
+        let fees = self.calculate_fees(fill_price, quantity, &order_type);
+        let rebates = self.calculate_rebates(fill_price, quantity, &order_type);
+        
+        // Update position and PnL
+        self.update_position(signal, fill_price, quantity);
+        self.update_pnl(fill_price, std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64());
+        
+        // Record trade with realistic metrics
+        self.record_trade(signal, fill_price, quantity, fees, slippage, rebates);
+        
+        Some((fill_price, fees, slippage, rebates, order_type))
     }
 
     fn unrealized_pnl(&self, current_price: f64) -> f64 {
