@@ -8,7 +8,7 @@ use strategies::strategy::Strategy;
 use tracing::info;
 use ::trade::trader::TradeMode;
 use binance_exchange::BinanceClient;
-use ::trade::Trade;
+
 
 use binance_exchange::trader::BinanceTrader;
 use trade::signal::Signal;
@@ -254,9 +254,7 @@ fn get_config_value<T: ConfigValue>(config: &Value, key: &str) -> Option<T> {
     T::from_config_value(config, key)
 }
 
-fn create_strategy(_strategy_name: &str) -> Box<dyn Strategy> {
-    Box::new(StochasticHftStrategy::new())
-}
+
 
 trait ConfigValue: Sized {
     fn from_config_value(config: &Value, key: &str) -> Option<Self>;
@@ -327,7 +325,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
     // Create strategy and trader once
-    let strategy = Box::new(StochasticHftStrategy::new());
+    let strategy = Box::new(
+        StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
+            .expect("Failed to load StochasticHftStrategy configuration")
+    );
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
     
@@ -335,7 +336,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     match cli.command {
         Commands::Trade => {
-            info!("Starting LIVE TRADING for {}...", trading_symbol);
+            info!("Starting live trading for {}...", trading_symbol);
             
             // Create live WebSocket trade stream for real trading
             let binance_client = BinanceClient::new().await?;
@@ -352,7 +353,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ).await?;
         }
         Commands::Emulate => {
-            info!("Starting LIVE EMULATION with real WebSocket stream for {}...", trading_symbol);
+            info!("Starting live emulation with real WebSocket stream for {}...", trading_symbol);
             
             // Create live WebSocket trade stream for continuous emulation
             let binance_client = BinanceClient::new().await?;
@@ -370,7 +371,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         Commands::Backtest { path, url } => {
             if let Some(data_path) = path {
-                info!("Starting BACKTEST with historical data from: {}", data_path);
+                info!("Starting backtest with historical data from: {}", data_path);
                 
                 // Create historical data stream for backtesting
                 let historical_trade_stream = BinanceClient::trade_data_from_path(&data_path).await?;
@@ -385,7 +386,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &api_secret
                 ).await?;
             } else if let Some(ws_url) = url {
-                info!("Starting BACKTEST with WebSocket data from: {}", ws_url);
+                info!("Starting backtest with WebSocket data from: {}", ws_url);
                 
                 // Create WebSocket data stream for backtesting
                 let ws_trade_stream = BinanceClient::trade_data(&ws_url).await?;

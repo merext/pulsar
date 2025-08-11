@@ -484,6 +484,10 @@ impl StochasticHftStrategy {
 
 #[async_trait::async_trait]
 impl Strategy for StochasticHftStrategy {
+    fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::from_file(config_path)
+    }
+    
     fn get_info(&self) -> String {
         let stats = self.get_backtest_stats();
         let current_k = self.stochastic_k.back().unwrap_or(&0.0);
