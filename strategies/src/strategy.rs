@@ -8,7 +8,7 @@ pub trait Strategy {
     fn get_info(&self) -> String;
     async fn on_trade(&mut self, trade: TradeData);
     fn get_signal(
-        &self,
+        &mut self,
         _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,

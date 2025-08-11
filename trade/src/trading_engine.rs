@@ -893,23 +893,27 @@ impl TradingEngine {
             OrderType::Limit
         };
 
+        // Calculate PnL for SELL signals
         let pnl = match signal {
             Signal::Sell => {
+                // For SELL signals, we need to calculate PnL based on the entry price
+                // Since update_position has already been called, we need to reconstruct the PnL
                 if self.position.entry_price > 0.0 {
-                    let gross_revenue = fill_price * quantity;
+                    let sell_quantity = quantity;
+                    let gross_revenue = fill_price * sell_quantity;
                     let net_revenue = gross_revenue - fees + rebates;
-                    let cost = self.position.entry_price * quantity;
-                    net_revenue - cost
+                    let cost = self.position.entry_price * sell_quantity;
+                    let trade_pnl = net_revenue - cost;
+                    
+                    // Update realized PnL
+                    self.realized_pnl += trade_pnl;
+                    trade_pnl
                 } else {
                     0.0
                 }
             }
             _ => 0.0,
         };
-
-        if matches!(signal, Signal::Sell) && pnl != 0.0 {
-            self.realized_pnl += pnl;
-        }
 
         let record = TradeRecord {
             timestamp,

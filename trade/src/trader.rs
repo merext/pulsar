@@ -1,9 +1,10 @@
 use crate::signal::Signal;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TradeMode {
     Real,
     Emulated,
+    Backtest,
 }
 
 #[derive(Debug, Clone)]

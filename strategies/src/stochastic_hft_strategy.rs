@@ -277,6 +277,15 @@ impl StochasticHftStrategy {
         self.update_stochastic();
         self.calculate_volatility();
         self.calculate_trend_strength();
+        
+        // Debug logging for indicator updates
+        if self.stochastic_k.len() % 1000 == 0 && self.stochastic_k.len() > 0 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                stochastic_k_size = self.stochastic_k.len(),
+                "Indicators updated"
+            );
+        }
     }
     
     fn generate_signal(&self) -> (Signal, f64) {
@@ -322,6 +331,30 @@ impl StochasticHftStrategy {
                     "Sell signal generated from overbought condition"
                 );
             }
+        }
+        
+        // Debug logging for signal generation
+        if self.stochastic_k.len() % 100 == 0 {
+            tracing::info!(
+                stochastic_k = current_k,
+                stochastic_d = current_d,
+                oversold_threshold = self.config.stochastic.oversold,
+                overbought_threshold = self.config.stochastic.overbought,
+                buy_signals_count = buy_signals.len(),
+                sell_signals_count = sell_signals.len(),
+                "Stochastic signal analysis"
+            );
+        }
+        
+        // More frequent debug logging for stochastic values
+        if self.stochastic_k.len() % 50 == 0 {
+            tracing::info!(
+                stochastic_k = current_k,
+                stochastic_d = current_d,
+                oversold_threshold = self.config.stochastic.oversold,
+                overbought_threshold = self.config.stochastic.overbought,
+                "Stochastic values"
+            );
         }
         
         // Alternative signals for low-volatility historical data
@@ -470,12 +503,67 @@ impl Strategy for StochasticHftStrategy {
     }
     
     async fn on_trade(&mut self, trade: TradeData) {
+        // Debug logging for on_trade calls
+        if self.price_history.len() % 1000 == 0 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                latest_price = trade.price,
+                "on_trade called"
+            );
+        }
+        
+        // More frequent debug logging for the first few calls
+        if self.price_history.len() < 100 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                latest_price = trade.price,
+                "on_trade called (early)"
+            );
+        }
+        
+        // Debug logging for every 100th trade
+        if self.price_history.len() % 100 == 0 && self.price_history.len() > 0 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                latest_price = trade.price,
+                "on_trade called (every 100)"
+            );
+        }
+        
         // Update price data
         self.price_history.push_back(trade.price);
         
         // Keep only recent data
         if self.price_history.len() > self.config.stochastic.buffer_capacity {
             self.price_history.pop_front();
+        }
+        
+        // Debug logging for every trade for the first 100 trades
+        if self.price_history.len() <= 100 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                latest_price = trade.price,
+                "Price data accumulated (first 100)"
+            );
+        }
+        
+        // Debug logging for price data accumulation
+        if self.price_history.len() % 50 == 0 && self.price_history.len() > 0 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                latest_price = trade.price,
+                buffer_capacity = self.config.stochastic.buffer_capacity,
+                "Price data accumulated"
+            );
+        }
+        
+        // Debug logging for price data accumulation
+        if self.price_history.len() % 1000 == 0 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                latest_price = trade.price,
+                "Price data accumulated"
+            );
         }
         
         // Update all indicators
@@ -490,11 +578,44 @@ impl Strategy for StochasticHftStrategy {
     }
     
     fn get_signal(
-        &self,
+        &mut self,
         _current_price: f64,
         current_timestamp: f64,
         current_position: Position,
     ) -> (Signal, f64) {
+        // Debug logging to see if get_signal is being called
+        if self.stochastic_k.len() % 100 == 0 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                stochastic_k_size = self.stochastic_k.len(),
+                current_position = current_position.quantity,
+                "get_signal called"
+            );
+        }
+        
+        // More frequent debug logging for the first few calls
+        if self.stochastic_k.len() < 200 {
+            tracing::info!(
+                price_history_size = self.price_history.len(),
+                stochastic_k_size = self.stochastic_k.len(),
+                current_position = current_position.quantity,
+                "get_signal called (early)"
+            );
+        }
+        
+        // Debug logging for stochastic values every 1000 trades
+        if self.stochastic_k.len() % 1000 == 0 && self.stochastic_k.len() > 0 {
+            let current_k = *self.stochastic_k.back().unwrap();
+            let current_d = *self.stochastic_d.back().unwrap();
+            tracing::info!(
+                stochastic_k = current_k,
+                stochastic_d = current_d,
+                oversold_threshold = self.config.stochastic.oversold,
+                overbought_threshold = self.config.stochastic.overbought,
+                "Stochastic values (every 1000)"
+            );
+        }
+        
         // Check cooldown
         #[allow(clippy::cast_precision_loss)]
         let cooldown = self.config.risk.signal_cooldown_ms as f64 / 1000.0;
@@ -536,6 +657,16 @@ impl Strategy for StochasticHftStrategy {
         // Generate base signal based on Stochastic Oscillator
         let (base_signal, confidence) = self.generate_signal();
         
+        // Debug logging for every signal generation
+        if self.stochastic_k.len() % 50 == 0 {
+            tracing::info!(
+                base_signal = format!("{:?}", base_signal),
+                confidence = confidence,
+                stochastic_k_size = self.stochastic_k.len(),
+                "Signal generated"
+            );
+        }
+        
         // Debug logging for signal generation
         if self.stochastic_k.len() % 100 == 0 {
             tracing::info!(
@@ -545,14 +676,19 @@ impl Strategy for StochasticHftStrategy {
             );
         }
         
+
+        
         // Position-aware signal filtering with minimum holding time
         match base_signal {
             Signal::Buy => {
                 // Only generate BUY if we don't have a long position
                 if current_position.quantity <= 0.0 {
+                    // Update entry time when opening a new position
+                    self.entry_time = current_timestamp;
                     if self.stochastic_k.len() % 100 == 0 {
                         tracing::info!(
                             current_position = current_position.quantity,
+                            entry_time = self.entry_time,
                             "BUY signal approved"
                         );
                     }
@@ -570,8 +706,8 @@ impl Strategy for StochasticHftStrategy {
             Signal::Sell => {
                 // Only generate SELL if we have a long position and have held it for minimum time
                 if current_position.quantity > 0.0 {
-                    // Minimum holding time of 30 seconds to avoid overtrading
-                    let min_hold_time = 30.0; // seconds
+                    // Minimum holding time of 5 seconds to allow for more frequent trading
+                    let min_hold_time = 5.0; // seconds
                     let holding_time = current_timestamp - self.entry_time;
                     if holding_time >= min_hold_time {
                         if self.stochastic_k.len() % 100 == 0 {
