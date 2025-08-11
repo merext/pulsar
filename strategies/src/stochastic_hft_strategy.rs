@@ -560,8 +560,8 @@ impl Strategy for StochasticHftStrategy {
                 } else {
                     if self.stochastic_k.len() % 100 == 0 {
                         tracing::info!(
-                            "BUY signal rejected - already have position",
-                            current_position = current_position.quantity
+                            current_position = current_position.quantity,
+                            "BUY signal rejected - already have position"
                         );
                     }
                     (Signal::Hold, 0.0)
@@ -575,28 +575,28 @@ impl Strategy for StochasticHftStrategy {
                     let holding_time = current_timestamp - self.entry_time;
                     if holding_time >= min_hold_time {
                         if self.stochastic_k.len() % 100 == 0 {
-                            tracing::info!(
-                                "SELL signal approved",
-                                holding_time = holding_time,
-                                min_hold_time = min_hold_time
-                            );
+                                                    tracing::info!(
+                            holding_time = holding_time,
+                            min_hold_time = min_hold_time,
+                            "SELL signal approved"
+                        );
                         }
                         (Signal::Sell, confidence)
                     } else {
                         if self.stochastic_k.len() % 100 == 0 {
-                            tracing::info!(
-                                "SELL signal rejected - holding time too short",
-                                holding_time = holding_time,
-                                min_hold_time = min_hold_time
-                            );
+                                                    tracing::info!(
+                            holding_time = holding_time,
+                            min_hold_time = min_hold_time,
+                            "SELL signal rejected - holding time too short"
+                        );
                         }
                         (Signal::Hold, 0.0)
                     }
                 } else {
                     if self.stochastic_k.len() % 100 == 0 {
                         tracing::info!(
-                            "SELL signal rejected - no position",
-                            current_position = current_position.quantity
+                            current_position = current_position.quantity,
+                            "SELL signal rejected - no position"
                         );
                     }
                     (Signal::Hold, 0.0)

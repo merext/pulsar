@@ -528,10 +528,10 @@ impl Strategy for CorrelationDiversifiedPortfolioStrategy {
         // Debug logging
         if self.trade_counter < 10 {
                     tracing::info!(
-            "Portfolio signal generated",
             signal = format!("{:?}", signal),
             confidence = confidence,
-            asset_count = self.assets.len()
+            asset_count = self.assets.len(),
+            "Portfolio signal generated"
         );
         }
         

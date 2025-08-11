@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 TradeMode::Real,
             ).await?;
             
-            info!("Starting LIVE TRADING with real WebSocket stream for {}...", trading_symbol);
+            info!("Starting live trading for {}...", trading_symbol);
             
             // Create live WebSocket trade stream for real trading
             let binance_client = BinanceClient::new().await?;
