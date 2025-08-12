@@ -176,7 +176,7 @@ impl StochasticHftStrategy {
             
             // Debug logging for stochastic values
             if self.stochastic_k.len() % 50 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     price_history_size = self.price_history.len(),
                     stochastic_k = k,
                     "Stochastic calculation update"
@@ -280,7 +280,7 @@ impl StochasticHftStrategy {
         
         // Debug logging for indicator updates
         if self.stochastic_k.len() % 1000 == 0 && self.stochastic_k.len() > 0 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 stochastic_k_size = self.stochastic_k.len(),
                 "Indicators updated"
@@ -291,7 +291,7 @@ impl StochasticHftStrategy {
     fn generate_signal(&self) -> (Signal, f64) {
         if self.stochastic_k.len() < 2 || self.stochastic_d.len() < 2 {
             if self.stochastic_k.len() % 100 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     k_buffer_size = self.stochastic_k.len(),
                     d_buffer_size = self.stochastic_d.len(),
                     "Not enough stochastic data for signal generation"
@@ -316,7 +316,7 @@ impl StochasticHftStrategy {
         if current_k < self.config.stochastic.oversold {
             buy_signals.push(self.config.signals.oversold);
             if self.stochastic_k.len() % 50 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     stochastic_k = current_k,
                     oversold_threshold = self.config.stochastic.oversold,
                     "Buy signal generated from oversold condition"
@@ -325,7 +325,7 @@ impl StochasticHftStrategy {
         } else if current_k > self.config.stochastic.overbought {
             sell_signals.push(self.config.signals.overbought);
             if self.stochastic_k.len() % 50 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     stochastic_k = current_k,
                     overbought_threshold = self.config.stochastic.overbought,
                     "Sell signal generated from overbought condition"
@@ -335,7 +335,7 @@ impl StochasticHftStrategy {
         
         // Debug logging for signal generation
         if self.stochastic_k.len() % 100 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 stochastic_k = current_k,
                 stochastic_d = current_d,
                 oversold_threshold = self.config.stochastic.oversold,
@@ -348,7 +348,7 @@ impl StochasticHftStrategy {
         
         // More frequent debug logging for stochastic values
         if self.stochastic_k.len() % 50 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 stochastic_k = current_k,
                 stochastic_d = current_d,
                 oversold_threshold = self.config.stochastic.oversold,
@@ -366,7 +366,7 @@ impl StochasticHftStrategy {
             if price_momentum > 0.001 { // Slight upward momentum
                 buy_signals.push(self.config.signals.oversold * 0.8); // Lower confidence
                 if self.stochastic_k.len() % 50 == 0 {
-                    tracing::info!(
+                    tracing::debug!(
                         stochastic_k = current_k,
                         price_momentum = price_momentum,
                         "Momentum buy signal generated"
@@ -380,7 +380,7 @@ impl StochasticHftStrategy {
             if price_momentum < -0.001 { // Slight downward momentum
                 sell_signals.push(self.config.signals.overbought * 0.8); // Lower confidence
                 if self.stochastic_k.len() % 50 == 0 {
-                    tracing::info!(
+                    tracing::debug!(
                         stochastic_k = current_k,
                         price_momentum = price_momentum,
                         "Momentum sell signal generated"
@@ -459,7 +459,7 @@ impl StochasticHftStrategy {
         
                 // Debug logging for stochastic values
         if self.stochastic_k.len() % 100 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 stochastic_k = current_k,
                 stochastic_d = current_d,
                 confidence = final_confidence,
@@ -509,7 +509,7 @@ impl Strategy for StochasticHftStrategy {
     async fn on_trade(&mut self, trade: TradeData) {
         // Debug logging for on_trade calls
         if self.price_history.len() % 1000 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 latest_price = trade.price,
                 "on_trade called"
@@ -518,7 +518,7 @@ impl Strategy for StochasticHftStrategy {
         
         // More frequent debug logging for the first few calls
         if self.price_history.len() < 100 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 latest_price = trade.price,
                 "on_trade called (early)"
@@ -527,7 +527,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Debug logging for every 100th trade
         if self.price_history.len() % 100 == 0 && self.price_history.len() > 0 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 latest_price = trade.price,
                 "on_trade called (every 100)"
@@ -544,7 +544,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Debug logging for every trade for the first 100 trades
         if self.price_history.len() <= 100 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 latest_price = trade.price,
                 "Price data accumulated (first 100)"
@@ -553,7 +553,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Debug logging for price data accumulation
         if self.price_history.len() % 50 == 0 && self.price_history.len() > 0 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 latest_price = trade.price,
                 buffer_capacity = self.config.stochastic.buffer_capacity,
@@ -563,7 +563,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Debug logging for price data accumulation
         if self.price_history.len() % 1000 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 latest_price = trade.price,
                 "Price data accumulated"
@@ -589,7 +589,7 @@ impl Strategy for StochasticHftStrategy {
     ) -> (Signal, f64) {
         // Debug logging to see if get_signal is being called
         if self.stochastic_k.len() % 100 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 stochastic_k_size = self.stochastic_k.len(),
                 current_position = current_position.quantity,
@@ -599,7 +599,7 @@ impl Strategy for StochasticHftStrategy {
         
         // More frequent debug logging for the first few calls
         if self.stochastic_k.len() < 200 {
-            tracing::info!(
+            tracing::debug!(
                 price_history_size = self.price_history.len(),
                 stochastic_k_size = self.stochastic_k.len(),
                 current_position = current_position.quantity,
@@ -611,7 +611,7 @@ impl Strategy for StochasticHftStrategy {
         if self.stochastic_k.len() % 1000 == 0 && self.stochastic_k.len() > 0 {
             let current_k = *self.stochastic_k.back().unwrap();
             let current_d = *self.stochastic_d.back().unwrap();
-            tracing::info!(
+            tracing::debug!(
                 stochastic_k = current_k,
                 stochastic_d = current_d,
                 oversold_threshold = self.config.stochastic.oversold,
@@ -625,7 +625,7 @@ impl Strategy for StochasticHftStrategy {
         let cooldown = self.config.risk.signal_cooldown_ms as f64 / 1000.0;
         if current_timestamp - self.last_signal_time < cooldown {
             if self.stochastic_k.len() % 100 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     time_since_last_signal = current_timestamp - self.last_signal_time,
                     cooldown_duration = cooldown,
                     "Signal generation blocked by cooldown"
@@ -637,7 +637,7 @@ impl Strategy for StochasticHftStrategy {
         // Check if we have enough data
         if self.price_history.len() < self.config.stochastic.k_period {
             if self.stochastic_k.len() % 100 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     current_price_count = self.price_history.len(),
                     required_price_count = self.config.stochastic.k_period,
                     "Not enough price data for signal generation"
@@ -649,7 +649,7 @@ impl Strategy for StochasticHftStrategy {
         // Check risk management
         if self.consecutive_losses >= self.config.risk.max_consecutive_losses {
             if self.stochastic_k.len() % 100 == 0 {
-                tracing::info!(
+                tracing::debug!(
                     consecutive_losses = self.consecutive_losses,
                     max_consecutive_losses = self.config.risk.max_consecutive_losses,
                     "Risk management triggered - consecutive losses limit reached"
@@ -663,7 +663,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Debug logging for every signal generation
         if self.stochastic_k.len() % 50 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 base_signal = format!("{:?}", base_signal),
                 confidence = confidence,
                 stochastic_k_size = self.stochastic_k.len(),
@@ -673,7 +673,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Debug logging for signal generation
         if self.stochastic_k.len() % 100 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 signal = format!("{:?}", base_signal),
                 confidence = confidence,
                 "Base signal generated"
@@ -690,7 +690,7 @@ impl Strategy for StochasticHftStrategy {
                     // Update entry time when opening a new position
                     self.entry_time = current_timestamp;
                     if self.stochastic_k.len() % 100 == 0 {
-                        tracing::info!(
+                        tracing::debug!(
                             current_position = current_position.quantity,
                             entry_time = self.entry_time,
                             "BUY signal approved"
@@ -699,7 +699,7 @@ impl Strategy for StochasticHftStrategy {
                     (Signal::Buy, confidence)
                 } else {
                     if self.stochastic_k.len() % 100 == 0 {
-                        tracing::info!(
+                        tracing::debug!(
                             current_position = current_position.quantity,
                             "BUY signal rejected - already have position"
                         );
@@ -715,7 +715,7 @@ impl Strategy for StochasticHftStrategy {
                     let holding_time = current_timestamp - self.entry_time;
                     if holding_time >= min_hold_time {
                         if self.stochastic_k.len() % 100 == 0 {
-                                                    tracing::info!(
+                                                    tracing::debug!(
                             holding_time = holding_time,
                             min_hold_time = min_hold_time,
                             "SELL signal approved"
@@ -724,7 +724,7 @@ impl Strategy for StochasticHftStrategy {
                         (Signal::Sell, confidence)
                     } else {
                         if self.stochastic_k.len() % 100 == 0 {
-                                                    tracing::info!(
+                                                    tracing::debug!(
                             holding_time = holding_time,
                             min_hold_time = min_hold_time,
                             "SELL signal rejected - holding time too short"
@@ -734,7 +734,7 @@ impl Strategy for StochasticHftStrategy {
                     }
                 } else {
                     if self.stochastic_k.len() % 100 == 0 {
-                        tracing::info!(
+                        tracing::debug!(
                             current_position = current_position.quantity,
                             "SELL signal rejected - no position"
                         );

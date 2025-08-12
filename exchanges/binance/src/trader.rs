@@ -10,7 +10,8 @@ use rust_decimal_macros::dec;
 use tracing::{error, debug, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
-use trade::trading_engine::{TradingConfig, OrderType};
+use trade::config::TradingConfig;
+use trade::trader::OrderType;
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,

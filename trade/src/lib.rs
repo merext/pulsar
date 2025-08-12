@@ -1,16 +1,15 @@
-pub mod trading_engine;
-pub use trading_engine::TradingConfig;
+pub mod config;
+pub mod metrics;
 pub mod executor;
 pub mod market;
 pub mod trader;
-// (trading_engine already declared above)
 pub mod signal;
 pub mod models;
 
-
 // Re-export commonly used types
 pub use models::{Trade, TradeData};
-pub use trader::{Position, Trader, TradeMode};
-pub use trading_engine::{TradingEngine, PerformanceMetrics};
+pub use trader::{Position, Trader, TradeMode, OrderType};
+pub use config::TradingConfig;
+pub use metrics::{PerformanceMetrics, TradeRecord};
 pub use signal::Signal;
 

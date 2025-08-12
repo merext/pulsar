@@ -13,7 +13,6 @@ use binance_exchange::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use trade::signal::Signal;
 use trade::trader::Trader;
-use trade::trading_engine::TradingConfig;
 use std::time::Instant;
 use futures_util::StreamExt;
 
@@ -41,20 +40,7 @@ async fn run_trade_loop(
         entry_price: 0.0,
     };
 
-    // Create TradingEngine for emulated and backtest modes with realistic calculations
-    let mut trading_engine = if matches!(trade_mode, TradeMode::Emulated | TradeMode::Backtest) {
-        match TradingConfig::from_file("config/trading_config.toml") {
-            Ok(config) => {
-                match trade::trading_engine::TradingEngine::new_with_config("DOGEUSDT", config) {
-                    Ok(engine) => Some(engine),
-                    Err(_) => None,
-                }
-            }
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
+
 
     let mut trade_stream = trade_data;
     let mut trade_count = 0;
@@ -84,7 +70,7 @@ async fn run_trade_loop(
         
         // Debug logging for signal generation
         if trade_count % 1000 == 0 {
-            info!("Trade {}: signal={:?}, confidence={:.3}", trade_count, final_signal, confidence);
+            tracing::debug!("Trade {}: signal={:?}, confidence={:.3}", trade_count, final_signal, confidence);
         }
 
         // Debug logging to see what signals are being generated
@@ -112,6 +98,11 @@ async fn run_trade_loop(
             );
         }
 
+        // Log when there's insufficient data for trading (only at INFO level)
+        if matches!(final_signal, Signal::Hold) && confidence < 0.1 {
+            info!("Insufficient data for trading - confidence: {:.3}, waiting for more market data", confidence);
+        }
+
         match trade_mode {
             TradeMode::Real => {
                 binance_trader
@@ -120,7 +111,7 @@ async fn run_trade_loop(
                 
                 // Log executed trades for live trading with PnL information
                 if matches!(final_signal, Signal::Buy | Signal::Sell) {
-                    info!(
+                    tracing::debug!(
                         signal = %final_signal,
                         confidence = %format!("{:.2}", confidence),
                         price = format!("{:.8}", trade_price),
@@ -151,13 +142,8 @@ async fn run_trade_loop(
                     tokio::time::sleep(network_latency).await;
                 }
 
-                // Use TradingEngine for realistic trade execution simulation
-                let trade_result = if let Some(engine) = &mut trading_engine {
-                    engine.on_emulate(final_signal, trade_price, quantity_to_trade).await
-                } else {
-                    // Fallback to BinanceTrader if TradingEngine not available
-                    binance_trader.on_emulate(final_signal, trade_price, quantity_to_trade).await
-                };
+                // Use trader for trade execution simulation
+                let trade_result = binance_trader.on_emulate(final_signal, trade_price, quantity_to_trade).await;
 
                 // Calculate total execution time including simulated latency
                 let total_execution_time = execution_start.elapsed();
@@ -166,7 +152,7 @@ async fn run_trade_loop(
                 // Log executed trades with detailed execution metrics
                 if matches!(final_signal, Signal::Buy | Signal::Sell) {
                     if let Some((fill_price, fees, slippage, rebates, order_type)) = trade_result {
-                        info!(
+                        tracing::debug!(
                             signal = %final_signal,
                             confidence = %format!("{:.2}", confidence),
                             price = format!("{:.8}", trade_price),
@@ -180,12 +166,12 @@ async fn run_trade_loop(
                             network_latency = format!("{:?}", network_latency),
                             total_latency = format!("{:?}", total_execution_time),
                             position = %current_position,
-                            unrealized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.unrealized_pnl(trade_price) } else { 0.0 }),
-                            realized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.realized_pnl() } else { 0.0 })
+                            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+                            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
                         );
                     } else {
                         // Fallback logging if trade_result is None
-                        info!(
+                        tracing::debug!(
                             signal = %final_signal,
                             confidence = %format!("{:.2}", confidence),
                             price = format!("{:.8}", trade_price),
@@ -194,8 +180,8 @@ async fn run_trade_loop(
                             network_latency = format!("{:?}", network_latency),
                             total_latency = format!("{:?}", total_execution_time),
                             position = %current_position,
-                            unrealized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.unrealized_pnl(trade_price) } else { 0.0 }),
-                            realized_pnl = format!("{:.6}", if let Some(engine) = &trading_engine { engine.realized_pnl() } else { 0.0 })
+                            unrealized_pnl = format!("{:.6}", binance_trader.unrealized_pnl(trade_price)),
+                            realized_pnl = format!("{:.6}", binance_trader.realized_pnl())
                         );
                     }
                 }
@@ -203,16 +189,7 @@ async fn run_trade_loop(
         }
 
         // Update current position for display purposes
-        match trade_mode {
-            TradeMode::Real => {
-                current_position = binance_trader.position();
-            }
-            TradeMode::Emulated | TradeMode::Backtest => {
-                if let Some(engine) = &mut trading_engine {
-                    current_position = engine.position();
-                }
-            }
-        }
+        current_position = binance_trader.position();
     }
 
     // Log completion message
@@ -228,16 +205,10 @@ async fn run_trade_loop(
             let mode_name = if matches!(trade_mode, TradeMode::Emulated) { "Emulation" } else { "Backtest" };
             info!("{} completed - processed {} trades", mode_name, trade_count);
             info!("Final position: {}", current_position);
-            
-            // Use TradingEngine PnL if available, otherwise fallback to BinanceTrader
-            if let Some(engine) = &trading_engine {
-                info!("Final PnL: {:.6}", engine.realized_pnl());
-                // For unrealized PnL, we need a current price - use the last known price or 0
-                let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
-                info!("Final Unrealized PnL: {:.6}", engine.unrealized_pnl(last_price));
-            } else {
-                info!("Final PnL: {:.6}", binance_trader.realized_pnl());
-            }
+            info!("Final PnL: {:.6}", binance_trader.realized_pnl());
+            // For unrealized PnL, we need a current price - use the last known price or 0
+            let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
+            info!("Final Unrealized PnL: {:.6}", binance_trader.unrealized_pnl(last_price));
         }
     }
 
@@ -371,7 +342,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             info!("Starting backtest with data from: {}", uri);
             
             // Create historical data stream for backtesting from URI (local file or remote URL)
-            let historical_trade_stream = BinanceClient::trade_data_from_uri(&uri).await?;
+            // TODO: Implement BinanceClient::trade_data_from_uri() that auto-detects schema
+            let historical_trade_stream = BinanceClient::trade_data(&uri).await?;
             
             // Run trading loop directly
             run_trade_loop(
