@@ -50,7 +50,7 @@ async fn run_trade_loop(
         
         // Debug logging for trade processing
         if trade_count % 1000 == 0 {
-            info!("Processing trade {}: price={:.8}, time={}", trade_count, trade.price, trade.event_time);
+            tracing::debug!("Processing trade {}: price={:.8}, time={}", trade_count, trade.price, trade.event_time);
         }
         
         // Update strategy with trade data
@@ -58,7 +58,7 @@ async fn run_trade_loop(
         
         // Debug logging for strategy calls
         if trade_count % 1000 == 0 {
-            info!("Strategy on_trade called for trade {}", trade_count);
+            tracing::debug!("Strategy on_trade called for trade {}", trade_count);
         }
 
         let trade_price = trade.price;
