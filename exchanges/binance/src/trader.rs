@@ -431,8 +431,8 @@ impl BinanceTrader {
         // Initialize position symbol
         self.position.symbol = trading_symbol.to_string();
         
-        // Initialize connection for real trading mode
-        if trade_mode == TradeMode::Real && self.connection.is_none() {
+        // Initialize connection for real and emulated trading modes
+        if (trade_mode == TradeMode::Real || trade_mode == TradeMode::Emulated) && self.connection.is_none() {
             let config = ConfigurationWebsocketApi::builder()
                 .api_key(&self.api_key)
                 .api_secret(&self.api_secret)
