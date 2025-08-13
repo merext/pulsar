@@ -11,9 +11,7 @@ use binance_exchange::BinanceClient;
 
 
 use binance_exchange::trader::BinanceTrader;
-use trade::signal::Signal;
-use trade::trader::Trader;
-use std::time::Instant;
+
 use futures_util::StreamExt;
 
 
@@ -100,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
     // Create strategy and trader once
-    let strategy = Box::new(
+    let mut strategy = Box::new(
         StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
             .expect("Failed to load StochasticHftStrategy configuration")
     );
@@ -126,10 +124,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ).await?;
             
             binance_trader.run_trading_loop(
-                &mut strategy,
+                &mut *strategy,
                 &trading_symbol,
                 TradeMode::Real,
-                live_trade_stream
+                live_trade_stream.map(|trade| trade.into())
             ).await?;
         }
         Commands::Emulate => {
@@ -148,10 +146,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ).await?;
             
             binance_trader.run_trading_loop(
-                &mut strategy,
+                &mut *strategy,
                 &trading_symbol,
                 TradeMode::Emulated,
-                live_trade_stream
+                live_trade_stream.map(|trade| trade.into())
             ).await?;
         }
         Commands::Backtest { uri } => {
@@ -170,10 +168,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             ).await?;
             
             binance_trader.run_trading_loop(
-                &mut strategy,
+                &mut *strategy,
                 &trading_symbol,
                 TradeMode::Backtest,
-                historical_trade_stream
+                historical_trade_stream.map(|trade| trade.into())
             ).await?;
         }
     }

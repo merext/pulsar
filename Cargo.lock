@@ -196,6 +196,7 @@ dependencies = [
  "rust_decimal",
  "rust_decimal_macros",
  "serde",
+ "strategies",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -2822,6 +2823,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "futures-util",
  "rand 0.8.5",
  "rust_decimal",
  "rust_decimal_macros",

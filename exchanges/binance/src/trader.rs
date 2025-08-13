@@ -13,7 +13,7 @@ use trade::trader::{Position, TradeMode, Trader};
 use trade::config::TradingConfig;
 use trade::trader::OrderType;
 use trade::models::TradeData;
-use strategies::strategy::Strategy;
+
 use std::time::Instant;
 use futures_util::StreamExt;
 
@@ -440,16 +440,18 @@ impl Trader for BinanceTrader {
 
         Ok(())
     }
+}
 
-    async fn run_trading_loop<S>(
+impl BinanceTrader {
+    pub async fn run_trading_loop<S>(
         &mut self,
         strategy: &mut S,
-        trading_symbol: &str,
+        _trading_symbol: &str,
         trade_mode: TradeMode,
-        mut trade_data: impl futures_util::Stream<Item = TradeData> + Unpin,
+        mut trade_data: impl futures_util::Stream<Item = TradeData> + Unpin + Send,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
-        S: Strategy + Send,
+        S: strategies::strategy::Strategy + Send + Sync,
     {
         let mut current_position = self.position.clone();
 
@@ -458,7 +460,7 @@ impl Trader for BinanceTrader {
             strategy.on_trade(trade.clone()).await;
 
             let trade_price = trade.price;
-            let trade_time = trade.event_time as f64;
+            let trade_time = trade.time as f64;
 
             // Get signal from strategy
             let (final_signal, confidence) = 
