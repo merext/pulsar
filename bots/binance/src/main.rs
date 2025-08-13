@@ -104,15 +104,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     
     info!("Trading strategy: {}", strategy.get_info());
 
+    // Create trader once for all modes
+    let mut binance_trader = BinanceTrader::new(
+        &api_key,
+        &api_secret
+    ).await?;
+
     match cli.command {
         Commands::Trade => {
             info!("Starting live trading for {}...", trading_symbol);
-            
-            // Create trader and run trading loop
-            let mut binance_trader = BinanceTrader::new(
-                &api_key,
-                &api_secret
-            ).await?;
             
             binance_trader.run_trading_loop(
                 &mut *strategy,
@@ -124,12 +124,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Emulate => {
             info!("Starting live emulation with real WebSocket stream for {}...", trading_symbol);
             
-            // Create trader and run trading loop
-            let mut binance_trader = BinanceTrader::new(
-                &api_key,
-                &api_secret
-            ).await?;
-            
             binance_trader.run_trading_loop(
                 &mut *strategy,
                 &trading_symbol,
@@ -139,12 +133,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
         Commands::Backtest { uri } => {
             info!("Starting backtest with data from: {}", uri);
-            
-            // Create trader and run trading loop
-            let mut binance_trader = BinanceTrader::new(
-                &api_key,
-                &api_secret
-            ).await?;
             
             binance_trader.run_trading_loop(
                 &mut *strategy,
