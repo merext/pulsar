@@ -48,18 +48,8 @@ async fn run_trade_loop(
     while let Some(trade) = trade_stream.next().await {
         trade_count += 1;
         
-        // Debug logging for trade processing
-        if trade_count % 1000 == 0 {
-            tracing::debug!("Processing trade {}: price={:.8}, time={}", trade_count, trade.price, trade.event_time);
-        }
-        
         // Update strategy with trade data
         strategy.on_trade(trade.clone().into()).await;
-        
-        // Debug logging for strategy calls
-        if trade_count % 1000 == 0 {
-            tracing::debug!("Strategy on_trade called for trade {}", trade_count);
-        }
 
         let trade_price = trade.price;
         let trade_time = trade.event_time as f64;
@@ -68,16 +58,7 @@ async fn run_trade_loop(
         let (final_signal, confidence) = 
             strategy.get_signal(trade_price, trade_time, current_position.clone());
         
-        // Debug logging for signal generation
-        if trade_count % 1000 == 0 {
-            tracing::debug!("Trade {}: signal={:?}, confidence={:.3}", trade_count, final_signal, confidence);
-        }
 
-        // Debug logging to see what signals are being generated
-        tracing::debug!(
-            "Trade {}: Price: {:.8}, Signal: {:?}, Confidence: {:.3}",
-            trade.trade_id, trade_price, final_signal, confidence
-        );
 
         // Calculate position size based on confidence and trading config
         let quantity_to_trade = binance_trader.calculate_trade_size(
@@ -89,14 +70,7 @@ async fn run_trade_loop(
             1.0, // trading_size_step - use 1.0 for DOGEUSDT
         );
 
-        // Only log HOLD signals at debug level (no execution)
-        if matches!(final_signal, Signal::Hold) {
-            tracing::debug!(
-                signal = %final_signal,
-                confidence = %format!("{:.2}", confidence),
-                position = %current_position
-            );
-        }
+
 
         // Log when there's insufficient data for trading (only at INFO level)
         if matches!(final_signal, Signal::Hold) && confidence < 0.1 {
