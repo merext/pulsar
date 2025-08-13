@@ -2,8 +2,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use crate::strategy::Strategy;
-use trade::{Position, Signal};
-use trade::models::TradeData;
+use crate::models::{Position, Signal, TradeData};
 
 #[derive(serde::Deserialize)]
 struct StochasticHftConfig {
@@ -575,7 +574,7 @@ impl Strategy for StochasticHftStrategy {
         
         // Update PnL for current position
         #[allow(clippy::cast_precision_loss)]
-        self.update_pnl(trade.price, trade.time as f64);
+        self.update_pnl(trade.price, trade.timestamp);
         
         // Note: Trade execution is handled by the backtest system, not here
         // The strategy only updates its internal state and indicators

@@ -1,7 +1,5 @@
 use crate::strategy::Strategy;
-use trade::models::TradeData;
-use trade::trader::Position;
-use trade::signal::Signal;
+use crate::models::{TradeData, Position, Signal};
 use std::collections::VecDeque;
 use std::collections::HashMap;
 use async_trait::async_trait;

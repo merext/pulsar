@@ -2352,7 +2352,6 @@ dependencies = [
  "splines",
  "toml",
  "tracing",
- "trade",
 ]
 
 [[package]]
@@ -2828,6 +2827,7 @@ dependencies = [
  "rust_decimal",
  "rust_decimal_macros",
  "serde",
+ "strategies",
  "tokio",
  "toml",
  "tracing",

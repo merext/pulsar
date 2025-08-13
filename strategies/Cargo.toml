@@ -16,7 +16,7 @@ serde_json = "1.0"
 toml = "0.8"
 splines = "4.4"
 nalgebra = "0.32"
-trade = { path = "../trade" }
+
 tracing = "0.1"
 fastrand = "2.0"
 

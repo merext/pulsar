@@ -46,14 +46,12 @@ pub trait Trader {
     fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64;
     
     // Universal trading loop that handles all trading modes
-    async fn trade<S>(
+    async fn trade(
         &mut self,
         trading_stream: impl Stream<Item = Trade> + Unpin + Send,
-        trading_strategy: &mut S,
+        trading_strategy: &mut dyn strategies::strategy::Strategy,
         trading_symbol: &str,
         trading_mode: TradeMode,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-    where
-        S: Send + Sync;
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 } 

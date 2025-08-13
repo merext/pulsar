@@ -1,11 +1,9 @@
-use trade::models::TradeData;
-use trade::trader::Position;
-use trade::signal::Signal;
+use crate::models::{TradeData, Position, Signal};
 use std::path::Path;
 
 #[allow(async_fn_in_trait)]
 #[async_trait::async_trait]
-pub trait Strategy {
+pub trait Strategy: Send + Sync {
     /// Create a new strategy instance from a configuration file
     fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>>
     where

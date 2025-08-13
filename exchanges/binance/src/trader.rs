@@ -17,6 +17,32 @@ use trade::config::TradingConfig;
 use futures_util::StreamExt;
 use futures_util::Stream;
 
+// Conversion functions to bridge trade and strategies types
+fn convert_trade_to_trade_data(trade: &trade::models::Trade) -> strategies::models::TradeData {
+    strategies::models::TradeData {
+        price: trade.price,
+        quantity: trade.quantity,
+        timestamp: trade.trade_time as f64,
+        symbol: trade.symbol.clone(),
+    }
+}
+
+fn convert_position_to_strategies_position(position: &trade::trader::Position) -> strategies::models::Position {
+    strategies::models::Position {
+        symbol: position.symbol.clone(),
+        quantity: position.quantity,
+        entry_price: position.entry_price,
+    }
+}
+
+fn convert_strategies_signal_to_trade_signal(signal: strategies::models::Signal) -> trade::signal::Signal {
+    match signal {
+        strategies::models::Signal::Buy => trade::signal::Signal::Buy,
+        strategies::models::Signal::Sell => trade::signal::Signal::Sell,
+        strategies::models::Signal::Hold => trade::signal::Signal::Hold,
+    }
+}
+
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
     pub position: Position,
@@ -368,15 +394,13 @@ impl Trader for BinanceTrader {
         Ok(())
     }
 
-    async fn trade<S>(
+    async fn trade(
         &mut self,
         mut trading_stream: impl Stream<Item = trade::models::Trade> + Unpin + Send,
-        trading_strategy: &mut S,
+        trading_strategy: &mut dyn strategies::strategy::Strategy,
         trading_symbol: &str,
         trading_mode: TradeMode,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-    where
-        S: strategies::strategy::Strategy + Send + Sync,
     {
         // Initialize position symbol
         self.position.symbol = trading_symbol.to_string();
@@ -401,14 +425,15 @@ impl Trader for BinanceTrader {
         let mut current_position = self.position.clone();
 
         while let Some(trade) = trading_stream.next().await {
-            // Process trade data
+            // Update strategy with trade data
+            trading_strategy.on_trade(convert_trade_to_trade_data(&trade)).await;
+
             let trade_price = trade.price;
             let trade_time = trade.trade_time as f64;
 
-            // For now, simulate strategy signal generation
-            // In a real implementation, we would call strategy methods here
-            let final_signal = Signal::Hold; // Default signal
-            let confidence = 0.5; // Default confidence
+            // Get signal from strategy
+            let (final_signal, confidence) = 
+                trading_strategy.get_signal(trade_price, trade_time, convert_position_to_strategies_position(&current_position));
 
             // Calculate position size based on confidence and trading config
             let quantity_to_trade = self.calculate_trade_size(
@@ -422,12 +447,12 @@ impl Trader for BinanceTrader {
 
             match trading_mode {
                 TradeMode::Real => {
-                    self.on_signal(final_signal, trade_price, quantity_to_trade).await;
+                    self.on_signal(convert_strategies_signal_to_trade_signal(final_signal), trade_price, quantity_to_trade).await;
                 }
                 TradeMode::Emulated | TradeMode::Backtest => {
                     // Simulate trade execution for emulated/backtest modes
                     match final_signal {
-                        Signal::Buy => {
+                        strategies::models::Signal::Buy => {
                             if current_position.quantity == 0.0 {
                                 debug!(
                                     action = "buy_signal_emulated",
@@ -440,7 +465,7 @@ impl Trader for BinanceTrader {
                                 self.position.entry_price = trade_price;
                             }
                         }
-                        Signal::Sell => {
+                        strategies::models::Signal::Sell => {
                             if current_position.quantity > 0.0 {
                                 let pnl = (trade_price - current_position.entry_price) * current_position.quantity;
                                 self.realized_pnl += pnl;
@@ -456,7 +481,7 @@ impl Trader for BinanceTrader {
                                 self.position.entry_price = 0.0;
                             }
                         }
-                        Signal::Hold => {
+                        strategies::models::Signal::Hold => {
                             // Do nothing
                         }
                     }

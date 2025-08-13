@@ -1,3 +1,4 @@
+pub mod models;
 pub mod stochastic_hft_strategy;
 pub mod strategy;
 
