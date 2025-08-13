@@ -23,6 +23,8 @@ pub struct BinanceTrader {
     pub position: Position,
     pub realized_pnl: f64,
     pub config: TradingConfig,
+    api_key: String,
+    api_secret: String,
 }
 
 impl BinanceTrader {
@@ -33,37 +35,20 @@ impl BinanceTrader {
     /// # Errors
     ///
     /// Will return `Err` if the trading config cannot be loaded.
-    pub async fn new(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let connection = if mode == TradeMode::Real {
-            let config = ConfigurationWebsocketApi::builder()
-                .api_key(api_key)
-                .api_secret(api_secret)
-                .build()
-                .expect("Failed to build Binance API configuration");
-
-            let client = SpotWsApi::production(config);
-
-            Some(
-                client
-                    .connect()
-                    .await
-                    .expect("Failed to connect to WebSocket API"),
-            )
-        } else {
-            None
-        };
-
-        let trading_config = TradingConfig::load()?; // Keep backward compat; will add explicit ctor below
+    pub async fn new(api_key: &str, api_secret: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let trading_config = TradingConfig::load()?;
 
         Ok(Self {
-            connection,
+            connection: None, // Will be initialized in run_trading_loop if needed
             position: Position {
-                symbol: symbol.to_string(),
+                symbol: String::new(), // Will be set in run_trading_loop
                 quantity: 0.0,
                 entry_price: 0.0,
             },
             realized_pnl: 0.0,
             config: trading_config,
+            api_key: api_key.to_string(),
+            api_secret: api_secret.to_string(),
         })
     }
 
@@ -74,31 +59,20 @@ impl BinanceTrader {
     /// # Errors
     ///
     /// Will return `Err` if the trading config cannot be loaded from the provided path.
-    pub async fn new_with_config(symbol: &str, api_key: &str, api_secret: &str, mode: TradeMode, config_path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let connection = if mode == TradeMode::Real {
-            let cfg = ConfigurationWebsocketApi::builder()
-                .api_key(api_key)
-                .api_secret(api_secret)
-                .build()
-                .expect("Failed to build Binance API configuration");
-
-            let client = SpotWsApi::production(cfg);
-            Some(client.connect().await.expect("Failed to connect to WebSocket API"))
-        } else {
-            None
-        };
-
+    pub async fn new_with_config(api_key: &str, api_secret: &str, config_path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let trading_config = TradingConfig::from_file(config_path)?;
 
         Ok(Self {
-            connection,
+            connection: None, // Will be initialized in run_trading_loop if needed
             position: Position {
-                symbol: symbol.to_string(),
+                symbol: String::new(), // Will be set in run_trading_loop
                 quantity: 0.0,
                 entry_price: 0.0,
             },
             realized_pnl: 0.0,
             config: trading_config,
+            api_key: api_key.to_string(),
+            api_secret: api_secret.to_string(),
         })
     }
 
@@ -454,6 +428,26 @@ impl BinanceTrader {
     where
         S: strategies::strategy::Strategy + Send + Sync,
     {
+        // Initialize position symbol
+        self.position.symbol = trading_symbol.to_string();
+        
+        // Initialize connection for real trading mode
+        if trade_mode == TradeMode::Real && self.connection.is_none() {
+            let config = ConfigurationWebsocketApi::builder()
+                .api_key(&self.api_key)
+                .api_secret(&self.api_secret)
+                .build()
+                .expect("Failed to build Binance API configuration");
+
+            let client = SpotWsApi::production(config);
+            self.connection = Some(
+                client
+                    .connect()
+                    .await
+                    .expect("Failed to connect to WebSocket API"),
+            );
+        }
+        
         // Create BinanceClient and get appropriate data stream
         let binance_client = BinanceClient::new().await?;
         let mut trade_data: Box<dyn futures_util::Stream<Item = trade::models::Trade> + Unpin + Send> = match trade_mode {

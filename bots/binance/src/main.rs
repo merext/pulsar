@@ -110,10 +110,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             
             // Create trader and run trading loop
             let mut binance_trader = BinanceTrader::new(
-                &trading_symbol,
                 &api_key,
-                &api_secret,
-                TradeMode::Real
+                &api_secret
             ).await?;
             
             binance_trader.run_trading_loop(
@@ -128,10 +126,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             
             // Create trader and run trading loop
             let mut binance_trader = BinanceTrader::new(
-                &trading_symbol,
                 &api_key,
-                &api_secret,
-                TradeMode::Emulated
+                &api_secret
             ).await?;
             
             binance_trader.run_trading_loop(
@@ -146,10 +142,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             
             // Create trader and run trading loop
             let mut binance_trader = BinanceTrader::new(
-                &trading_symbol,
                 &api_key,
-                &api_secret,
-                TradeMode::Backtest
+                &api_secret
             ).await?;
             
             binance_trader.run_trading_loop(
