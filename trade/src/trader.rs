@@ -1,4 +1,8 @@
 use crate::signal::Signal;
+use crate::models::TradeData;
+use strategies::strategy::Strategy;
+use std::time::Instant;
+use futures_util::StreamExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderType {
@@ -43,4 +47,15 @@ pub trait Trader {
     
     // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
     fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64;
+    
+    // Main trading loop - each exchange implements its own trading logic
+    async fn run_trading_loop<S>(
+        &mut self,
+        strategy: &mut S,
+        trading_symbol: &str,
+        trade_mode: TradeMode,
+        trade_data: impl futures_util::Stream<Item = TradeData> + Unpin,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        S: Strategy + Send;
 } 

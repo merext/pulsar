@@ -12,6 +12,10 @@ use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 use trade::config::TradingConfig;
 use trade::trader::OrderType;
+use trade::models::TradeData;
+use strategies::strategy::Strategy;
+use std::time::Instant;
+use futures_util::StreamExt;
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
@@ -431,6 +435,99 @@ impl Trader for BinanceTrader {
                         "Balance for asset"
                     );
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_trading_loop<S>(
+        &mut self,
+        strategy: &mut S,
+        trading_symbol: &str,
+        trade_mode: TradeMode,
+        mut trade_data: impl futures_util::Stream<Item = TradeData> + Unpin,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        S: Strategy + Send,
+    {
+        let mut current_position = self.position.clone();
+
+        while let Some(trade) = trade_data.next().await {
+            // Update strategy with trade data
+            strategy.on_trade(trade.clone()).await;
+
+            let trade_price = trade.price;
+            let trade_time = trade.event_time as f64;
+
+            // Get signal from strategy
+            let (final_signal, confidence) = 
+                strategy.get_signal(trade_price, trade_time, current_position.clone());
+            
+            // Calculate position size based on confidence and trading config
+            let quantity_to_trade = self.calculate_trade_size(
+                &current_position.symbol,
+                trade_price,
+                confidence,
+                self.config.position_sizing.trading_size_min,
+                self.config.position_sizing.trading_size_max,
+                1.0, // trading_size_step - use 1.0 for DOGEUSDT
+            );
+
+            match trade_mode {
+                TradeMode::Real => {
+                    self.on_signal(final_signal, trade_price, quantity_to_trade).await;
+                }
+                TradeMode::Emulated | TradeMode::Backtest => {
+                    // Record execution start time for latency measurement
+                    let execution_start = Instant::now();
+                    
+                    // Simulate realistic network latency (1-5ms typical for HFT)
+                    let network_latency = if matches!(final_signal, Signal::Buy | Signal::Sell) {
+                        // Simulate variable latency based on market conditions
+                        let base_latency = 1.0; // 1ms base
+                        let volatility_factor = (trade_price - current_position.entry_price).abs() / trade_price;
+                        let latency_variance = (volatility_factor * 4.0).min(4.0); // 0-4ms additional
+                        std::time::Duration::from_millis((base_latency + latency_variance) as u64)
+                    } else {
+                        std::time::Duration::from_millis(0)
+                    };
+
+                    // Simulate network delay
+                    if !network_latency.is_zero() {
+                        tokio::time::sleep(network_latency).await;
+                    }
+
+                    // Use trader for trade execution simulation
+                    let _trade_result = self.on_emulate(final_signal, trade_price, quantity_to_trade).await;
+
+                    // Calculate total execution time including simulated latency
+                    let _total_execution_time = execution_start.elapsed();
+                    let _computational_latency = _total_execution_time.saturating_sub(network_latency);
+                }
+            }
+
+            // Update current position for display purposes
+            current_position = self.position();
+        }
+
+        // Log completion message
+        match trade_mode {
+            TradeMode::Real => {
+                info!("Live trading completed");
+                info!("Final position: {}", current_position);
+                info!("Final PnL: {:.6}", self.realized_pnl());
+                let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
+                info!("Final Unrealized PnL: {:.6}", self.unrealized_pnl(last_price));
+            }
+            TradeMode::Emulated | TradeMode::Backtest => {
+                let mode_name = if matches!(trade_mode, TradeMode::Emulated) { "Emulation" } else { "Backtest" };
+                info!("{} completed", mode_name);
+                info!("Final position: {}", current_position);
+                info!("Final PnL: {:.6}", self.realized_pnl());
+                // For unrealized PnL, we need a current price - use the last known price or 0
+                let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
+                info!("Final Unrealized PnL: {:.6}", self.unrealized_pnl(last_price));
             }
         }
 
