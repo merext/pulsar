@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
     // Create strategy and trader once
-    let strategy = Box::new(
+    let mut strategy = Box::new(
         StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
             .expect("Failed to load StochasticHftStrategy configuration")
     );
@@ -121,6 +121,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             
             binance_trader.trade(
                 trading_stream,
+                &mut *strategy,
                 &trading_symbol,
                 TradeMode::Real
             ).await?;
@@ -134,6 +135,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             
             binance_trader.trade(
                 trading_stream,
+                &mut *strategy,
                 &trading_symbol,
                 TradeMode::Emulated
             ).await?;
@@ -146,6 +148,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             
             binance_trader.trade(
                 trading_stream,
+                &mut *strategy,
                 &trading_symbol,
                 TradeMode::Backtest
             ).await?;

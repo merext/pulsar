@@ -368,12 +368,15 @@ impl Trader for BinanceTrader {
         Ok(())
     }
 
-    async fn trade(
+    async fn trade<S>(
         &mut self,
         mut trading_stream: impl Stream<Item = trade::models::Trade> + Unpin + Send,
+        trading_strategy: &mut S,
         trading_symbol: &str,
         trading_mode: TradeMode,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        S: strategies::strategy::Strategy + Send + Sync,
     {
         // Initialize position symbol
         self.position.symbol = trading_symbol.to_string();
@@ -398,17 +401,67 @@ impl Trader for BinanceTrader {
         let mut current_position = self.position.clone();
 
         while let Some(trade) = trading_stream.next().await {
-            // Process trade data (strategy interaction will be handled in main function)
+            // Process trade data
             let trade_price = trade.price;
             let trade_time = trade.trade_time as f64;
 
-            // For now, just log the trade
-            debug!(
-                action = "trade_received",
-                symbol = %trading_symbol,
-                price = %format!("{:.8}", trade_price),
-                time = %trade_time
+            // For now, simulate strategy signal generation
+            // In a real implementation, we would call strategy methods here
+            let final_signal = Signal::Hold; // Default signal
+            let confidence = 0.5; // Default confidence
+
+            // Calculate position size based on confidence and trading config
+            let quantity_to_trade = self.calculate_trade_size(
+                &current_position.symbol,
+                trade_price,
+                confidence,
+                self.config.position_sizing.trading_size_min,
+                self.config.position_sizing.trading_size_max,
+                1.0, // trading_size_step - use 1.0 for DOGEUSDT
             );
+
+            match trading_mode {
+                TradeMode::Real => {
+                    self.on_signal(final_signal, trade_price, quantity_to_trade).await;
+                }
+                TradeMode::Emulated | TradeMode::Backtest => {
+                    // Simulate trade execution for emulated/backtest modes
+                    match final_signal {
+                        Signal::Buy => {
+                            if current_position.quantity == 0.0 {
+                                debug!(
+                                    action = "buy_signal_emulated",
+                                    symbol = %trading_symbol,
+                                    price = %format!("{:.8}", trade_price),
+                                    quantity = %format!("{:.2}", quantity_to_trade)
+                                );
+                                // Update position for emulated trading
+                                self.position.quantity = quantity_to_trade;
+                                self.position.entry_price = trade_price;
+                            }
+                        }
+                        Signal::Sell => {
+                            if current_position.quantity > 0.0 {
+                                let pnl = (trade_price - current_position.entry_price) * current_position.quantity;
+                                self.realized_pnl += pnl;
+                                debug!(
+                                    action = "sell_signal_emulated",
+                                    symbol = %trading_symbol,
+                                    price = %format!("{:.8}", trade_price),
+                                    quantity = %format!("{:.2}", current_position.quantity),
+                                    pnl = %format!("{:.6}", pnl)
+                                );
+                                // Reset position after sell
+                                self.position.quantity = 0.0;
+                                self.position.entry_price = 0.0;
+                            }
+                        }
+                        Signal::Hold => {
+                            // Do nothing
+                        }
+                    }
+                }
+            }
 
             // Update current position for display purposes
             current_position = self.position();
