@@ -6,8 +6,9 @@ use clap::{Parser, Subcommand};
 use strategies::StochasticHftStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
-use ::trade::trader::TradeMode;
+use ::trade::trader::{TradeMode, Trader};
 use binance_exchange::trader::BinanceTrader;
+use binance_exchange::BinanceClient;
 
 
 
@@ -95,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| "DOGEUSDT".to_string());
     
     // Create strategy and trader once
-    let mut strategy = Box::new(
+    let strategy = Box::new(
         StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
             .expect("Failed to load StochasticHftStrategy configuration")
     );
@@ -114,31 +115,39 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Trade => {
             info!("Starting live trading for {}...", trading_symbol);
             
-            binance_trader.run_trading_loop(
-                &mut *strategy,
+            // Get live WebSocket stream
+            let binance_client = BinanceClient::new().await?;
+            let trading_stream = binance_client.trade_stream(&trading_symbol).await?;
+            
+            binance_trader.trade(
+                trading_stream,
                 &trading_symbol,
-                TradeMode::Real,
-                ""
+                TradeMode::Real
             ).await?;
         }
         Commands::Emulate => {
             info!("Starting live emulation with real WebSocket stream for {}...", trading_symbol);
             
-            binance_trader.run_trading_loop(
-                &mut *strategy,
+            // Get live WebSocket stream
+            let binance_client = BinanceClient::new().await?;
+            let trading_stream = binance_client.trade_stream(&trading_symbol).await?;
+            
+            binance_trader.trade(
+                trading_stream,
                 &trading_symbol,
-                TradeMode::Emulated,
-                ""
+                TradeMode::Emulated
             ).await?;
         }
         Commands::Backtest { uri } => {
             info!("Starting backtest with data from: {}", uri);
             
-            binance_trader.run_trading_loop(
-                &mut *strategy,
+            // Get historical data stream
+            let trading_stream = BinanceClient::trade_data(&uri).await?;
+            
+            binance_trader.trade(
+                trading_stream,
                 &trading_symbol,
-                TradeMode::Backtest,
-                &uri
+                TradeMode::Backtest
             ).await?;
         }
     }

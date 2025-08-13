@@ -1,4 +1,6 @@
 use crate::signal::Signal;
+use crate::models::Trade;
+use futures_util::Stream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderType {
@@ -44,5 +46,12 @@ pub trait Trader {
     // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
     fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64;
     
+    // Universal trading loop that handles all trading modes
+    async fn trade(
+        &mut self,
+        trading_stream: impl Stream<Item = Trade> + Unpin + Send,
+        trading_symbol: &str,
+        trading_mode: TradeMode,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 } 

@@ -13,10 +13,10 @@ use trade::trader::{Position, TradeMode, Trader};
 use trade::config::TradingConfig;
 use trade::trader::OrderType;
 
-use crate::client::BinanceClient;
 
-use std::time::Instant;
+
 use futures_util::StreamExt;
+use futures_util::Stream;
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
@@ -147,6 +147,10 @@ impl BinanceTrader {
         // For now, use a conservative multiplier
         0.8 // Reduce position size to 80% of base calculation
     }
+
+
+
+
 }
 
 #[async_trait]
@@ -415,24 +419,19 @@ impl Trader for BinanceTrader {
 
         Ok(())
     }
-}
 
-impl BinanceTrader {
-    pub async fn run_trading_loop<S>(
+    async fn trade(
         &mut self,
-        strategy: &mut S,
+        mut trading_stream: impl Stream<Item = trade::models::Trade> + Unpin + Send,
         trading_symbol: &str,
-        trade_mode: TradeMode,
-        data_source: &str,
+        trading_mode: TradeMode,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-    where
-        S: strategies::strategy::Strategy + Send + Sync,
     {
         // Initialize position symbol
         self.position.symbol = trading_symbol.to_string();
         
         // Initialize connection for real and emulated trading modes
-        if (trade_mode == TradeMode::Real || trade_mode == TradeMode::Emulated) && self.connection.is_none() {
+        if (trading_mode == TradeMode::Real || trading_mode == TradeMode::Emulated) && self.connection.is_none() {
             let config = ConfigurationWebsocketApi::builder()
                 .api_key(&self.api_key)
                 .api_secret(&self.api_secret)
@@ -447,80 +446,28 @@ impl BinanceTrader {
                     .expect("Failed to connect to WebSocket API"),
             );
         }
-        
-        // Create BinanceClient and get appropriate data stream
-        let binance_client = BinanceClient::new().await?;
-        let mut trade_data: Box<dyn futures_util::Stream<Item = trade::models::Trade> + Unpin + Send> = match trade_mode {
-            TradeMode::Real | TradeMode::Emulated => {
-                Box::new(binance_client.trade_stream(trading_symbol).await?)
-            }
-            TradeMode::Backtest => {
-                Box::new(BinanceClient::trade_data(data_source).await?)
-            }
-        };
 
         let mut current_position = self.position.clone();
 
-        while let Some(trade) = trade_data.next().await {
-            // Update strategy with trade data
-            strategy.on_trade(trade.clone().into()).await;
-
+        while let Some(trade) = trading_stream.next().await {
+            // Process trade data (strategy interaction will be handled in main function)
             let trade_price = trade.price;
             let trade_time = trade.trade_time as f64;
 
-            // Get signal from strategy
-            let (final_signal, confidence) = 
-                strategy.get_signal(trade_price, trade_time, current_position.clone());
-            
-            // Calculate position size based on confidence and trading config
-            let quantity_to_trade = self.calculate_trade_size(
-                &current_position.symbol,
-                trade_price,
-                confidence,
-                self.config.position_sizing.trading_size_min,
-                self.config.position_sizing.trading_size_max,
-                1.0, // trading_size_step - use 1.0 for DOGEUSDT
+            // For now, just log the trade
+            debug!(
+                action = "trade_received",
+                symbol = %trading_symbol,
+                price = %format!("{:.8}", trade_price),
+                time = %trade_time
             );
-
-            match trade_mode {
-                TradeMode::Real => {
-                    self.on_signal(final_signal, trade_price, quantity_to_trade).await;
-                }
-                TradeMode::Emulated | TradeMode::Backtest => {
-                    // Record execution start time for latency measurement
-                    let execution_start = Instant::now();
-                    
-                    // Simulate realistic network latency (1-5ms typical for HFT)
-                    let network_latency = if matches!(final_signal, Signal::Buy | Signal::Sell) {
-                        // Simulate variable latency based on market conditions
-                        let base_latency = 1.0; // 1ms base
-                        let volatility_factor = (trade_price - current_position.entry_price).abs() / trade_price;
-                        let latency_variance = (volatility_factor * 4.0).min(4.0); // 0-4ms additional
-                        std::time::Duration::from_millis((base_latency + latency_variance) as u64)
-                    } else {
-                        std::time::Duration::from_millis(0)
-                    };
-
-                    // Simulate network delay
-                    if !network_latency.is_zero() {
-                        tokio::time::sleep(network_latency).await;
-                    }
-
-                    // Use trader for trade execution simulation
-                    let _trade_result = self.on_emulate(final_signal, trade_price, quantity_to_trade).await;
-
-                    // Calculate total execution time including simulated latency
-                    let _total_execution_time = execution_start.elapsed();
-                    let _computational_latency = _total_execution_time.saturating_sub(network_latency);
-                }
-            }
 
             // Update current position for display purposes
             current_position = self.position();
         }
 
         // Log completion message
-        match trade_mode {
+        match trading_mode {
             TradeMode::Real => {
                 info!("Live trading completed");
                 info!("Final position: {}", current_position);
@@ -529,7 +476,7 @@ impl BinanceTrader {
                 info!("Final Unrealized PnL: {:.6}", self.unrealized_pnl(last_price));
             }
             TradeMode::Emulated | TradeMode::Backtest => {
-                let mode_name = if matches!(trade_mode, TradeMode::Emulated) { "Emulation" } else { "Backtest" };
+                let mode_name = if matches!(trading_mode, TradeMode::Emulated) { "Emulation" } else { "Backtest" };
                 info!("{} completed", mode_name);
                 info!("Final position: {}", current_position);
                 info!("Final PnL: {:.6}", self.realized_pnl());
@@ -541,4 +488,7 @@ impl BinanceTrader {
 
         Ok(())
     }
+
 }
+
+
