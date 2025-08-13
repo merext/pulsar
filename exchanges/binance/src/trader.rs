@@ -12,7 +12,8 @@ use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 use trade::config::TradingConfig;
 use trade::trader::OrderType;
-use trade::models::TradeData;
+
+use crate::client::BinanceClient;
 
 use std::time::Instant;
 use futures_util::StreamExt;
@@ -446,21 +447,32 @@ impl BinanceTrader {
     pub async fn run_trading_loop<S>(
         &mut self,
         strategy: &mut S,
-        _trading_symbol: &str,
+        trading_symbol: &str,
         trade_mode: TradeMode,
-        mut trade_data: impl futures_util::Stream<Item = TradeData> + Unpin + Send,
+        data_source: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
         S: strategies::strategy::Strategy + Send + Sync,
     {
+        // Create BinanceClient and get appropriate data stream
+        let binance_client = BinanceClient::new().await?;
+        let mut trade_data: Box<dyn futures_util::Stream<Item = trade::models::Trade> + Unpin + Send> = match trade_mode {
+            TradeMode::Real | TradeMode::Emulated => {
+                Box::new(binance_client.trade_stream(trading_symbol).await?)
+            }
+            TradeMode::Backtest => {
+                Box::new(BinanceClient::trade_data(data_source).await?)
+            }
+        };
+
         let mut current_position = self.position.clone();
 
         while let Some(trade) = trade_data.next().await {
             // Update strategy with trade data
-            strategy.on_trade(trade.clone()).await;
+            strategy.on_trade(trade.clone().into()).await;
 
             let trade_price = trade.price;
-            let trade_time = trade.time as f64;
+            let trade_time = trade.trade_time as f64;
 
             // Get signal from strategy
             let (final_signal, confidence) = 

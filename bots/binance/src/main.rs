@@ -7,12 +7,9 @@ use strategies::StochasticHftStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
 use ::trade::trader::TradeMode;
-use binance_exchange::BinanceClient;
-
-
 use binance_exchange::trader::BinanceTrader;
 
-use futures_util::StreamExt;
+
 
 
 
@@ -111,10 +108,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Commands::Trade => {
             info!("Starting live trading for {}...", trading_symbol);
             
-            // Create live WebSocket trade stream for real trading
-            let binance_client = BinanceClient::new().await?;
-            let live_trade_stream = binance_client.trade_stream(&trading_symbol).await?;
-            
             // Create trader and run trading loop
             let mut binance_trader = BinanceTrader::new(
                 &trading_symbol,
@@ -127,15 +120,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &mut *strategy,
                 &trading_symbol,
                 TradeMode::Real,
-                live_trade_stream.map(|trade| trade.into())
+                ""
             ).await?;
         }
         Commands::Emulate => {
             info!("Starting live emulation with real WebSocket stream for {}...", trading_symbol);
-            
-            // Create live WebSocket trade stream for continuous emulation
-            let binance_client = BinanceClient::new().await?;
-            let live_trade_stream = binance_client.trade_stream(&trading_symbol).await?;
             
             // Create trader and run trading loop
             let mut binance_trader = BinanceTrader::new(
@@ -149,15 +138,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &mut *strategy,
                 &trading_symbol,
                 TradeMode::Emulated,
-                live_trade_stream.map(|trade| trade.into())
+                ""
             ).await?;
         }
         Commands::Backtest { uri } => {
             info!("Starting backtest with data from: {}", uri);
-            
-            // Create historical data stream for backtesting from URI (local file or remote URL)
-            // TODO: Implement BinanceClient::trade_data_from_uri() that auto-detects schema
-            let historical_trade_stream = BinanceClient::trade_data(&uri).await?;
             
             // Create trader and run trading loop
             let mut binance_trader = BinanceTrader::new(
@@ -171,7 +156,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &mut *strategy,
                 &trading_symbol,
                 TradeMode::Backtest,
-                historical_trade_stream.map(|trade| trade.into())
+                &uri
             ).await?;
         }
     }
