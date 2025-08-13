@@ -41,12 +41,9 @@ async fn run_trade_loop(
     };
 
 
-
     let mut trade_stream = trade_data;
-    let mut trade_count = 0;
 
     while let Some(trade) = trade_stream.next().await {
-        trade_count += 1;
         
         // Update strategy with trade data
         strategy.on_trade(trade.clone().into()).await;
@@ -69,13 +66,6 @@ async fn run_trade_loop(
             binance_trader.config.position_sizing.trading_size_max,
             1.0, // trading_size_step - use 1.0 for DOGEUSDT
         );
-
-
-
-        // Log when there's insufficient data for trading (only at INFO level)
-        if matches!(final_signal, Signal::Hold) && confidence < 0.1 {
-            info!("Insufficient data for trading - confidence: {:.3}, waiting for more market data", confidence);
-        }
 
         match trade_mode {
             TradeMode::Real => {
@@ -169,7 +159,7 @@ async fn run_trade_loop(
     // Log completion message
     match trade_mode {
         TradeMode::Real => {
-            info!("Live trading completed - processed {} trades", trade_count);
+            info!("Live trading completed");
             info!("Final position: {}", current_position);
             info!("Final PnL: {:.6}", binance_trader.realized_pnl());
             let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
@@ -177,7 +167,7 @@ async fn run_trade_loop(
         }
         TradeMode::Emulated | TradeMode::Backtest => {
             let mode_name = if matches!(trade_mode, TradeMode::Emulated) { "Emulation" } else { "Backtest" };
-            info!("{} completed - processed {} trades", mode_name, trade_count);
+            info!("{} completed", mode_name);
             info!("Final position: {}", current_position);
             info!("Final PnL: {:.6}", binance_trader.realized_pnl());
             // For unrealized PnL, we need a current price - use the last known price or 0
