@@ -5,13 +5,12 @@ use binance_sdk::spot::websocket_api::{
     AccountStatusParams, OrderPlaceParams, OrderPlaceSideEnum, OrderPlaceTypeEnum, WebsocketApi,
 };
 use rust_decimal::Decimal;
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use rust_decimal_macros::dec;
+use rust_decimal::prelude::FromPrimitive;
 use tracing::{error, debug, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 use trade::config::TradingConfig;
-use trade::trader::OrderType;
+
 
 
 
@@ -290,58 +289,7 @@ impl Trader for BinanceTrader {
         }
     }
 
-    async fn on_emulate(&mut self, signal: Signal, price: f64, quantity: f64) -> Option<(f64, f64, f64, f64, OrderType)> {
-        let symbol = self.position.symbol.clone();
-        let quantity = Decimal::from_f64(quantity).unwrap_or(dec!(0.0)); // Updated quantity conversion
 
-        match signal {
-            Signal::Buy => {
-                if self.position.quantity == 0.0 {
-                    debug!(
-                        action = "buy_order_executed_emulated",
-                        symbol = %symbol,
-                        price = %format!("{:.5}", price),
-                        quantity = %format!("{:.0}", quantity.to_f64().unwrap_or_default()),
-                        entry_price = %format!("{:.5}", price)
-                    );
-                    // Simulate a buy in emulated mode
-                    self.position.quantity = quantity.to_f64().unwrap_or(0.0);
-                    self.position.entry_price = price;
-                    
-                    // Return simulated trade details for logging
-                    Some((price, 0.0, 0.0, 0.0, OrderType::Market))
-                } else {
-                    None
-                }
-            }
-            Signal::Sell => {
-                if self.position.quantity > 0.0 {
-                    let pnl = (price - self.position.entry_price) * self.position.quantity;
-                    self.realized_pnl += pnl;
-                    debug!(
-                        action = "sell_order_executed_emulated",
-                        symbol = %symbol,
-                        price = %format!("{:.5}", price),
-                        quantity = %format!("{:.0}", self.position.quantity),
-                        pnl = %format!("{:.6}", pnl),
-                        total_pnl = %format!("{:.6}", self.realized_pnl)
-                    );
-                    // Simulate a sell in emulated mode
-                    self.position.quantity = 0.0;
-                    self.position.entry_price = 0.0;
-                    
-                    // Return simulated trade details for logging
-                    Some((price, 0.0, 0.0, 0.0, OrderType::Market))
-                } else {
-                    None
-                }
-            }
-            Signal::Hold => {
-                // Do nothing
-                None
-            }
-        }
-    }
 
     fn unrealized_pnl(&self, current_price: f64) -> f64 {
         if self.position.quantity > 0.0 {
