@@ -1,9 +1,8 @@
-use ::trade::logger::{StrategyLoggerAdapter, TradeLogger};
+
 use ::trade::trader::{TradeMode, Trader};
 use binance_exchange::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use clap::{Parser, Subcommand};
-use std::env;
 use std::error::Error;
 use std::fs;
 use strategies::StochasticHftStrategy;
@@ -85,26 +84,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let trading_config =
         load_config("config/trading_config.toml").expect("Failed to load trading configuration");
 
-    let trading_symbol = get_config_value(&trading_config, "position_sizing.trading_symbol")
-        .unwrap_or_else(|| "DOGEUSDT".to_string());
+    let trading_symbol: String = get_config_value(&trading_config, "position_sizing.trading_symbol")
+        .ok_or("Trading symbol not defined in configuration")?;
 
     // Create strategy and trader once
-    let mut strategy = Box::new(
-        StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
-            .expect("Failed to load StochasticHftStrategy configuration")
-            .with_logger(Box::new(StrategyLoggerAdapter::new(TradeLogger::new(
-                "binance",
-                "stochastic",
-                &trading_symbol,
-            )))),
-    );
-    let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
-    let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
-
+    let mut strategy = StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
+        .expect("Failed to load StochasticHftStrategy configuration");
+        
     info!("Trading strategy: {}", strategy.get_info());
 
     // Create trader once for all modes
-    let mut binance_trader = BinanceTrader::new(&api_key, &api_secret).await?;
+    let mut binance_trader = BinanceTrader::new().await?;
 
     match cli.command {
         Commands::Trade => {
@@ -117,7 +107,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             binance_trader
                 .trade(
                     trading_stream,
-                    &mut *strategy,
+                    &mut strategy,
                     &trading_symbol,
                     TradeMode::Real,
                 )
@@ -136,7 +126,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             binance_trader
                 .trade(
                     trading_stream,
-                    &mut *strategy,
+                    &mut strategy,
                     &trading_symbol,
                     TradeMode::Emulated,
                 )
@@ -151,7 +141,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             binance_trader
                 .trade(
                     trading_stream,
-                    &mut *strategy,
+                    &mut strategy,
                     &trading_symbol,
                     TradeMode::Backtest,
                 )

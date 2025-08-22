@@ -53,6 +53,7 @@ pub struct BinanceTrader {
     pub config: TradeConfig,
     api_key: String,
     api_secret: String,
+    logger: TradeLogger,
 }
 
 impl BinanceTrader {
@@ -63,18 +64,21 @@ impl BinanceTrader {
     /// # Errors
     ///
     /// Will return `Err` if the trading config cannot be loaded.
-    pub async fn new(
-        api_key: &str,
-        api_secret: &str,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let api_key = std::env::var("BINANCE_API_KEY")
+            .map_err(|_| "BINANCE_API_KEY environment variable not set")?;
+        let api_secret = std::env::var("BINANCE_API_SECRET")
+            .map_err(|_| "BINANCE_API_SECRET environment variable not set")?;
+        
         let trading_config = TradeConfig::load()?;
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
             trade_manager: TradeManager::new(),
             config: trading_config,
-            api_key: api_key.to_string(),
-            api_secret: api_secret.to_string(),
+            api_key,
+            api_secret,
+            logger: TradeLogger::new(),
         })
     }
 
@@ -98,6 +102,7 @@ impl BinanceTrader {
             config: trading_config,
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
+            logger: TradeLogger::new(),
         })
     }
 
@@ -418,9 +423,8 @@ impl Trader for BinanceTrader {
             });
 
         while let Some(trade) = trading_stream.next().await {
-            // Create trade logger for this trade
-            let trade_logger = TradeLogger::new("binance", "stochastic", trading_symbol);
-            let strategy_logger = StrategyLoggerAdapter::new(trade_logger);
+            // Use the instance logger
+            let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
 
             // Update strategy with trade data
             trading_strategy
@@ -436,7 +440,7 @@ impl Trader for BinanceTrader {
             );
 
             // Log signal generated
-            strategy_logger.log_signal_generated(&final_signal, confidence, trade_price);
+            strategy_logger.log_signal_generated(trading_symbol, &final_signal, confidence, trade_price);
 
             // Calculate position size based on confidence and trading config
             let quantity_to_trade = self.calculate_trade_size(
@@ -464,6 +468,7 @@ impl Trader for BinanceTrader {
                             if current_position.quantity == 0.0 {
                                 // Log buy signal execution
                                 strategy_logger.log_trade_executed(
+                                    trading_symbol,
                                     &final_signal,
                                     trade_price,
                                     quantity_to_trade,
@@ -495,6 +500,7 @@ impl Trader for BinanceTrader {
                                 // Log sell signal execution with profit
                                 let profit = self.trade_manager.get_metrics().realized_pnl();
                                 strategy_logger.log_trade_executed(
+                                    trading_symbol,
                                     &final_signal,
                                     trade_price,
                                     current_position.quantity,
