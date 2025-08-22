@@ -7,9 +7,10 @@ use binance_sdk::spot::websocket_api::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use trade::signal::Signal;
-use trade::trader::{Position, TradeMode, Trader};
+use trade::trader::{Position as TraderPosition, TradeMode, Trader};
 use trade::config::TradingConfig;
 use trade::logger::{TradeLogger, StrategyLoggerAdapter};
+use trade::metrics::PositionManager;
 use strategies::strategy::StrategyLogger;
 use tracing::{error, info};
 
@@ -47,8 +48,8 @@ fn convert_strategies_signal_to_trade_signal(signal: strategies::models::Signal)
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
-    pub position: Position,
-    pub realized_pnl: f64,
+    pub position: TraderPosition,
+    pub position_manager: PositionManager,
     pub config: TradingConfig,
     api_key: String,
     api_secret: String,
@@ -67,12 +68,12 @@ impl BinanceTrader {
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
-            position: Position {
+            position: TraderPosition {
                 symbol: String::new(), // Will be set in run_trading_loop
                 quantity: 0.0,
                 entry_price: 0.0,
             },
-            realized_pnl: 0.0,
+            position_manager: PositionManager::new(),
             config: trading_config,
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
@@ -91,12 +92,12 @@ impl BinanceTrader {
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
-            position: Position {
+            position: TraderPosition {
                 symbol: String::new(), // Will be set in run_trading_loop
                 quantity: 0.0,
                 entry_price: 0.0,
             },
-            realized_pnl: 0.0,
+            position_manager: PositionManager::new(),
             config: trading_config,
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
@@ -251,8 +252,7 @@ impl Trader for BinanceTrader {
             }
             Signal::Sell => {
                 if self.position.quantity > 0.0 {
-                    let pnl = (price - self.position.entry_price) * self.position.quantity;
-                    self.realized_pnl += pnl;
+                    let _pnl = self.position_manager.close_position(&self.position.symbol, price, 0.0);
                     let params = OrderPlaceParams::builder(
                         symbol.clone(),
                         OrderPlaceSideEnum::Sell,
@@ -288,20 +288,12 @@ impl Trader for BinanceTrader {
 
 
 
-    fn unrealized_pnl(&self, current_price: f64) -> f64 {
-        if self.position.quantity > 0.0 {
-            (current_price - self.position.entry_price) * self.position.quantity
-        } else {
-            0.0
-        }
+    fn get_metrics(&self) -> &trade::metrics::PerformanceMetrics {
+        self.position_manager.get_metrics()
     }
-
-    fn realized_pnl(&self) -> f64 {
-        self.realized_pnl
-    }
-
-    fn position(&self) -> Position {
-        self.position.clone()
+    
+    fn get_position_manager(&self) -> &trade::metrics::PositionManager {
+        &self.position_manager
     }
 
     async fn account_status(&self) -> Result<(), anyhow::Error> {
@@ -440,6 +432,7 @@ impl Trader for BinanceTrader {
                                 
                                 // Update position for emulated trading
                                 let old_position = current_position.clone();
+                                self.position_manager.open_position(&current_position.symbol, trade_price, quantity_to_trade, trade_time);
                                 self.position.quantity = quantity_to_trade;
                                 self.position.entry_price = trade_price;
                                 
@@ -452,14 +445,14 @@ impl Trader for BinanceTrader {
                         }
                         strategies::models::Signal::Sell => {
                             if current_position.quantity > 0.0 {
-                                let pnl = (trade_price - current_position.entry_price) * current_position.quantity;
-                                self.realized_pnl += pnl;
+                                let pnl = self.position_manager.close_position(&current_position.symbol, trade_price, trade_time);
                                 
                                 // Log sell signal execution
                                 strategy_logger.log_trade_executed(&final_signal, trade_price, current_position.quantity, Some(pnl));
                                 
                                 // Reset position after sell
                                 let old_position = current_position.clone();
+                                self.position_manager.update_position(&current_position.symbol, 0.0, trade_price, trade_time);
                                 self.position.quantity = 0.0;
                                 self.position.entry_price = 0.0;
                                 
@@ -478,7 +471,7 @@ impl Trader for BinanceTrader {
             }
 
             // Update current position for display purposes
-            current_position = self.position();
+            current_position = self.position.clone();
         }
 
 

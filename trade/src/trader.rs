@@ -1,5 +1,6 @@
 use crate::signal::Signal;
 use crate::models::Trade;
+use crate::metrics::{PerformanceMetrics, PositionManager};
 use futures_util::Stream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,9 +37,11 @@ impl std::fmt::Display for Position {
 
 #[async_trait::async_trait]
 pub trait Trader {
-    fn unrealized_pnl(&self, current_price: f64) -> f64;
-    fn realized_pnl(&self) -> f64;
-    fn position(&self) -> Position;
+    // Centralized metrics access
+    fn get_metrics(&self) -> &PerformanceMetrics;
+    fn get_position_manager(&self) -> &PositionManager;
+    
+    // Account and trading operations
     async fn account_status(&self) -> Result<(), anyhow::Error>;
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64);
     

@@ -1,196 +1,188 @@
 use crate::signal::Signal;
-use crate::trader::OrderType;
-use std::collections::VecDeque;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub struct PerformanceMetrics {
-    pub total_trades: usize,
-    pub winning_trades: usize,
-    pub losing_trades: usize,
-    pub total_fees: f64,
-    pub total_rebates: f64,
-    pub total_slippage: f64,
-    pub average_fill_rate: f64,
-    pub consecutive_losses: usize,
-    pub max_drawdown: f64,
-    pub peak_equity: f64,
-    pub current_equity: f64,
-    pub trade_history: VecDeque<TradeRecord>,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields are used in backtest statistics calculation
 pub struct TradeRecord {
     pub timestamp: f64,
-    pub signal: Signal,
     pub price: f64,
     pub quantity: f64,
-    pub fees: f64,
-    pub slippage: f64,
-    pub rebates: f64,
-    pub pnl: f64,
-    pub order_type: OrderType,
+    pub signal: Signal,
+    pub pnl: Option<f64>,
 }
 
-impl Default for PerformanceMetrics {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Debug, Clone)]
+pub struct Position {
+    pub symbol: String,
+    pub quantity: f64,
+    pub entry_price: f64,
+    pub entry_time: f64,
 }
 
-impl PerformanceMetrics {
-    #[must_use]
-    pub const fn new() -> Self {
+#[derive(Debug, Clone)]
+pub struct PositionManager {
+    positions: HashMap<String, Position>,
+    metrics: PerformanceMetrics,
+}
+
+impl PositionManager {
+    pub fn new() -> Self {
         Self {
-            total_trades: 0,
-            winning_trades: 0,
-            losing_trades: 0,
-            total_fees: 0.0,
-            total_rebates: 0.0,
-            total_slippage: 0.0,
-            average_fill_rate: 0.0,
-            consecutive_losses: 0,
-            max_drawdown: 0.0,
-            peak_equity: 0.0,
-            current_equity: 0.0,
-            trade_history: VecDeque::new(),
+            positions: HashMap::new(),
+            metrics: PerformanceMetrics::new(),
         }
     }
 
-    pub fn update_equity(&mut self, new_equity: f64) {
-        self.current_equity = new_equity;
-        if new_equity > self.peak_equity {
-            self.peak_equity = new_equity;
-        }
+    // Position management
+    pub fn open_position(&mut self, symbol: &str, price: f64, quantity: f64, timestamp: f64) {
+        let position = Position {
+            symbol: symbol.to_string(),
+            quantity,
+            entry_price: price,
+            entry_time: timestamp,
+        };
+        self.positions.insert(symbol.to_string(), position);
+    }
 
-        // Prevent division by zero when peak_equity is 0
-        if self.peak_equity > 0.0 {
-            let drawdown = (self.peak_equity - new_equity) / self.peak_equity;
-            if drawdown > self.max_drawdown {
-                self.max_drawdown = drawdown;
+    pub fn close_position(&mut self, symbol: &str, price: f64, timestamp: f64) -> f64 {
+        if let Some(position) = self.positions.remove(symbol) {
+            let pnl = (price - position.entry_price) * position.quantity;
+            self.metrics.record_trade(TradeRecord {
+                timestamp,
+                price,
+                quantity: position.quantity,
+                signal: Signal::Sell, // Assuming closing is selling
+                pnl: Some(pnl),
+            });
+            pnl
+        } else {
+            0.0
+        }
+    }
+
+    pub fn update_position(&mut self, symbol: &str, new_quantity: f64, new_price: f64, timestamp: f64) {
+        if let Some(position) = self.positions.get_mut(symbol) {
+            if new_quantity != position.quantity {
+                // If quantity changed, calculate PnL for the change
+                let quantity_change = new_quantity - position.quantity;
+                if quantity_change < 0.0 {
+                    // Reducing position (partial close)
+                    let pnl = (new_price - position.entry_price) * quantity_change.abs();
+                    self.metrics.record_trade(TradeRecord {
+                        timestamp,
+                        price: new_price,
+                        quantity: quantity_change.abs(),
+                        signal: Signal::Sell,
+                        pnl: Some(pnl),
+                    });
+                }
+                
+                position.quantity = new_quantity;
+                if new_quantity == 0.0 {
+                    // Position fully closed
+                    self.positions.remove(symbol);
+                }
             }
         }
     }
 
-    pub fn record_trade(&mut self, record: TradeRecord) {
-        self.total_trades += 1;
-        self.total_fees += record.fees;
-        self.total_slippage += record.slippage;
-        self.total_rebates += record.rebates;
+    pub fn get_position(&self, symbol: &str) -> Option<&Position> {
+        self.positions.get(symbol)
+    }
 
-        if record.pnl > 0.0 {
-            self.winning_trades += 1;
-            self.consecutive_losses = 0;
+    pub fn unrealized_pnl(&self, symbol: &str, current_price: f64) -> f64 {
+        if let Some(position) = self.positions.get(symbol) {
+            (current_price - position.entry_price) * position.quantity
         } else {
-            self.losing_trades += 1;
-            self.consecutive_losses += 1;
-        }
-
-        self.trade_history.push_back(record);
-        if self.trade_history.len() > 1000 {
-            self.trade_history.pop_front();
+            0.0
         }
     }
 
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)]
+    pub fn total_unrealized_pnl(&self, current_prices: &HashMap<String, f64>) -> f64 {
+        self.positions
+            .iter()
+            .map(|(symbol, position)| {
+                if let Some(&price) = current_prices.get(symbol) {
+                    (price - position.entry_price) * position.quantity
+                } else {
+                    0.0
+                }
+            })
+            .sum()
+    }
+
+    pub fn realized_pnl(&self) -> f64 {
+        self.metrics.total_pnl()
+    }
+
+    pub fn get_metrics(&self) -> &PerformanceMetrics {
+        &self.metrics
+    }
+
+    pub fn get_positions(&self) -> &HashMap<String, Position> {
+        &self.positions
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PerformanceMetrics {
+    trades: Vec<TradeRecord>,
+    total_pnl: f64,
+    win_count: usize,
+    loss_count: usize,
+    total_trades: usize,
+}
+
+impl PerformanceMetrics {
+    pub fn new() -> Self {
+        Self {
+            trades: Vec::new(),
+            total_pnl: 0.0,
+            win_count: 0,
+            loss_count: 0,
+            total_trades: 0,
+        }
+    }
+
+    pub fn record_trade(&mut self, trade: TradeRecord) {
+        if let Some(pnl) = trade.pnl {
+            self.total_pnl += pnl;
+            if pnl > 0.0 {
+                self.win_count += 1;
+            } else if pnl < 0.0 {
+                self.loss_count += 1;
+            }
+        }
+        self.total_trades += 1;
+        self.trades.push(trade);
+    }
+
+    pub fn total_pnl(&self) -> f64 {
+        self.total_pnl
+    }
+
     pub fn win_rate(&self) -> f64 {
         if self.total_trades == 0 {
             0.0
         } else {
-            self.winning_trades as f64 / self.total_trades as f64
+            self.win_count as f64 / self.total_trades as f64
         }
     }
 
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)]
+    pub fn total_trades(&self) -> usize {
+        self.total_trades
+    }
+
     pub fn average_trade_pnl(&self) -> f64 {
-        if self.total_trades == 0 || self.trade_history.is_empty() {
+        if self.total_trades == 0 {
             0.0
         } else {
-            self.trade_history.iter().map(|t| t.pnl).sum::<f64>() / self.total_trades as f64
+            self.total_pnl / self.total_trades as f64
         }
     }
 
-    #[must_use]
-    pub fn net_pnl_after_costs(&self) -> f64 {
-        if self.trade_history.is_empty() {
-            0.0
-        } else {
-            self.trade_history.iter().map(|t| t.pnl).sum::<f64>()
-        }
-    }
-
-    #[must_use]
-    pub fn gross_pnl(&self) -> f64 {
-        self.net_pnl_after_costs() + self.total_costs()
-    }
-
-    #[must_use]
-    pub fn total_costs(&self) -> f64 {
-        self.total_fees + self.total_slippage - self.total_rebates
-    }
-
-    #[must_use]
-    pub fn profit_factor(&self) -> f64 {
-        if self.total_costs() == 0.0 {
-            if self.net_pnl_after_costs() > 0.0 {
-                f64::INFINITY
-            } else {
-                0.0
-            }
-        } else {
-            self.gross_pnl() / self.total_costs()
-        }
-    }
-
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)]
-    pub fn average_win(&self) -> f64 {
-        if self.winning_trades == 0 {
-            0.0
-        } else {
-            let winning_pnl: f64 = self.trade_history.iter()
-                .filter(|t| t.pnl > 0.0)
-                .map(|t| t.pnl)
-                .sum();
-            winning_pnl / self.winning_trades as f64
-        }
-    }
-
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)]
-    pub fn average_loss(&self) -> f64 {
-        if self.losing_trades == 0 {
-            0.0
-        } else {
-            let losing_pnl: f64 = self.trade_history.iter()
-                .filter(|t| t.pnl < 0.0)
-                .map(|t| t.pnl.abs())
-                .sum();
-            losing_pnl / self.losing_trades as f64
-        }
-    }
-
-    #[must_use]
-    pub fn sharpe_ratio(&self) -> f64 {
-        if self.trade_history.len() < 2 {
-            return 0.0;
-        }
-
-        let returns: Vec<f64> = self.trade_history.iter()
-            .map(|t| t.pnl)
-            .collect();
-
-        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter()
-            .map(|r| (r - mean_return).powi(2))
-            .sum::<f64>() / (returns.len() - 1) as f64;
-
-        if variance == 0.0 {
-            0.0
-        } else {
-            mean_return / variance.sqrt()
-        }
+    pub fn get_trades(&self) -> &[TradeRecord] {
+        &self.trades
     }
 }
+
+

@@ -1,16 +1,16 @@
 pub mod config;
-pub mod metrics;
 pub mod executor;
-pub mod market;
-pub mod trader;
-pub mod signal;
-pub mod models;
 pub mod logger;
+pub mod market;
+pub mod metrics;
+pub mod models;
+pub mod signal;
+pub mod trader;
 
-// Re-export commonly used types
-pub use models::{Trade, TradeData};
-pub use trader::{Position, Trader, TradeMode, OrderType};
 pub use config::TradingConfig;
-pub use metrics::{PerformanceMetrics, TradeRecord};
+pub use logger::{StrategyLoggerAdapter, TradeLogger};
+pub use metrics::{PerformanceMetrics, Position, PositionManager, TradeRecord};
+pub use models::Trade;
 pub use signal::Signal;
+pub use trader::{OrderType, Position as TraderPosition, TradeMode, Trader};
 

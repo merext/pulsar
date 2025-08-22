@@ -64,39 +64,16 @@ pub struct StochasticHftStrategy {
     last_signal_time: f64,
     consecutive_losses: usize,
     
-    // Position and PnL tracking for backtesting
+    // Position tracking for backtesting
     current_position: f64,
     entry_price: f64,
     entry_time: f64,
-    unrealized_pnl: f64,
-    realized_pnl: f64,
-    total_pnl: f64,
-    
-    // Trade history for backtesting
-    trades: Vec<TradeRecord>,
-    
-    // Performance tracking
-    win_count: usize,
-    loss_count: usize,
-    max_drawdown: f64,
-    peak_equity: f64,
-    current_equity: f64,
     
     // Strategy logger
     logger: Box<dyn StrategyLogger>,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields are used in backtest statistics calculation
-struct TradeRecord {
-    entry_time: f64,
-    exit_time: f64,
-    entry_price: f64,
-    exit_price: f64,
-    position_size: f64,
-    pnl: f64,
-    signal: Signal,
-}
+
 
 impl StochasticHftStrategy {
     /// # Panics
@@ -136,15 +113,6 @@ impl StochasticHftStrategy {
             current_position: 0.0,
             entry_price: 0.0,
             entry_time: 0.0,
-            unrealized_pnl: 0.0,
-            realized_pnl: 0.0,
-            total_pnl: 0.0,
-            trades: Vec::new(),
-            win_count: 0,
-            loss_count: 0,
-            max_drawdown: 0.0,
-            peak_equity: 0.0,
-            current_equity: 0.0,
             logger: Box::new(NoOpStrategyLogger),
         })
     }
@@ -412,18 +380,12 @@ impl Strategy for StochasticHftStrategy {
     }
     
     fn get_info(&self) -> String {
-        let stats = self.get_backtest_stats();
         let current_k = self.stochastic_k.back().unwrap_or(&0.0);
         let current_d = self.stochastic_d.back().unwrap_or(&0.0);
         
         format!(
-            "{} - Trades: {}, PnL: {:.4}, Win Rate: {:.1}%, MaxDD: {:.2}%, PF: {:.2}, K: {:.1}, D: {:.1}",
+            "{} - K: {:.1}, D: {:.1}",
             self.config.general.strategy_name,
-            stats.total_trades,
-            stats.total_pnl,
-            stats.win_rate,
-            stats.max_drawdown * 100.0,
-            stats.profit_factor,
             current_k,
             current_d
         )
@@ -441,9 +403,7 @@ impl Strategy for StochasticHftStrategy {
         // Update all indicators
         self.update_indicators();
         
-        // Update PnL for current position
-        #[allow(clippy::cast_precision_loss)]
-        self.update_pnl(trade.price, trade.timestamp);
+
     }
     
     fn get_signal(
@@ -507,32 +467,7 @@ impl Strategy for StochasticHftStrategy {
 }
 
 impl StochasticHftStrategy {
-    // PnL calculation methods for backtesting
-    #[allow(clippy::cast_precision_loss)]
-    fn update_pnl(&mut self, current_price: f64, _current_time: f64) {
-        if self.current_position != 0.0 {
-            // Calculate unrealized PnL
-            let price_change = if self.current_position > 0.0 {
-                current_price - self.entry_price
-            } else {
-                self.entry_price - current_price
-            };
-            
-            self.unrealized_pnl = self.current_position.abs() * price_change;
-            self.total_pnl = self.realized_pnl + self.unrealized_pnl;
-            self.current_equity = self.total_pnl;
-            
-            // Update max drawdown
-            if self.current_equity > self.peak_equity {
-                self.peak_equity = self.current_equity;
-            } else {
-                let drawdown = (self.peak_equity - self.current_equity) / self.peak_equity.max(1.0);
-                if drawdown > self.max_drawdown {
-                    self.max_drawdown = drawdown;
-                }
-            }
-        }
-    }
+
     
     #[allow(dead_code)]
     fn execute_trade(&mut self, signal: Signal, current_price: f64, current_time: f64, confidence: f64) {
@@ -545,11 +480,6 @@ impl StochasticHftStrategy {
         match signal {
             Signal::Buy => {
                 if self.current_position <= 0.0 {
-                    // Close existing short position if any
-                    if self.current_position < 0.0 {
-                        self.close_position(current_price, current_time);
-                    }
-                    
                     // Open long position
                     self.current_position = position_size;
                     self.entry_price = current_price;
@@ -559,11 +489,6 @@ impl StochasticHftStrategy {
             }
             Signal::Sell => {
                 if self.current_position >= 0.0 {
-                    // Close existing long position if any
-                    if self.current_position > 0.0 {
-                        self.close_position(current_price, current_time);
-                    }
-                    
                     // Open short position
                     self.current_position = -position_size;
                     self.entry_price = current_price;
@@ -572,115 +497,12 @@ impl StochasticHftStrategy {
                 }
             }
             Signal::Hold => {
-                // Update unrealized PnL for current position
-                self.update_pnl(current_price, current_time);
+                // No action needed for hold signals
             }
         }
     }
     
-    #[allow(dead_code)]
-    fn close_position(&mut self, exit_price: f64, exit_time: f64) {
-        if self.current_position != 0.0 {
-            let pnl = if self.current_position > 0.0 {
-                (exit_price - self.entry_price) * self.current_position.abs()
-            } else {
-                (self.entry_price - exit_price) * self.current_position.abs()
-            };
-            
-            // Record the trade
-            let trade_record = TradeRecord {
-                entry_time: self.entry_time,
-                exit_time,
-                entry_price: self.entry_price,
-                exit_price,
-                position_size: self.current_position.abs(),
-                pnl,
-                signal: if self.current_position > 0.0 { Signal::Buy } else { Signal::Sell },
-            };
-            
-            self.trades.push(trade_record);
-            
-            // Update performance metrics
-            self.realized_pnl += pnl;
-            self.total_pnl = self.realized_pnl;
-            
-            if pnl > 0.0 {
-                self.win_count += 1;
-                self.consecutive_losses = 0;
-            } else {
-                self.loss_count += 1;
-                self.consecutive_losses += 1;
-            }
-            
-            // Reset position
-            self.current_position = 0.0;
-            self.entry_price = 0.0;
-            self.entry_time = 0.0;
-            self.unrealized_pnl = 0.0;
-        }
-    }
-    
-    // Get backtesting statistics
-    #[allow(clippy::cast_precision_loss)]
-    fn get_backtest_stats(&self) -> BacktestStats {
-        let total_trades = self.trades.len();
-        let win_rate = if total_trades > 0 {
-            self.win_count as f64 / total_trades as f64 * 100.0
-        } else {
-            0.0
-        };
-        
-        let avg_win = if self.win_count > 0 {
-            self.trades.iter()
-                .filter(|t| t.pnl > 0.0)
-                .map(|t| t.pnl)
-                .sum::<f64>() / self.win_count as f64
-        } else {
-            0.0
-        };
-        
-        let avg_loss = if self.loss_count > 0 {
-            self.trades.iter()
-                .filter(|t| t.pnl < 0.0)
-                .map(|t| t.pnl.abs())
-                .sum::<f64>() / self.loss_count as f64
-        } else {
-            0.0
-        };
-        
-        let profit_factor = if avg_loss > 0.0 {
-            (avg_win * self.win_count as f64) / (avg_loss * self.loss_count as f64)
-        } else {
-            f64::INFINITY
-        };
-        
-        BacktestStats {
-            total_trades,
-            win_rate,
-            total_pnl: self.total_pnl,
-            realized_pnl: self.realized_pnl,
-            max_drawdown: self.max_drawdown,
-            profit_factor,
-            avg_win,
-            avg_loss,
-        }
-    }
-    
-    // Public method to get backtest statistics
-    #[must_use]
-    pub fn get_stats(&self) -> BacktestStats {
-        self.get_backtest_stats()
-    }
-}
 
-#[derive(Debug, Clone)]
-pub struct BacktestStats {
-    pub total_trades: usize,
-    pub win_rate: f64,
-    pub total_pnl: f64,
-    pub realized_pnl: f64,
-    pub max_drawdown: f64,
-    pub profit_factor: f64,
-    pub avg_win: f64,
-    pub avg_loss: f64,
+    
+
 }
