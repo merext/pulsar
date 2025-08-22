@@ -1,0 +1,11 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+
+[stochastic]
+# Very long period for stable, reliable signals
+k_period = 30
+buffer_capacity = 1000
+
+[signals]
+# Very high confidence threshold - only the best trades
+min = 0.95

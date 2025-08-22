@@ -423,6 +423,9 @@ impl Trader for BinanceTrader {
             });
 
         while let Some(trade) = trading_stream.next().await {
+            // Increment tick counter for each market data update
+            self.trade_manager.increment_ticks();
+            
             // Use the instance logger
             let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
 
@@ -466,7 +469,15 @@ impl Trader for BinanceTrader {
                     match final_signal {
                         strategies::models::Signal::Buy => {
                             if current_position.quantity == 0.0 {
-                                // Log buy signal execution
+                                // Update position for emulated trading first
+                                self.trade_manager.open_position(
+                                    &current_position.symbol,
+                                    trade_price,
+                                    quantity_to_trade,
+                                    trade_time,
+                                );
+
+                                // Log buy signal execution after position is updated
                                 strategy_logger.log_trade_executed(
                                     trading_symbol,
                                     &final_signal,
@@ -474,19 +485,8 @@ impl Trader for BinanceTrader {
                                     quantity_to_trade,
                                     None,
                                     None,
+                                    Some(self.trade_manager.get_trade_summary()),
                                 );
-
-                                // Update position for emulated trading
-
-                                self.trade_manager.open_position(
-                                    &current_position.symbol,
-                                    trade_price,
-                                    quantity_to_trade,
-                                    trade_time,
-                                );
-                                // Position is now managed by trade_manager
-
-                                // Position change is already captured in buy_executed log
                             }
                         }
                         strategies::models::Signal::Sell => {
@@ -497,7 +497,15 @@ impl Trader for BinanceTrader {
                                     trade_time,
                                 );
 
-                                // Log sell signal execution with profit
+                                // Reset position after sell
+                                self.trade_manager.update_position(
+                                    &current_position.symbol,
+                                    0.0,
+                                    trade_price,
+                                    trade_time,
+                                );
+
+                                // Log sell signal execution with profit after position is updated
                                 let profit = self.trade_manager.get_metrics().realized_pnl();
                                 strategy_logger.log_trade_executed(
                                     trading_symbol,
@@ -506,19 +514,8 @@ impl Trader for BinanceTrader {
                                     current_position.quantity,
                                     Some(pnl),
                                     Some(profit),
+                                    Some(self.trade_manager.get_trade_summary()),
                                 );
-
-                                // Reset position after sell
-
-                                self.trade_manager.update_position(
-                                    &current_position.symbol,
-                                    0.0,
-                                    trade_price,
-                                    trade_time,
-                                );
-                                // Position is now managed by trade_manager
-
-                                // Position change is already captured in buy_executed log
                             }
                         }
                         strategies::models::Signal::Hold => {

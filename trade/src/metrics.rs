@@ -22,6 +22,7 @@ pub struct Position {
 pub struct TradeManager {
     positions: HashMap<String, Position>,
     metrics: PerformanceMetrics,
+    total_ticks: usize, // Total number of market data ticks received
 }
 
 impl TradeManager {
@@ -29,6 +30,7 @@ impl TradeManager {
         Self {
             positions: HashMap::new(),
             metrics: PerformanceMetrics::new(),
+            total_ticks: 0,
         }
     }
 
@@ -41,6 +43,15 @@ impl TradeManager {
             entry_time: timestamp,
         };
         self.positions.insert(symbol.to_string(), position);
+        
+        // Record the buy trade
+        self.metrics.record_trade(TradeRecord {
+            timestamp,
+            price,
+            quantity,
+            signal: Signal::Buy,
+            pnl: None, // No PnL for opening position
+        });
     }
 
     pub fn close_position(&mut self, symbol: &str, price: f64, timestamp: f64) -> f64 {
@@ -136,6 +147,18 @@ impl TradeManager {
     pub fn get_current_trade(&self) -> Option<&Position> {
         // Return the first position if we have any, otherwise None
         self.positions.values().next()
+    }
+
+    pub fn increment_ticks(&mut self) {
+        self.total_ticks += 1;
+    }
+
+    pub fn get_total_ticks(&self) -> usize {
+        self.total_ticks
+    }
+
+    pub fn get_trade_summary(&self) -> (usize, usize) {
+        (self.total_ticks, self.metrics.total_trades())
     }
 }
 

@@ -1,0 +1,11 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+
+[stochastic]
+# Moderate period for balanced signals
+k_period = 10
+buffer_capacity = 1000
+
+[signals]
+# Balanced confidence threshold
+min = 0.6

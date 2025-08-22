@@ -4,7 +4,7 @@ use std::path::Path;
 /// Universal logging interface for strategies
 pub trait StrategyLogger: Send + Sync {
     fn log_signal_generated(&self, symbol: &str, signal: &Signal, confidence: f64, price: f64);
-    fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>);
+    fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>, trade_summary: Option<(usize, usize)>);
 }
 
 #[allow(async_fn_in_trait)]
@@ -27,5 +27,5 @@ pub struct NoOpStrategyLogger;
 
 impl StrategyLogger for NoOpStrategyLogger {
     fn log_signal_generated(&self, _symbol: &str, _signal: &Signal, _confidence: f64, _price: f64) {}
-    fn log_trade_executed(&self, _symbol: &str, _signal: &Signal, _price: f64, _quantity: f64, _pnl: Option<f64>, _profit: Option<f64>) {}
+    fn log_trade_executed(&self, _symbol: &str, _signal: &Signal, _price: f64, _quantity: f64, _pnl: Option<f64>, _profit: Option<f64>, _trade_summary: Option<(usize, usize)>) {}
 }

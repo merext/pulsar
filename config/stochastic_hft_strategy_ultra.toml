@@ -1,0 +1,11 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+
+[stochastic]
+# Ultra-short period for maximum signal frequency
+k_period = 2
+buffer_capacity = 1000
+
+[signals]
+# Extremely low confidence threshold for maximum opportunities
+min = 0.3

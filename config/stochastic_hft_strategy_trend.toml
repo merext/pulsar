@@ -1,0 +1,11 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+
+[stochastic]
+# Buffer capacity for price history
+buffer_capacity = 100
+k_period = 20
+
+[signals]
+# Lower confidence threshold for more trading opportunities
+min = 0.5

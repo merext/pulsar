@@ -1,0 +1,11 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+
+[stochastic]
+# Longer period for more stable signals
+k_period = 21
+buffer_capacity = 1000
+
+[signals]
+# Lower confidence for more opportunities
+min = 0.6

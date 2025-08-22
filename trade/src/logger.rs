@@ -30,10 +30,17 @@ impl TradeLogger {
         );
     }
 
-    pub fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>) {
+    pub fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>, trade_summary: Option<(usize, usize)>) {
+        let trades_info = if let Some((total_ticks, total_trades)) = trade_summary {
+            format!("{}/{}", total_ticks, total_trades)
+        } else {
+            "unknown".to_string()
+        };
+
         match signal {
             Signal::Buy => {
                 info!(
+                    trades = %trades_info,
                     symbol = %symbol,
                     action = "buy_executed",
                     price = %format!("{:.8}", price),
@@ -44,6 +51,7 @@ impl TradeLogger {
                 if let Some(pnl) = pnl {
                     if let Some(profit) = profit {
                         info!(
+                            trades = %trades_info,
                             symbol = %symbol,
                             action = "sell_executed",
                             price = %format!("{:.8}", price),
@@ -53,6 +61,7 @@ impl TradeLogger {
                         );
                     } else {
                         info!(
+                            trades = %trades_info,
                             symbol = %symbol,
                             action = "sell_executed",
                             price = %format!("{:.8}", price),
@@ -62,6 +71,7 @@ impl TradeLogger {
                     }
                 } else if let Some(profit) = profit {
                     info!(
+                        trades = %trades_info,
                         symbol = %symbol,
                         action = "sell_executed",
                         price = %format!("{:.8}", price),
@@ -70,6 +80,7 @@ impl TradeLogger {
                     );
                 } else {
                     info!(
+                        trades = %trades_info,
                         symbol = %symbol,
                         action = "sell_executed",
                         price = %format!("{:.8}", price),
@@ -123,8 +134,8 @@ impl<'a> StrategyLogger for StrategyLoggerAdapter<'a> {
             .log_signal_generated(symbol, signal, confidence, price);
     }
 
-    fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>) {
+    fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>, trade_summary: Option<(usize, usize)>) {
         self.trade_logger
-            .log_trade_executed(symbol, signal, price, quantity, pnl, profit);
+            .log_trade_executed(symbol, signal, price, quantity, pnl, profit, trade_summary);
     }
 }

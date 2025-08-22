@@ -1,0 +1,11 @@
+[general]
+strategy_name = "StochasticHftStrategy"
+
+[stochastic]
+# Shorter period for faster signals in HFT
+k_period = 8
+buffer_capacity = 1000
+
+[signals]
+# Lower confidence threshold for more trading opportunities
+min = 0.65

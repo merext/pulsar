@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .ok_or("Trading symbol not defined in configuration")?;
 
     // Create strategy and trader once
-    let mut strategy = StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
+    let mut strategy = StochasticHftStrategy::from_file("config/stochastic_hft_strategy_trend.toml")
         .expect("Failed to load StochasticHftStrategy configuration");
         
     info!("Trading strategy: {}", strategy.get_info());
