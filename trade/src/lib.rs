@@ -5,6 +5,7 @@ pub mod market;
 pub mod trader;
 pub mod signal;
 pub mod models;
+pub mod logger;
 
 // Re-export commonly used types
 pub use models::{Trade, TradeData};

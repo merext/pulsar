@@ -96,14 +96,46 @@ impl BinanceClient {
         Ok(stream::iter(trades))
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if the file cannot be read or the data cannot be parsed.
+    /// This method automatically detects whether the input is a URL or local file path.
+    pub async fn trade_data_from_uri(
+        uri: &str,
+    ) -> Result<impl Stream<Item = PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
+        if uri.starts_with("http://") || uri.starts_with("https://") {
+            // It's a URL, use HTTP request
+            let response = reqwest::get(uri).await?.bytes().await?;
+            let trades = Self::parse_trade_data(response)?;
+            Ok(stream::iter(trades))
+        } else {
+            // It's a local file path
+            let file_content = tokio::fs::read(uri).await?;
+            let trades = Self::parse_trade_data(Bytes::from(file_content))?;
+            Ok(stream::iter(trades))
+        }
+    }
+
     fn parse_trade_data(
         data: Bytes,
     ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
         let cursor = Cursor::new(data);
-        let mut archive = ZipArchive::new(cursor)?;
-        let file = archive.by_index(0)?;
+        
+        // Try to parse as ZIP first
+        if let Ok(mut archive) = ZipArchive::new(cursor.clone()) {
+            if let Ok(file) = archive.by_index(0) {
+                return Self::parse_csv_from_reader(file);
+            }
+        }
+        
+        // If ZIP fails, try to parse as plain CSV
+        Self::parse_csv_from_reader(cursor)
+    }
 
-        let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
+    fn parse_csv_from_reader<R: std::io::Read>(
+        reader: R,
+    ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut rdr = ReaderBuilder::new().has_headers(false).from_reader(reader);
         let mut trades = Vec::new();
 
         for result in rdr.records() {
@@ -114,6 +146,10 @@ impl BinanceClient {
                     continue;
                 }
             };
+
+            if record.len() < 6 {
+                continue; // Skip incomplete records
+            }
 
             let trade_id: u64 = match record[0].parse() {
                 Ok(id) => id,

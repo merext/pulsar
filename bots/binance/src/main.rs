@@ -7,6 +7,7 @@ use strategies::StochasticHftStrategy;
 use strategies::strategy::Strategy;
 use tracing::info;
 use ::trade::trader::{TradeMode, Trader};
+use ::trade::logger::{TradeLogger, StrategyLoggerAdapter};
 use binance_exchange::trader::BinanceTrader;
 use binance_exchange::BinanceClient;
 
@@ -99,6 +100,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut strategy = Box::new(
         StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
             .expect("Failed to load StochasticHftStrategy configuration")
+            .with_logger(Box::new(StrategyLoggerAdapter::new(
+                TradeLogger::new("binance", "stochastic", &trading_symbol)
+            )))
     );
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
@@ -144,7 +148,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             info!("Starting backtest with data from: {}", uri);
             
             // Get historical data stream
-            let trading_stream = BinanceClient::trade_data(&uri).await?;
+            let trading_stream = BinanceClient::trade_data_from_uri(&uri).await?;
             
             binance_trader.trade(
                 trading_stream,

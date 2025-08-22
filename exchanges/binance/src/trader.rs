@@ -6,10 +6,12 @@ use binance_sdk::spot::websocket_api::{
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
-use tracing::{error, debug, info};
 use trade::signal::Signal;
 use trade::trader::{Position, TradeMode, Trader};
 use trade::config::TradingConfig;
+use trade::logger::{TradeLogger, StrategyLoggerAdapter};
+use strategies::strategy::StrategyLogger;
+use tracing::{error, info};
 
 
 
@@ -101,7 +103,7 @@ impl BinanceTrader {
         })
     }
 
-    pub fn calculate_trade_size_impl(&self, symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
+    pub fn calculate_trade_size_impl(&self, _symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
         // Enhanced dynamic sizing with multiple factors
         
         // Base size from linear confidence scaling
@@ -137,24 +139,6 @@ impl BinanceTrader {
         
         // Ensure we stay within the min/max bounds after rounding
         let final_quantity = quantity_to_trade.max(trading_size_min).min(trading_size_max);
-        
-                debug!(
-            exchange = "binance",
-            action = "calculate_trade_size",
-            symbol = %symbol,
-            price = price,
-            confidence = confidence,
-            trading_size_min = trading_size_min,
-            trading_size_max = trading_size_max,
-            trading_size_step = trading_size_step,
-            volatility = volatility,
-            volatility_factor = volatility_factor,
-            risk_factor = risk_factor,
-            kelly_factor = kelly_factor,
-            dynamic_quantity = dynamic_quantity,
-            quantity_to_trade = quantity_to_trade,
-            final_quantity = final_quantity
-        );
 
         final_quantity
     }
@@ -262,13 +246,7 @@ impl Trader for BinanceTrader {
                         .parse()
                         .expect("Failed to parse entry price");
                     
-                    debug!(
-                        action = "buy_order_executed",
-                        symbol = %symbol,
-                        price = %format!("{:.5}", price),
-                        quantity = %format!("{:.0}", self.position.quantity),
-                        entry_price = %format!("{:.5}", self.position.entry_price)
-                    );
+                    // Buy order executed - position updated
                 }
             }
             Signal::Sell => {
@@ -296,14 +274,7 @@ impl Trader for BinanceTrader {
                         std::process::exit(1);
                     }
 
-                    debug!(
-                        action = "sell_order_executed",
-                        symbol = %symbol,
-                        price = %format!("{:.5}", price),
-                        quantity = %format!("{:.0}", self.position.quantity),
-                        pnl = %format!("{:.6}", pnl),
-                        total_pnl = %format!("{:.6}", self.realized_pnl)
-                    );
+                    // Sell order executed - position reset and PnL recorded
 
                     self.position.quantity = 0.0; // Assuming full sell
                     self.position.entry_price = 0.0;
@@ -425,6 +396,13 @@ impl Trader for BinanceTrader {
         let mut current_position = self.position.clone();
 
         while let Some(trade) = trading_stream.next().await {
+            // Create trade logger for this trade
+            let trade_logger = TradeLogger::new("binance", "stochastic", trading_symbol);
+            let strategy_logger = StrategyLoggerAdapter::new(trade_logger);
+            
+            // Log trade received
+            strategy_logger.log_trade_processed(&convert_trade_to_trade_data(&trade));
+            
             // Update strategy with trade data
             trading_strategy.on_trade(convert_trade_to_trade_data(&trade)).await;
 
@@ -434,6 +412,9 @@ impl Trader for BinanceTrader {
             // Get signal from strategy
             let (final_signal, confidence) = 
                 trading_strategy.get_signal(trade_price, trade_time, convert_position_to_strategies_position(&current_position));
+            
+            // Log signal generated
+            strategy_logger.log_signal_generated(&final_signal, confidence, trade_price);
 
             // Calculate position size based on confidence and trading config
             let quantity_to_trade = self.calculate_trade_size(
@@ -454,35 +435,43 @@ impl Trader for BinanceTrader {
                     match final_signal {
                         strategies::models::Signal::Buy => {
                             if current_position.quantity == 0.0 {
-                                debug!(
-                                    action = "buy_signal_emulated",
-                                    symbol = %trading_symbol,
-                                    price = %format!("{:.8}", trade_price),
-                                    quantity = %format!("{:.2}", quantity_to_trade)
-                                );
+                                // Log buy signal execution
+                                strategy_logger.log_trade_executed(&final_signal, trade_price, quantity_to_trade, None);
+                                
                                 // Update position for emulated trading
+                                let old_position = current_position.clone();
                                 self.position.quantity = quantity_to_trade;
                                 self.position.entry_price = trade_price;
+                                
+                                // Log position change
+                                strategy_logger.log_position_change(
+                                    &convert_position_to_strategies_position(&old_position), 
+                                    &convert_position_to_strategies_position(&self.position)
+                                );
                             }
                         }
                         strategies::models::Signal::Sell => {
                             if current_position.quantity > 0.0 {
                                 let pnl = (trade_price - current_position.entry_price) * current_position.quantity;
                                 self.realized_pnl += pnl;
-                                debug!(
-                                    action = "sell_signal_emulated",
-                                    symbol = %trading_symbol,
-                                    price = %format!("{:.8}", trade_price),
-                                    quantity = %format!("{:.2}", current_position.quantity),
-                                    pnl = %format!("{:.6}", pnl)
-                                );
+                                
+                                // Log sell signal execution
+                                strategy_logger.log_trade_executed(&final_signal, trade_price, current_position.quantity, Some(pnl));
+                                
                                 // Reset position after sell
+                                let old_position = current_position.clone();
                                 self.position.quantity = 0.0;
                                 self.position.entry_price = 0.0;
+                                
+                                // Log position change
+                                strategy_logger.log_position_change(
+                                    &convert_position_to_strategies_position(&old_position), 
+                                    &convert_position_to_strategies_position(&self.position)
+                                );
                             }
                         }
                         strategies::models::Signal::Hold => {
-                            // Do nothing
+                            // No action needed for hold signals
                         }
                     }
                 }
@@ -492,25 +481,7 @@ impl Trader for BinanceTrader {
             current_position = self.position();
         }
 
-        // Log completion message
-        match trading_mode {
-            TradeMode::Real => {
-                info!("Live trading completed");
-                info!("Final position: {}", current_position);
-                info!("Final PnL: {:.6}", self.realized_pnl());
-                let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
-                info!("Final Unrealized PnL: {:.6}", self.unrealized_pnl(last_price));
-            }
-            TradeMode::Emulated | TradeMode::Backtest => {
-                let mode_name = if matches!(trading_mode, TradeMode::Emulated) { "Emulation" } else { "Backtest" };
-                info!("{} completed", mode_name);
-                info!("Final position: {}", current_position);
-                info!("Final PnL: {:.6}", self.realized_pnl());
-                // For unrealized PnL, we need a current price - use the last known price or 0
-                let last_price = if current_position.entry_price > 0.0 { current_position.entry_price } else { 0.0 };
-                info!("Final Unrealized PnL: {:.6}", self.unrealized_pnl(last_price));
-            }
-        }
+
 
         Ok(())
     }
