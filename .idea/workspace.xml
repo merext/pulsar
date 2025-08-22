@@ -20,18 +20,7 @@
     </cargoProject>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9f8cfa95-d1f9-4171-acf5-2fbc4b1dc028" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/bots/binance/src/main.rs" beforeDir="false" afterPath="$PROJECT_DIR$/bots/binance/src/main.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/trading_config.toml" beforeDir="false" afterPath="$PROJECT_DIR$/config/trading_config.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/adaptive_regime_strategy.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/adaptive_regime_strategy.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/game_theory_ml_strategy.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/game_theory_ml_strategy.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/lib.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/microstructure_arbitrage_strategy.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/microstructure_arbitrage_strategy.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/multi_timeframe_momentum_strategy.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/multi_timeframe_momentum_strategy.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/sentiment_analysis_strategy.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/sentiment_analysis_strategy.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/statistical_arbitrage_strategy.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/statistical_arbitrage_strategy.rs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/strategies/src/strategy_factory.rs" beforeDir="false" afterPath="$PROJECT_DIR$/strategies/src/strategy_factory.rs" afterDir="false" />
-    </list>
+    <list default="true" id="9f8cfa95-d1f9-4171-acf5-2fbc4b1dc028" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -44,37 +33,37 @@
   <component name="MacroExpansionManager">
     <option name="directoryName" value="iTs5y2lV" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "customColor": "",
-  "associatedIndex": 3
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 3
+}</component>
   <component name="ProjectId" id="3103gXIOsHpbZW8c1yJG17hrGZL" />
   <component name="ProjectViewState">
     <option name="autoscrollToSource" value="true" />
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.rust.reset.selective.auto.import": "true",
-    "git-widget-placeholder": "main",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
-    "org.rust.disableDetachedFileInspection/Users/maggnus/Code/Merext/pulsar/strategies/src/fractal_analysis_strategy.rs": "true",
-    "org.rust.first.attach.projects": "true",
-    "settings.editor.selected.configurable": "preferences.pluginManager",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.rust.reset.selective.auto.import&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;org.rust.cargo.project.model.PROJECT_DISCOVERY&quot;: &quot;true&quot;,
+    &quot;org.rust.disableDetachedFileInspection/Users/maggnus/Code/Merext/pulsar/strategies/src/fractal_analysis_strategy.rs&quot;: &quot;true&quot;,
+    &quot;org.rust.first.attach.projects&quot;: &quot;true&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager" selected="Cargo.Test pulsar">
     <configuration name="Run binance-bot" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
       <option name="command" value="run --package binance-bot --bin binance-bot" />
@@ -123,6 +112,7 @@
       <option name="presentableId" value="Default" />
       <updated>1754647275101</updated>
       <workItem from="1754647276441" duration="1234000" />
+      <workItem from="1755745683432" duration="42000" />
     </task>
     <servers />
   </component>

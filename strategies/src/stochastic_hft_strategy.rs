@@ -145,8 +145,6 @@ impl StochasticHftStrategy {
         })
     }
     
-
-    
     fn calculate_stochastic(&self) -> Option<(f64, f64)> {
         if self.price_history.len() < self.config.stochastic.k_period {
             return None;
