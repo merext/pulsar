@@ -1,6 +1,6 @@
-use tracing::{info, debug, warn, error};
-use strategies::strategy::StrategyLogger;
 use strategies::models::Signal;
+use strategies::strategy::StrategyLogger;
+use tracing::{debug, error, info, warn};
 
 /// Trading logger that provides standardized logging for any exchange and strategy
 pub struct TradeLogger {
@@ -42,9 +42,7 @@ impl TradeLogger {
         );
     }
 
-
-
-    pub fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>) {
+    pub fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>) {
         match signal {
             Signal::Buy => {
                 info!(
@@ -58,6 +56,29 @@ impl TradeLogger {
             }
             Signal::Sell => {
                 if let Some(pnl) = pnl {
+                    if let Some(profit) = profit {
+                        info!(
+                            exchange = %self.exchange_name,
+                            strategy = %self.strategy_name,
+                            symbol = %self.symbol,
+                            action = "sell_executed",
+                            price = %format!("{:.8}", price),
+                            quantity = %format!("{:.2}", quantity),
+                            pnl = %format!("{:.6}", pnl),
+                            profit = %format!("{:.6}", profit)
+                        );
+                    } else {
+                        info!(
+                            exchange = %self.exchange_name,
+                            strategy = %self.strategy_name,
+                            symbol = %self.symbol,
+                            action = "sell_executed",
+                            price = %format!("{:.8}", price),
+                            quantity = %format!("{:.2}", quantity),
+                            pnl = %format!("{:.6}", pnl)
+                        );
+                    }
+                } else if let Some(profit) = profit {
                     info!(
                         exchange = %self.exchange_name,
                         strategy = %self.strategy_name,
@@ -65,7 +86,7 @@ impl TradeLogger {
                         action = "sell_executed",
                         price = %format!("{:.8}", price),
                         quantity = %format!("{:.2}", quantity),
-                        pnl = %format!("{:.6}", pnl)
+                        profit = %format!("{:.6}", profit)
                     );
                 } else {
                     info!(
@@ -83,10 +104,6 @@ impl TradeLogger {
             }
         }
     }
-
-
-
-
 
     pub fn log_error(&self, action: &str, error: &str) {
         error!(
@@ -122,10 +139,12 @@ impl StrategyLoggerAdapter {
 
 impl StrategyLogger for StrategyLoggerAdapter {
     fn log_signal_generated(&self, signal: &Signal, confidence: f64, price: f64) {
-        self.trade_logger.log_signal_generated(signal, confidence, price);
+        self.trade_logger
+            .log_signal_generated(signal, confidence, price);
     }
 
-    fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>) {
-        self.trade_logger.log_trade_executed(signal, price, quantity, pnl);
+    fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>) {
+        self.trade_logger
+            .log_trade_executed(signal, price, quantity, pnl, profit);
     }
 }

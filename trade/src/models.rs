@@ -9,8 +9,6 @@ pub struct TradeData {
     pub is_best_match: bool,
 }
 
-
-
 #[derive(Debug, Clone, Default)]
 pub struct Trade {
     pub event_type: String,

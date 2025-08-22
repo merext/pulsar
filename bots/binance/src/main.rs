@@ -1,23 +1,17 @@
+use ::trade::logger::{StrategyLoggerAdapter, TradeLogger};
+use ::trade::trader::{TradeMode, Trader};
+use binance_exchange::BinanceClient;
+use binance_exchange::trader::BinanceTrader;
+use clap::{Parser, Subcommand};
+use std::env;
 use std::error::Error;
 use std::fs;
-use std::env;
-use toml::Value;
-use clap::{Parser, Subcommand};
 use strategies::StochasticHftStrategy;
 use strategies::strategy::Strategy;
+use toml::Value;
 use tracing::info;
-use ::trade::trader::{TradeMode, Trader};
-use ::trade::logger::{TradeLogger, StrategyLoggerAdapter};
-use binance_exchange::trader::BinanceTrader;
-use binance_exchange::BinanceClient;
-
-
-
-
 
 #[allow(clippy::too_many_lines)]
-
-
 fn load_config<P: AsRef<std::path::Path>>(config_path: P) -> Result<Value, Box<dyn Error>> {
     let content = fs::read_to_string(config_path)?;
     let config = content.parse::<Value>()?;
@@ -28,8 +22,6 @@ fn get_config_value<T: ConfigValue>(config: &Value, key: &str) -> Option<T> {
     T::from_config_value(config, key)
 }
 
-
-
 trait ConfigValue: Sized {
     fn from_config_value(config: &Value, key: &str) -> Option<Self>;
 }
@@ -38,11 +30,11 @@ impl ConfigValue for f64 {
     fn from_config_value(config: &Value, key: &str) -> Option<Self> {
         let keys: Vec<&str> = key.split('.').collect();
         let mut current = config;
-        
+
         for key in keys {
             current = current.get(key)?;
         }
-        
+
         current.as_float()
     }
 }
@@ -51,11 +43,11 @@ impl ConfigValue for String {
     fn from_config_value(config: &Value, key: &str) -> Option<Self> {
         let keys: Vec<&str> = key.split('.').collect();
         let mut current = config;
-        
+
         for key in keys {
             current = current.get(key)?;
         }
-        
+
         current.as_str().map(std::string::ToString::to_string)
     }
 }
@@ -90,72 +82,80 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cli = Cli::parse();
 
     // Load trading configuration
-    let trading_config = load_config("config/trading_config.toml")
-        .expect("Failed to load trading configuration");
-    
+    let trading_config =
+        load_config("config/trading_config.toml").expect("Failed to load trading configuration");
+
     let trading_symbol = get_config_value(&trading_config, "position_sizing.trading_symbol")
         .unwrap_or_else(|| "DOGEUSDT".to_string());
-    
+
     // Create strategy and trader once
     let mut strategy = Box::new(
         StochasticHftStrategy::from_file("config/stochastic_hft_strategy.toml")
             .expect("Failed to load StochasticHftStrategy configuration")
-            .with_logger(Box::new(StrategyLoggerAdapter::new(
-                TradeLogger::new("binance", "stochastic", &trading_symbol)
-            )))
+            .with_logger(Box::new(StrategyLoggerAdapter::new(TradeLogger::new(
+                "binance",
+                "stochastic",
+                &trading_symbol,
+            )))),
     );
     let api_key = env::var("BINANCE_API_KEY").expect("API_KEY must be set");
     let api_secret = env::var("BINANCE_API_SECRET").expect("API_SECRET must be set");
-    
+
     info!("Trading strategy: {}", strategy.get_info());
 
     // Create trader once for all modes
-    let mut binance_trader = BinanceTrader::new(
-        &api_key,
-        &api_secret
-    ).await?;
+    let mut binance_trader = BinanceTrader::new(&api_key, &api_secret).await?;
 
     match cli.command {
         Commands::Trade => {
             info!("Starting live trading for {}...", trading_symbol);
-            
+
             // Get live WebSocket stream
             let binance_client = BinanceClient::new().await?;
             let trading_stream = binance_client.trade_stream(&trading_symbol).await?;
-            
-            binance_trader.trade(
-                trading_stream,
-                &mut *strategy,
-                &trading_symbol,
-                TradeMode::Real
-            ).await?;
+
+            binance_trader
+                .trade(
+                    trading_stream,
+                    &mut *strategy,
+                    &trading_symbol,
+                    TradeMode::Real,
+                )
+                .await?;
         }
         Commands::Emulate => {
-            info!("Starting live emulation with real WebSocket stream for {}...", trading_symbol);
-            
+            info!(
+                "Starting live emulation with real WebSocket stream for {}...",
+                trading_symbol
+            );
+
             // Get live WebSocket stream
             let binance_client = BinanceClient::new().await?;
             let trading_stream = binance_client.trade_stream(&trading_symbol).await?;
-            
-            binance_trader.trade(
-                trading_stream,
-                &mut *strategy,
-                &trading_symbol,
-                TradeMode::Emulated
-            ).await?;
+
+            binance_trader
+                .trade(
+                    trading_stream,
+                    &mut *strategy,
+                    &trading_symbol,
+                    TradeMode::Emulated,
+                )
+                .await?;
         }
         Commands::Backtest { uri } => {
             info!("Starting backtest with data from: {}", uri);
-            
+
             // Get historical data stream
             let trading_stream = BinanceClient::trade_data_from_uri(&uri).await?;
-            
-            binance_trader.trade(
-                trading_stream,
-                &mut *strategy,
-                &trading_symbol,
-                TradeMode::Backtest
-            ).await?;
+
+            binance_trader
+                .trade(
+                    trading_stream,
+                    &mut *strategy,
+                    &trading_symbol,
+                    TradeMode::Backtest,
+                )
+                .await?;
         }
     }
 

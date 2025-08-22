@@ -362,37 +362,57 @@ impl Strategy for SentimentAnalysisStrategy {
 
     fn get_signal(
         &self,
-        _current_timestamp: f64,
-        _current_position: Position,
+        current_position: Position,
     ) -> (Signal, f64) {
         if self.sentiment_history.len() < 5 {
             return (Signal::Hold, 0.0);
         }
 
-        // Generate sentiment-based signal
-        let (signal, confidence) = self.generate_sentiment_signal();
+        // Generate base sentiment signal
+        let (base_signal, base_confidence) = self.generate_sentiment_signal();
         
-        // If sentiment signal is Hold, try counter-based signals
-        if signal == Signal::Hold && self.trade_counter > 0 {
-            // Generate a signal every 5000 trades based on simple price movement
-            if self.trade_counter % 5000 == 0 && self.price_history.len() >= 10 {
-                let recent_prices: Vec<f64> = self.price_history
-                    .iter()
-                    .rev()
-                    .take(10)
-                    .cloned()
-                    .collect();
-                
-                let price_change = (recent_prices.last().unwrap() - recent_prices.first().unwrap()) / recent_prices.first().unwrap();
-                
-                if price_change > 0.001 {
-                    return (Signal::Buy, 0.45);
-                } else if price_change < -0.001 {
-                    return (Signal::Sell, 0.45);
+        // Apply position-aware filtering and adjustments
+        match base_signal {
+            Signal::Buy => {
+                // Only generate BUY if we don't have a long position
+                if current_position.quantity <= 0.0 {
+                    (Signal::Buy, base_confidence)
+                } else {
+                    (Signal::Hold, 0.0)
                 }
             }
+            Signal::Sell => {
+                // Only generate SELL if we have a long position
+                if current_position.quantity > 0.0 {
+                    (Signal::Sell, base_confidence)
+                } else {
+                    (Signal::Hold, 0.0)
+                }
+            }
+            Signal::Hold => {
+                // For Hold signals, try counter-based signals with position awareness
+                if self.trade_counter > 0 {
+                    // Generate a signal every 5000 trades based on simple price movement
+                    if self.trade_counter % 5000 == 0 && self.price_history.len() >= 10 {
+                        let recent_prices: Vec<f64> = self.price_history
+                            .iter()
+                            .rev()
+                            .take(10)
+                            .cloned()
+                            .collect();
+                        
+                        let price_change = (recent_prices.last().unwrap() - recent_prices.first().unwrap()) / recent_prices.first().unwrap();
+                        
+                        // Position-aware counter signals
+                        if price_change > 0.001 && current_position.quantity <= 0.0 {
+                            return (Signal::Buy, 0.45);
+                        } else if price_change < -0.001 && current_position.quantity > 0.0 {
+                            return (Signal::Sell, 0.45);
+                        }
+                    }
+                }
+                (Signal::Hold, 0.0)
+            }
         }
-        
-        (signal, confidence)
     }
 }

@@ -10,6 +10,4 @@ buffer_capacity = 1000
 # Confidence threshold for quality signals
 min = 0.8
 
-[risk]
-max_consecutive_losses = 3
-signal_cooldown_ms = 1000
+

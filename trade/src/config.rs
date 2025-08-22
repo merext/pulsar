@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TradingConfig {
+pub struct TradeConfig {
     pub position_sizing: PositionSizingConfig,
     pub exchange: ExchangeConfig,
     pub slippage: SlippageConfig,
@@ -182,14 +182,16 @@ pub struct BacktestSettingsConfig {
     pub max_drawdown_override: Option<f64>,
 }
 
-impl TradingConfig {
+impl TradeConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::from_file("config/trading_config.toml")
     }
 
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let content = std::fs::read_to_string(path)?;
-        let config: TradingConfig = toml::from_str(&content)?;
+        let config: TradeConfig = toml::from_str(&content)?;
         Ok(config)
     }
 }

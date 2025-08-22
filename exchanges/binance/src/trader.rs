@@ -6,19 +6,16 @@ use binance_sdk::spot::websocket_api::{
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
-use trade::signal::Signal;
-use trade::trader::{TradeMode, Trader};
-use trade::config::TradingConfig;
-use trade::logger::{TradeLogger, StrategyLoggerAdapter};
-use trade::metrics::PositionManager;
 use strategies::strategy::StrategyLogger;
 use tracing::{error, info};
+use trade::config::TradeConfig;
+use trade::logger::{StrategyLoggerAdapter, TradeLogger};
+use trade::metrics::TradeManager;
+use trade::signal::Signal;
+use trade::trader::{TradeMode, Trader};
 
-
-
-
-use futures_util::StreamExt;
 use futures_util::Stream;
+use futures_util::StreamExt;
 
 // Conversion functions to bridge trade and strategies types
 fn convert_trade_to_trade_data(trade: &trade::models::Trade) -> strategies::models::TradeData {
@@ -30,7 +27,9 @@ fn convert_trade_to_trade_data(trade: &trade::models::Trade) -> strategies::mode
     }
 }
 
-fn convert_metrics_position_to_strategies_position(position: &trade::metrics::Position) -> strategies::models::Position {
+fn convert_metrics_position_to_strategies_position(
+    position: &trade::metrics::Position,
+) -> strategies::models::Position {
     strategies::models::Position {
         symbol: position.symbol.clone(),
         quantity: position.quantity,
@@ -38,7 +37,9 @@ fn convert_metrics_position_to_strategies_position(position: &trade::metrics::Po
     }
 }
 
-fn convert_strategies_signal_to_trade_signal(signal: strategies::models::Signal) -> trade::signal::Signal {
+fn convert_strategies_signal_to_trade_signal(
+    signal: strategies::models::Signal,
+) -> trade::signal::Signal {
     match signal {
         strategies::models::Signal::Buy => trade::signal::Signal::Buy,
         strategies::models::Signal::Sell => trade::signal::Signal::Sell,
@@ -48,8 +49,8 @@ fn convert_strategies_signal_to_trade_signal(signal: strategies::models::Signal)
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
-    pub position_manager: PositionManager,
-    pub config: TradingConfig,
+    pub trade_manager: TradeManager,
+    pub config: TradeConfig,
     api_key: String,
     api_secret: String,
 }
@@ -62,12 +63,15 @@ impl BinanceTrader {
     /// # Errors
     ///
     /// Will return `Err` if the trading config cannot be loaded.
-    pub async fn new(api_key: &str, api_secret: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let trading_config = TradingConfig::load()?;
+    pub async fn new(
+        api_key: &str,
+        api_secret: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let trading_config = TradeConfig::load()?;
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
-            position_manager: PositionManager::new(),
+            trade_manager: TradeManager::new(),
             config: trading_config,
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
@@ -81,34 +85,49 @@ impl BinanceTrader {
     /// # Errors
     ///
     /// Will return `Err` if the trading config cannot be loaded from the provided path.
-    pub async fn new_with_config(api_key: &str, api_secret: &str, config_path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let trading_config = TradingConfig::from_file(config_path)?;
+    pub async fn new_with_config(
+        api_key: &str,
+        api_secret: &str,
+        config_path: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let trading_config = TradeConfig::from_file(config_path)?;
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
-            position_manager: PositionManager::new(),
+            trade_manager: TradeManager::new(),
             config: trading_config,
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
         })
     }
 
-    pub fn calculate_trade_size_impl(&self, _symbol: &str, price: f64, confidence: f64, trading_size_min: f64, trading_size_max: f64, trading_size_step: f64) -> f64 {
+    pub fn calculate_trade_size_impl(
+        &self,
+        _symbol: &str,
+        price: f64,
+        confidence: f64,
+        trading_size_min: f64,
+        trading_size_max: f64,
+        trading_size_step: f64,
+    ) -> f64 {
         // Enhanced dynamic sizing with multiple factors
-        
+
         // Base size from linear confidence scaling
-        let confidence_factor = confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);
-        
+        let confidence_factor =
+            confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);
+
         // Volatility adjustment - reduce size in high volatility
         let volatility = Self::estimate_volatility(price);
-        let volatility_factor = if volatility > 0.02 { // If volatility > 2%
+        let volatility_factor = if volatility > 0.02 {
+            // If volatility > 2%
             0.7 // Reduce size by 30%
-        } else if volatility > 0.01 { // If volatility > 1%
+        } else if volatility > 0.01 {
+            // If volatility > 1%
             0.85 // Reduce size by 15%
         } else {
             1.0 // No adjustment for low volatility
         };
-        
+
         // Risk adjustment based on confidence
         let risk_factor = if confidence > 0.7 {
             1.2 // Increase size for high confidence
@@ -117,54 +136,58 @@ impl BinanceTrader {
         } else {
             1.0
         };
-        
+
         // Kelly Criterion-inspired sizing (simplified)
         let kelly_factor = Self::estimate_kelly_fraction();
-        
+
         // Combine all factors
         let dynamic_quantity = confidence_factor * volatility_factor * risk_factor * kelly_factor;
-        
+
         // Apply step size rounding (round down to nearest step)
         let quantity_to_trade = (dynamic_quantity / trading_size_step).floor() * trading_size_step;
-        
-        // Ensure we stay within the min/max bounds after rounding
-        let final_quantity = quantity_to_trade.max(trading_size_min).min(trading_size_max);
 
-        final_quantity
+        // Ensure we stay within the min/max bounds after rounding
+        quantity_to_trade
+            .max(trading_size_min)
+            .min(trading_size_max)
     }
-    
+
     const fn estimate_volatility(_current_price: f64) -> f64 {
         // Simple volatility estimation based on recent price movements
         // In a real implementation, this would track price history
         // For now, use a conservative estimate
         0.015 // 1.5% default volatility
     }
-    
+
     const fn estimate_kelly_fraction() -> f64 {
         // Kelly Criterion estimation
         // In practice, this would be calculated from historical performance
         // For now, use a conservative multiplier
         0.8 // Reduce position size to 80% of base calculation
     }
-
-
-
-
 }
 
 #[async_trait]
 impl Trader for BinanceTrader {
-    fn calculate_trade_size(&self, symbol: &str, price: f64, confidence: f64, _trading_size_min: f64, _trading_size_max: f64, _trading_size_step: f64) -> f64 {
+    fn calculate_trade_size(
+        &self,
+        symbol: &str,
+        price: f64,
+        confidence: f64,
+        _trading_size_min: f64,
+        _trading_size_max: f64,
+        _trading_size_step: f64,
+    ) -> f64 {
         // Read limits from central TradingConfig rather than caller
         let min = self.config.position_sizing.trading_size_min;
         let max = self.config.position_sizing.trading_size_max;
         let step = self.config.exchange.step_size.max(1.0); // default to 1 unit step for spot quantities
         self.calculate_trade_size_impl(symbol, price, confidence, min, max, step)
     }
-    
+
     #[allow(clippy::too_many_lines)]
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
-        let symbol = self.position_manager.get_current_position_symbol();
+        let symbol = self.trade_manager.get_current_trade_symbol();
         let quantity = Decimal::from_f64(quantity).expect("Failed to convert quantity to Decimal");
 
         let Some(connection) = &self.connection else {
@@ -179,7 +202,12 @@ impl Trader for BinanceTrader {
 
         match signal {
             Signal::Buy => {
-                if self.position_manager.get_current_position().map_or(0.0, |p| p.quantity) == 0.0 {
+                if self
+                    .trade_manager
+                    .get_current_trade()
+                    .map_or(0.0, |p| p.quantity)
+                    == 0.0
+                {
                     let params = OrderPlaceParams::builder(
                         symbol.clone(),
                         OrderPlaceSideEnum::Buy,
@@ -235,41 +263,42 @@ impl Trader for BinanceTrader {
                         .expect("Price not found in fill")
                         .parse()
                         .expect("Failed to parse entry price");
-                    
-                    self.position_manager.open_position(&symbol, entry_price, quantity, 0.0);
-                    
+
+                    self.trade_manager
+                        .open_position(&symbol, entry_price, quantity, 0.0);
+
                     // Buy order executed - position updated
                 }
             }
             Signal::Sell => {
-                if let Some(current_position) = self.position_manager.get_current_position() {
-                    if current_position.quantity > 0.0 {
-                        let symbol = current_position.symbol.clone();
-                        let _pnl = self.position_manager.close_position(&symbol, price, 0.0);
-                        let params = OrderPlaceParams::builder(
-                            symbol.clone(),
-                            OrderPlaceSideEnum::Sell,
-                            OrderPlaceTypeEnum::Market,
-                        )
-                        .quantity(quantity)
-                        .build()
-                        .expect("Failed to build order parameters");
+                if let Some(current_position) = self.trade_manager.get_current_trade()
+                    && current_position.quantity > 0.0
+                {
+                    let symbol = current_position.symbol.clone();
+                    let _pnl = self.trade_manager.close_position(&symbol, price, 0.0);
+                    let params = OrderPlaceParams::builder(
+                        symbol.clone(),
+                        OrderPlaceSideEnum::Sell,
+                        OrderPlaceTypeEnum::Market,
+                    )
+                    .quantity(quantity)
+                    .build()
+                    .expect("Failed to build order parameters");
 
-                        if let Err(e) = connection.order_place(params).await {
-                            error!(
-                                exchange = "binance",
-                                action = "place_sell_order",
-                                status = "failed",
-                                symbol = %symbol,
-                                quantity = %quantity,
-                                error = %e
-                            );
-                            std::process::exit(1);
-                        }
-
-                        // Sell order executed - position reset and PnL recorded
-                        // Position is already closed by close_position call above
+                    if let Err(e) = connection.order_place(params).await {
+                        error!(
+                            exchange = "binance",
+                            action = "place_sell_order",
+                            status = "failed",
+                            symbol = %symbol,
+                            quantity = %quantity,
+                            error = %e
+                        );
+                        std::process::exit(1);
                     }
+
+                    // Sell order executed - position reset and PnL recorded
+                    // Position is already closed by close_position call above
                 }
             }
             Signal::Hold => {
@@ -278,14 +307,12 @@ impl Trader for BinanceTrader {
         }
     }
 
-
-
     fn get_metrics(&self) -> &trade::metrics::PerformanceMetrics {
-        self.position_manager.get_metrics()
+        self.trade_manager.get_metrics()
     }
-    
-    fn get_position_manager(&self) -> &trade::metrics::PositionManager {
-        &self.position_manager
+
+    fn get_trade_manager(&self) -> &trade::metrics::TradeManager {
+        &self.trade_manager
     }
 
     async fn account_status(&self) -> Result<(), anyhow::Error> {
@@ -355,14 +382,15 @@ impl Trader for BinanceTrader {
         trading_strategy: &mut dyn strategies::strategy::Strategy,
         trading_symbol: &str,
         trading_mode: TradeMode,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-    {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Initialize position symbol
-                    // Initialize position manager with the trading symbol
-            // Position will be created when first trade occurs
-        
+        // Initialize position manager with the trading symbol
+        // Position will be created when first trade occurs
+
         // Initialize connection for real and emulated trading modes
-        if (trading_mode == TradeMode::Real || trading_mode == TradeMode::Emulated) && self.connection.is_none() {
+        if (trading_mode == TradeMode::Real || trading_mode == TradeMode::Emulated)
+            && self.connection.is_none()
+        {
             let config = ConfigurationWebsocketApi::builder()
                 .api_key(&self.api_key)
                 .api_secret(&self.api_secret)
@@ -378,7 +406,11 @@ impl Trader for BinanceTrader {
             );
         }
 
-                    let mut current_position = self.position_manager.get_current_position().cloned().unwrap_or_else(|| trade::metrics::Position {
+        let mut current_position = self
+            .trade_manager
+            .get_current_trade()
+            .cloned()
+            .unwrap_or_else(|| trade::metrics::Position {
                 symbol: trading_symbol.to_string(),
                 quantity: 0.0,
                 entry_price: 0.0,
@@ -389,19 +421,20 @@ impl Trader for BinanceTrader {
             // Create trade logger for this trade
             let trade_logger = TradeLogger::new("binance", "stochastic", trading_symbol);
             let strategy_logger = StrategyLoggerAdapter::new(trade_logger);
-            
 
-            
             // Update strategy with trade data
-            trading_strategy.on_trade(convert_trade_to_trade_data(&trade)).await;
+            trading_strategy
+                .on_trade(convert_trade_to_trade_data(&trade))
+                .await;
 
             let trade_price = trade.price;
             let trade_time = trade.trade_time as f64;
 
             // Get signal from strategy
-            let (final_signal, confidence) = 
-                trading_strategy.get_signal(trade_time, convert_metrics_position_to_strategies_position(&current_position));
-            
+            let (final_signal, confidence) = trading_strategy.get_signal(
+                convert_metrics_position_to_strategies_position(&current_position),
+            );
+
             // Log signal generated
             strategy_logger.log_signal_generated(&final_signal, confidence, trade_price);
 
@@ -417,7 +450,12 @@ impl Trader for BinanceTrader {
 
             match trading_mode {
                 TradeMode::Real => {
-                    self.on_signal(convert_strategies_signal_to_trade_signal(final_signal), trade_price, quantity_to_trade).await;
+                    self.on_signal(
+                        convert_strategies_signal_to_trade_signal(final_signal),
+                        trade_price,
+                        quantity_to_trade,
+                    )
+                    .await;
                 }
                 TradeMode::Emulated | TradeMode::Backtest => {
                     // Simulate trade execution for emulated/backtest modes
@@ -425,28 +463,55 @@ impl Trader for BinanceTrader {
                         strategies::models::Signal::Buy => {
                             if current_position.quantity == 0.0 {
                                 // Log buy signal execution
-                                strategy_logger.log_trade_executed(&final_signal, trade_price, quantity_to_trade, None);
-                                
+                                strategy_logger.log_trade_executed(
+                                    &final_signal,
+                                    trade_price,
+                                    quantity_to_trade,
+                                    None,
+                                    None,
+                                );
+
                                 // Update position for emulated trading
 
-                                self.position_manager.open_position(&current_position.symbol, trade_price, quantity_to_trade, trade_time);
-                                // Position is now managed by position_manager
-                                
+                                self.trade_manager.open_position(
+                                    &current_position.symbol,
+                                    trade_price,
+                                    quantity_to_trade,
+                                    trade_time,
+                                );
+                                // Position is now managed by trade_manager
+
                                 // Position change is already captured in buy_executed log
                             }
                         }
                         strategies::models::Signal::Sell => {
                             if current_position.quantity > 0.0 {
-                                let pnl = self.position_manager.close_position(&current_position.symbol, trade_price, trade_time);
-                                
-                                // Log sell signal execution
-                                strategy_logger.log_trade_executed(&final_signal, trade_price, current_position.quantity, Some(pnl));
-                                
+                                let pnl = self.trade_manager.close_position(
+                                    &current_position.symbol,
+                                    trade_price,
+                                    trade_time,
+                                );
+
+                                // Log sell signal execution with profit
+                                let profit = self.trade_manager.get_metrics().realized_pnl();
+                                strategy_logger.log_trade_executed(
+                                    &final_signal,
+                                    trade_price,
+                                    current_position.quantity,
+                                    Some(pnl),
+                                    Some(profit),
+                                );
+
                                 // Reset position after sell
 
-                                self.position_manager.update_position(&current_position.symbol, 0.0, trade_price, trade_time);
-                                // Position is now managed by position_manager
-                                
+                                self.trade_manager.update_position(
+                                    &current_position.symbol,
+                                    0.0,
+                                    trade_price,
+                                    trade_time,
+                                );
+                                // Position is now managed by trade_manager
+
                                 // Position change is already captured in buy_executed log
                             }
                         }
@@ -458,19 +523,18 @@ impl Trader for BinanceTrader {
             }
 
             // Update current position for display purposes
-            current_position = self.position_manager.get_current_position().cloned().unwrap_or_else(|| trade::metrics::Position {
-                symbol: trading_symbol.to_string(),
-                quantity: 0.0,
-                entry_price: 0.0,
-                entry_time: 0.0,
-            });
+            current_position = self
+                .trade_manager
+                .get_current_trade()
+                .cloned()
+                .unwrap_or_else(|| trade::metrics::Position {
+                    symbol: trading_symbol.to_string(),
+                    quantity: 0.0,
+                    entry_price: 0.0,
+                    entry_time: 0.0,
+                });
         }
-
-
 
         Ok(())
     }
-
 }
-
-

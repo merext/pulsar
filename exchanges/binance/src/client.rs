@@ -120,14 +120,14 @@ impl BinanceClient {
         data: Bytes,
     ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
         let cursor = Cursor::new(data);
-        
+
         // Try to parse as ZIP first
-        if let Ok(mut archive) = ZipArchive::new(cursor.clone()) {
-            if let Ok(file) = archive.by_index(0) {
-                return Self::parse_csv_from_reader(file);
-            }
+        if let Ok(mut archive) = ZipArchive::new(cursor.clone())
+            && let Ok(file) = archive.by_index(0)
+        {
+            return Self::parse_csv_from_reader(file);
         }
-        
+
         // If ZIP fails, try to parse as plain CSV
         Self::parse_csv_from_reader(cursor)
     }

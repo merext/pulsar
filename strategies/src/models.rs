@@ -31,5 +31,3 @@ pub enum Signal {
     Sell,
     Hold,
 }
-
-

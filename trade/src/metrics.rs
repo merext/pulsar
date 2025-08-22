@@ -19,12 +19,12 @@ pub struct Position {
 }
 
 #[derive(Debug, Clone)]
-pub struct PositionManager {
+pub struct TradeManager {
     positions: HashMap<String, Position>,
     metrics: PerformanceMetrics,
 }
 
-impl PositionManager {
+impl TradeManager {
     pub fn new() -> Self {
         Self {
             positions: HashMap::new(),
@@ -59,28 +59,34 @@ impl PositionManager {
         }
     }
 
-    pub fn update_position(&mut self, symbol: &str, new_quantity: f64, new_price: f64, timestamp: f64) {
-        if let Some(position) = self.positions.get_mut(symbol) {
-            if new_quantity != position.quantity {
-                // If quantity changed, calculate PnL for the change
-                let quantity_change = new_quantity - position.quantity;
-                if quantity_change < 0.0 {
-                    // Reducing position (partial close)
-                    let pnl = (new_price - position.entry_price) * quantity_change.abs();
-                    self.metrics.record_trade(TradeRecord {
-                        timestamp,
-                        price: new_price,
-                        quantity: quantity_change.abs(),
-                        signal: Signal::Sell,
-                        pnl: Some(pnl),
-                    });
-                }
-                
-                position.quantity = new_quantity;
-                if new_quantity == 0.0 {
-                    // Position fully closed
-                    self.positions.remove(symbol);
-                }
+    pub fn update_position(
+        &mut self,
+        symbol: &str,
+        new_quantity: f64,
+        new_price: f64,
+        timestamp: f64,
+    ) {
+        if let Some(position) = self.positions.get_mut(symbol)
+            && new_quantity != position.quantity
+        {
+            // If quantity changed, calculate PnL for the change
+            let quantity_change = new_quantity - position.quantity;
+            if quantity_change < 0.0 {
+                // Reducing position (partial close)
+                let pnl = (new_price - position.entry_price) * quantity_change.abs();
+                self.metrics.record_trade(TradeRecord {
+                    timestamp,
+                    price: new_price,
+                    quantity: quantity_change.abs(),
+                    signal: Signal::Sell,
+                    pnl: Some(pnl),
+                });
+            }
+
+            position.quantity = new_quantity;
+            if new_quantity == 0.0 {
+                // Position fully closed
+                self.positions.remove(symbol);
             }
         }
     }
@@ -111,7 +117,7 @@ impl PositionManager {
     }
 
     pub fn realized_pnl(&self) -> f64 {
-        self.metrics.total_pnl()
+        self.metrics.realized_pnl()
     }
 
     pub fn get_metrics(&self) -> &PerformanceMetrics {
@@ -121,15 +127,21 @@ impl PositionManager {
     pub fn get_positions(&self) -> &HashMap<String, Position> {
         &self.positions
     }
-    
-    pub fn get_current_position_symbol(&self) -> String {
+
+    pub fn get_current_trade_symbol(&self) -> String {
         // Return the first symbol if we have any positions, otherwise empty string
         self.positions.keys().next().cloned().unwrap_or_default()
     }
-    
-    pub fn get_current_position(&self) -> Option<&Position> {
+
+    pub fn get_current_trade(&self) -> Option<&Position> {
         // Return the first position if we have any, otherwise None
         self.positions.values().next()
+    }
+}
+
+impl Default for TradeManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -166,7 +178,7 @@ impl PerformanceMetrics {
         self.trades.push(trade);
     }
 
-    pub fn total_pnl(&self) -> f64 {
+    pub fn realized_pnl(&self) -> f64 {
         self.total_pnl
     }
 
@@ -182,17 +194,13 @@ impl PerformanceMetrics {
         self.total_trades
     }
 
-    pub fn average_trade_pnl(&self) -> f64 {
-        if self.total_trades == 0 {
-            0.0
-        } else {
-            self.total_pnl / self.total_trades as f64
-        }
-    }
-
     pub fn get_trades(&self) -> &[TradeRecord] {
         &self.trades
     }
 }
 
-
+impl Default for PerformanceMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
