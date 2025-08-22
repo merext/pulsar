@@ -1,6 +1,6 @@
 use tracing::{info, debug, warn, error};
 use strategies::strategy::StrategyLogger;
-use strategies::models::{Signal, TradeData};
+use strategies::models::Signal;
 
 /// Trading logger that provides standardized logging for any exchange and strategy
 pub struct TradeLogger {
@@ -84,27 +84,7 @@ impl TradeLogger {
         }
     }
 
-    pub fn log_strategy_event(&self, event_type: &str, details: &str) {
-        debug!(
-            exchange = %self.exchange_name,
-            strategy = %self.strategy_name,
-            symbol = %self.symbol,
-            action = "strategy_event",
-            event_type = %event_type,
-            details = %details
-        );
-    }
 
-    pub fn log_indicator_update(&self, indicator_name: &str, value: f64) {
-        debug!(
-            exchange = %self.exchange_name,
-            strategy = %self.strategy_name,
-            symbol = %self.symbol,
-            action = "indicator_update",
-            indicator = %indicator_name,
-            value = %format!("{:.6}", value)
-        );
-    }
 
 
 
@@ -141,24 +121,10 @@ impl StrategyLoggerAdapter {
 }
 
 impl StrategyLogger for StrategyLoggerAdapter {
-    fn log_strategy_event(&self, event_type: &str, details: &str) {
-        self.trade_logger.log_strategy_event(event_type, details);
-    }
-
     fn log_signal_generated(&self, signal: &Signal, confidence: f64, price: f64) {
         self.trade_logger.log_signal_generated(signal, confidence, price);
     }
 
-    fn log_trade_processed(&self, trade: &TradeData) {
-        self.trade_logger.log_trade_received(trade.price, trade.quantity, trade.timestamp);
-    }
-
-    fn log_indicator_update(&self, indicator_name: &str, value: f64) {
-        self.trade_logger.log_indicator_update(indicator_name, value);
-    }
-
-
-    
     fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>) {
         self.trade_logger.log_trade_executed(signal, price, quantity, pnl);
     }

@@ -362,7 +362,6 @@ impl Strategy for SentimentAnalysisStrategy {
 
     fn get_signal(
         &self,
-        _current_price: f64,
         _current_timestamp: f64,
         _current_position: Position,
     ) -> (Signal, f64) {

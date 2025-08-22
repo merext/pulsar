@@ -9,9 +9,7 @@ pub struct TradeData {
     pub is_best_match: bool,
 }
 
-pub enum MarketEvent {
-    Trade(TradeData),
-}
+
 
 #[derive(Debug, Clone, Default)]
 pub struct Trade {

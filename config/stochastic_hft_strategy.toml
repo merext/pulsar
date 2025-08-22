@@ -2,21 +2,13 @@
 strategy_name = "StochasticHftStrategy"
 
 [stochastic]
-# More sensitive Stochastic settings for historical data
+# Stochastic settings for historical data
 k_period = 14
-d_period = 3
-oversold = 30.0
-overbought = 70.0
-# Reduced buffer capacity for faster response
 buffer_capacity = 1000
 
 [signals]
-# Conservative confidence thresholds for quality signals
+# Confidence threshold for quality signals
 min = 0.8
-# Moderate confidence weights to reduce overtrading
-oversold = 0.75
-overbought = 0.75
-crossover = 0.7
 
 [risk]
 max_consecutive_losses = 3

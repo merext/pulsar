@@ -390,8 +390,7 @@ impl Trader for BinanceTrader {
             let trade_logger = TradeLogger::new("binance", "stochastic", trading_symbol);
             let strategy_logger = StrategyLoggerAdapter::new(trade_logger);
             
-            // Log trade received
-            strategy_logger.log_trade_processed(&convert_trade_to_trade_data(&trade));
+
             
             // Update strategy with trade data
             trading_strategy.on_trade(convert_trade_to_trade_data(&trade)).await;
@@ -401,7 +400,7 @@ impl Trader for BinanceTrader {
 
             // Get signal from strategy
             let (final_signal, confidence) = 
-                trading_strategy.get_signal(trade_price, trade_time, convert_metrics_position_to_strategies_position(&current_position));
+                trading_strategy.get_signal(trade_time, convert_metrics_position_to_strategies_position(&current_position));
             
             // Log signal generated
             strategy_logger.log_signal_generated(&final_signal, confidence, trade_price);
