@@ -121,6 +121,16 @@ impl PositionManager {
     pub fn get_positions(&self) -> &HashMap<String, Position> {
         &self.positions
     }
+    
+    pub fn get_current_position_symbol(&self) -> String {
+        // Return the first symbol if we have any positions, otherwise empty string
+        self.positions.keys().next().cloned().unwrap_or_default()
+    }
+    
+    pub fn get_current_position(&self) -> Option<&Position> {
+        // Return the first position if we have any, otherwise None
+        self.positions.values().next()
+    }
 }
 
 #[derive(Debug, Clone)]

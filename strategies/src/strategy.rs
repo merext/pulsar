@@ -7,7 +7,7 @@ pub trait StrategyLogger: Send + Sync {
     fn log_signal_generated(&self, signal: &Signal, confidence: f64, price: f64);
     fn log_trade_processed(&self, trade: &TradeData);
     fn log_indicator_update(&self, indicator_name: &str, value: f64);
-    fn log_position_change(&self, old_position: &Position, new_position: &Position);
+
     fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>);
 }
 
@@ -41,6 +41,6 @@ impl StrategyLogger for NoOpStrategyLogger {
     fn log_signal_generated(&self, _signal: &Signal, _confidence: f64, _price: f64) {}
     fn log_trade_processed(&self, _trade: &TradeData) {}
     fn log_indicator_update(&self, _indicator_name: &str, _value: f64) {}
-    fn log_position_change(&self, _old_position: &Position, _new_position: &Position) {}
+
     fn log_trade_executed(&self, _signal: &Signal, _price: f64, _quantity: f64, _pnl: Option<f64>) {}
 }

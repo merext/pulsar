@@ -1,6 +1,6 @@
 use tracing::{info, debug, warn, error};
 use strategies::strategy::StrategyLogger;
-use strategies::models::{Signal, TradeData, Position};
+use strategies::models::{Signal, TradeData};
 
 /// Trading logger that provides standardized logging for any exchange and strategy
 pub struct TradeLogger {
@@ -42,26 +42,12 @@ impl TradeLogger {
         );
     }
 
-    pub fn log_position_change(&self, old_position: &Position, new_position: &Position) {
-        if old_position.quantity != new_position.quantity || 
-           (old_position.entry_price - new_position.entry_price).abs() > 0.00000001 {
-            debug!(
-                exchange = %self.exchange_name,
-                strategy = %self.strategy_name,
-                symbol = %self.symbol,
-                action = "position_changed",
-                old_quantity = %format!("{:.2}", old_position.quantity),
-                new_quantity = %format!("{:.2}", new_position.quantity),
-                old_entry_price = %format!("{:.8}", old_position.entry_price),
-                new_entry_price = %format!("{:.8}", new_position.entry_price)
-            );
-        }
-    }
+
 
     pub fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>) {
         match signal {
             Signal::Buy => {
-                debug!(
+                info!(
                     exchange = %self.exchange_name,
                     strategy = %self.strategy_name,
                     symbol = %self.symbol,
@@ -82,7 +68,7 @@ impl TradeLogger {
                         pnl = %format!("{:.6}", pnl)
                     );
                 } else {
-                    debug!(
+                    info!(
                         exchange = %self.exchange_name,
                         strategy = %self.strategy_name,
                         symbol = %self.symbol,
@@ -171,9 +157,7 @@ impl StrategyLogger for StrategyLoggerAdapter {
         self.trade_logger.log_indicator_update(indicator_name, value);
     }
 
-    fn log_position_change(&self, old_position: &Position, new_position: &Position) {
-        self.trade_logger.log_position_change(old_position, new_position);
-    }
+
     
     fn log_trade_executed(&self, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>) {
         self.trade_logger.log_trade_executed(signal, price, quantity, pnl);
