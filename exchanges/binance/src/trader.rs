@@ -7,7 +7,7 @@ use binance_sdk::spot::websocket_api::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use strategies::strategy::StrategyLogger;
-use tracing::{error, info};
+use tracing::info;
 use crate::config::BinanceTraderConfig;
 use trade::config::TradeConfig;
 use trade::logger::{StrategyLoggerAdapter, TradeLogger};
@@ -56,6 +56,7 @@ pub struct BinanceTrader {
     api_key: String,
     api_secret: String,
     logger: TradeLogger,
+    exchange_info: trade::trader::ExchangeInfo,
 }
 
 impl BinanceTrader {
@@ -77,12 +78,16 @@ impl BinanceTrader {
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
-            trade_manager: TradeManager::new(),
+            trade_manager: TradeManager::new(trader_config.general.trading_fee),
             config: trading_config,
-            trader_config,
+            trader_config: trader_config.clone(),
             api_key,
             api_secret,
-            logger: TradeLogger::new(),
+            logger: TradeLogger::new(trader_config.general.name.clone()),
+            exchange_info: trade::trader::ExchangeInfo {
+                name: trader_config.general.name.clone(),
+                trading_fee: trader_config.general.trading_fee,
+            },
         })
     }
 
@@ -103,29 +108,37 @@ impl BinanceTrader {
         let confidence_factor =
             confidence.mul_add(trading_size_max - trading_size_min, trading_size_min);
 
+        // Cache configuration values to avoid repeated struct access
+        let config = &self.trader_config.trading_behavior;
+        let high_threshold = config.volatility_high_threshold;
+        let medium_threshold = config.volatility_medium_threshold;
+        let high_factor = config.volatility_high_factor;
+        let medium_factor = config.volatility_medium_factor;
+        let low_factor = config.volatility_low_factor;
+        let confidence_high = config.confidence_high_threshold;
+        let confidence_low = config.confidence_low_threshold;
+        let confidence_high_factor = config.confidence_high_factor;
+        let confidence_low_factor = config.confidence_low_factor;
+        let kelly_factor = config.kelly_factor;
+
         // Volatility adjustment - reduce size in high volatility
-        let volatility = Self::estimate_volatility(price);
-        let volatility_factor = if volatility > 0.02 {
-            // If volatility > 2%
-            0.7 // Reduce size by 30%
-        } else if volatility > 0.01 {
-            // If volatility > 1%
-            0.85 // Reduce size by 15%
+        let volatility = self.estimate_volatility(price);
+        let volatility_factor = if volatility > high_threshold {
+            high_factor
+        } else if volatility > medium_threshold {
+            medium_factor
         } else {
-            1.0 // No adjustment for low volatility
+            low_factor
         };
 
         // Risk adjustment based on confidence
-        let risk_factor = if confidence > 0.7 {
-            1.2 // Increase size for high confidence
-        } else if confidence < 0.3 {
-            0.8 // Reduce size for low confidence
+        let risk_factor = if confidence > confidence_high {
+            confidence_high_factor
+        } else if confidence < confidence_low {
+            confidence_low_factor
         } else {
             1.0
         };
-
-        // Kelly Criterion-inspired sizing (simplified)
-        let kelly_factor = Self::estimate_kelly_fraction();
 
         // Combine all factors
         let dynamic_quantity = confidence_factor * volatility_factor * risk_factor * kelly_factor;
@@ -139,23 +152,22 @@ impl BinanceTrader {
             .min(trading_size_max)
     }
 
-    const fn estimate_volatility(_current_price: f64) -> f64 {
+    fn estimate_volatility(&self, _current_price: f64) -> f64 {
         // Simple volatility estimation based on recent price movements
         // In a real implementation, this would track price history
-        // For now, use a conservative estimate
-        0.015 // 1.5% default volatility
+        // For now, use the configured default volatility
+        self.trader_config.trading_behavior.default_volatility
     }
 
-    const fn estimate_kelly_fraction() -> f64 {
-        // Kelly Criterion estimation
-        // In practice, this would be calculated from historical performance
-        // For now, use a conservative multiplier
-        0.8 // Reduce position size to 80% of base calculation
-    }
+
 }
 
 #[async_trait]
 impl Trader for BinanceTrader {
+    fn get_info(&self) -> &trade::trader::ExchangeInfo {
+        &self.exchange_info
+    }
+
     fn calculate_trade_size(
         &self,
         symbol: &str,
@@ -168,7 +180,7 @@ impl Trader for BinanceTrader {
         // Use TradeConfig for position sizing limits
         let min = self.config.position_sizing.trading_size_min;
         let max = self.config.position_sizing.trading_size_max;
-        let step = self.config.exchange.step_size.max(1.0); // default to 1 unit step for spot quantities
+        let step = self.config.exchange.step_size.max(self.trader_config.trading_behavior.step_size_fallback);
         self.calculate_trade_size_impl(symbol, price, confidence, min, max, step)
     }
 
@@ -178,11 +190,11 @@ impl Trader for BinanceTrader {
         let quantity = Decimal::from_f64(quantity).expect("Failed to convert quantity to Decimal");
 
         let Some(connection) = &self.connection else {
-            error!(
-                exchange = "binance",
-                action = "on_signal",
-                status = "connection_missing",
-                symbol = %symbol
+            self.logger.log_order_error(
+                &symbol,
+                "on_signal",
+                "connection_missing",
+                "WebSocket connection not available"
             );
             return;
         };
@@ -205,33 +217,30 @@ impl Trader for BinanceTrader {
                     .expect("Failed to build order parameters");
 
                     let Ok(response) = connection.order_place(params).await else {
-                        error!(
-                            exchange = "binance",
-                            action = "place_buy_order",
-                            status = "failed",
-                            symbol = %symbol,
-                            quantity = %quantity,
-                            error = "Failed to place order"
+                        self.logger.log_order_error(
+                            &symbol,
+                            "place_buy_order",
+                            "failed",
+                            "Failed to place order"
                         );
                         return;
                     };
                     let Ok(data) = response.data() else {
-                        error!(
-                            exchange = "binance",
-                            action = "buy_order_data",
-                            status = "failed",
-                            symbol = %symbol,
-                            error = "Failed to get order data"
+                        self.logger.log_order_error(
+                            &symbol,
+                            "buy_order_data",
+                            "failed",
+                            "Failed to get order data"
                         );
                         return;
                     };
 
                     let Some(fills) = data.fills.as_ref() else {
-                        error!(
-                            exchange = "binance",
-                            action = "buy_order_fills",
-                            status = "missing",
-                            symbol = %symbol
+                        self.logger.log_order_error(
+                            &symbol,
+                            "buy_order_fills",
+                            "missing",
+                            "No fills found in order response"
                         );
                         return;
                     };
@@ -273,15 +282,13 @@ impl Trader for BinanceTrader {
                     .expect("Failed to build order parameters");
 
                     if let Err(e) = connection.order_place(params).await {
-                        error!(
-                            exchange = "binance",
-                            action = "place_sell_order",
-                            status = "failed",
-                            symbol = %symbol,
-                            quantity = %quantity,
-                            error = %e
+                        self.logger.log_order_error(
+                            &symbol,
+                            "place_sell_order",
+                            "failed",
+                            &format!("Failed to place sell order: {}", e)
                         );
-                        std::process::exit(1);
+                        return;
                     }
 
                     // Sell order executed - position reset and PnL recorded
@@ -437,7 +444,7 @@ impl Trader for BinanceTrader {
                 confidence,
                 self.config.position_sizing.trading_size_min,
                 self.config.position_sizing.trading_size_max,
-                1.0, // trading_size_step - use 1.0 for DOGEUSDT
+                self.trader_config.trading_behavior.step_size_fallback,
             );
 
             match trading_mode {

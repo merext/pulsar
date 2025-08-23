@@ -84,8 +84,7 @@ impl StatisticalArbitrageHftStrategy {
             return 0.0;
         }
         
-        let recent_prices: Vec<f64> = prices.iter().rev().take(period).cloned().collect();
-        recent_prices.iter().sum::<f64>() / recent_prices.len() as f64
+        prices.iter().rev().take(period).sum::<f64>() / period as f64
     }
 
     fn calculate_standard_deviation(&self, prices: &VecDeque<f64>, period: usize) -> f64 {
@@ -93,12 +92,11 @@ impl StatisticalArbitrageHftStrategy {
             return 0.0;
         }
         
-        let recent_prices: Vec<f64> = prices.iter().rev().take(period).cloned().collect();
-        let mean = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
+        let mean = prices.iter().rev().take(period).sum::<f64>() / period as f64;
         
-        let variance = recent_prices.iter()
+        let variance = prices.iter().rev().take(period)
             .map(|&p| (p - mean).powi(2))
-            .sum::<f64>() / recent_prices.len() as f64;
+            .sum::<f64>() / period as f64;
         
         variance.sqrt()
     }
@@ -116,12 +114,11 @@ impl StatisticalArbitrageHftStrategy {
             return 0.0;
         }
         
-        let recent_prices: Vec<f64> = prices.iter().rev().take(period).cloned().collect();
-        let mean = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
+        let mean = prices.iter().rev().take(period).sum::<f64>() / period as f64;
         
-        let variance = recent_prices.iter()
+        let variance = prices.iter().rev().take(period)
             .map(|&p| (p - mean).powi(2))
-            .sum::<f64>() / recent_prices.len() as f64;
+            .sum::<f64>() / period as f64;
         
         variance.sqrt() / mean * 100.0
     }

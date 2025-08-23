@@ -1,3 +1,35 @@
+[general]
+# Exchange name
+name = "binance"
+# Trading fee for Binance exchange (0.1% = 0.001)
+trading_fee = 0.001
+
+[trading_behavior]
+# Volatility thresholds for position sizing adjustments
+volatility_high_threshold = 0.02      # 2% - reduce size by 30%
+volatility_medium_threshold = 0.01    # 1% - reduce size by 15%
+volatility_low_threshold = 0.005      # 0.5% - no adjustment
+
+# Position sizing adjustment factors
+volatility_high_factor = 0.7          # Reduce size by 30% in high volatility
+volatility_medium_factor = 0.85       # Reduce size by 15% in medium volatility
+volatility_low_factor = 1.0           # No adjustment for low volatility
+
+# Risk adjustment thresholds
+confidence_high_threshold = 0.7       # High confidence threshold
+confidence_low_threshold = 0.3        # Low confidence threshold
+confidence_high_factor = 1.2          # Increase size by 20% for high confidence
+confidence_low_factor = 0.8           # Reduce size by 20% for low confidence
+
+# Kelly Criterion factor
+kelly_factor = 0.8                    # Reduce position size to 80% of base calculation
+
+# Default volatility estimate
+default_volatility = 0.015            # 1.5% default volatility estimate
+
+# Step size fallback
+step_size_fallback = 1.0              # Fallback step size if exchange config is missing
+
 [websocket]
 # WebSocket connection timeout in seconds
 connection_timeout = 10

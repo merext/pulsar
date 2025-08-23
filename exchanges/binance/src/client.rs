@@ -58,7 +58,7 @@ impl BinanceClient {
             .await
             .context("Failed to subscribe to the trade stream")?;
 
-        let (tx, rx) = mpsc::channel(1000);
+        let (tx, rx) = mpsc::channel(10000);
 
         ws_stream.on_message(move |msg| {
             let trade = PulsarTrade {

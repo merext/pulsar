@@ -1,0 +1,40 @@
+[general]
+strategy_name = "VolumeBreakoutHftStrategy_Optimized"
+
+[volume]
+# Window for volume analysis (reduced for faster response)
+volume_window = 8
+# Volume spike threshold (increased for better signals)
+volume_threshold = 2.0
+# Volume momentum threshold (increased for better signals)
+volume_momentum = 3.0
+# Whether to adapt volume thresholds
+adaptive_volume = true
+
+[price]
+# Window for price analysis (reduced for faster response)
+price_window = 6
+# Price movement threshold (increased for better signals)
+price_threshold = 0.003
+# Price acceleration threshold (increased for better signals)
+price_acceleration = 0.002
+
+[breakout]
+# Window for breakout detection (reduced for faster response)
+breakout_window = 4
+# Breakout confirmation threshold (increased for better signals)
+breakout_threshold = 0.002
+# Filter for false breakouts (increased for better quality)
+false_breakout_filter = 0.001
+
+[signals]
+# Minimum confidence for trade (increased for better quality)
+min_confidence = 0.30
+# Maximum time to hold position in seconds (increased for better profits)
+max_position_time = 25.0
+# Profit target percentage (increased for better returns)
+profit_target = 0.05
+# Stop loss percentage (increased for better risk management)
+stop_loss = 0.025
+# Maximum trades per minute (reduced for quality over quantity)
+max_trades_per_minute = 35

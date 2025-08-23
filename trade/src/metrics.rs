@@ -23,16 +23,20 @@ pub struct TradeManager {
     positions: HashMap<String, Position>,
     metrics: PerformanceMetrics,
     total_ticks: usize, // Total number of market data ticks received
+    trading_fee: f64, // Trading fee as decimal (e.g., 0.001 for 0.1%)
 }
 
 impl TradeManager {
-    pub fn new() -> Self {
+    pub fn new(trading_fee: f64) -> Self {
         Self {
             positions: HashMap::new(),
             metrics: PerformanceMetrics::new(),
             total_ticks: 0,
+            trading_fee,
         }
     }
+
+
 
     // Position management
     pub fn open_position(&mut self, symbol: &str, price: f64, quantity: f64, timestamp: f64) {
@@ -56,15 +60,25 @@ impl TradeManager {
 
     pub fn close_position(&mut self, symbol: &str, price: f64, timestamp: f64) -> f64 {
         if let Some(position) = self.positions.remove(symbol) {
-            let pnl = (price - position.entry_price) * position.quantity;
+            // Calculate gross PnL
+            let gross_pnl = (price - position.entry_price) * position.quantity;
+            
+            // Calculate trading fees (entry + exit fees)
+            let entry_fee = position.entry_price * position.quantity * self.trading_fee;
+            let exit_fee = price * position.quantity * self.trading_fee;
+            let total_fees = entry_fee + exit_fee;
+            
+            // Net PnL after fees
+            let net_pnl = gross_pnl - total_fees;
+            
             self.metrics.record_trade(TradeRecord {
                 timestamp,
                 price,
                 quantity: position.quantity,
                 signal: Signal::Sell, // Assuming closing is selling
-                pnl: Some(pnl),
+                pnl: Some(net_pnl),
             });
-            pnl
+            net_pnl
         } else {
             0.0
         }
@@ -84,13 +98,22 @@ impl TradeManager {
             let quantity_change = new_quantity - position.quantity;
             if quantity_change < 0.0 {
                 // Reducing position (partial close)
-                let pnl = (new_price - position.entry_price) * quantity_change.abs();
+                let gross_pnl = (new_price - position.entry_price) * quantity_change.abs();
+                
+                // Calculate trading fees for the partial close
+                let entry_fee = position.entry_price * quantity_change.abs() * self.trading_fee;
+                let exit_fee = new_price * quantity_change.abs() * self.trading_fee;
+                let total_fees = entry_fee + exit_fee;
+                
+                // Net PnL after fees
+                let net_pnl = gross_pnl - total_fees;
+                
                 self.metrics.record_trade(TradeRecord {
                     timestamp,
                     price: new_price,
                     quantity: quantity_change.abs(),
                     signal: Signal::Sell,
-                    pnl: Some(pnl),
+                    pnl: Some(net_pnl),
                 });
             }
 
@@ -108,7 +131,16 @@ impl TradeManager {
 
     pub fn unrealized_pnl(&self, symbol: &str, current_price: f64) -> f64 {
         if let Some(position) = self.positions.get(symbol) {
-            (current_price - position.entry_price) * position.quantity
+            // Calculate gross unrealized PnL
+            let gross_pnl = (current_price - position.entry_price) * position.quantity;
+            
+            // Calculate trading fees (entry fee + estimated exit fee)
+            let entry_fee = position.entry_price * position.quantity * self.trading_fee;
+            let estimated_exit_fee = current_price * position.quantity * self.trading_fee;
+            let total_fees = entry_fee + estimated_exit_fee;
+            
+            // Net unrealized PnL after fees
+            gross_pnl - total_fees
         } else {
             0.0
         }
@@ -119,7 +151,16 @@ impl TradeManager {
             .iter()
             .map(|(symbol, position)| {
                 if let Some(&price) = current_prices.get(symbol) {
-                    (price - position.entry_price) * position.quantity
+                    // Calculate gross unrealized PnL
+                    let gross_pnl = (price - position.entry_price) * position.quantity;
+                    
+                    // Calculate trading fees (entry fee + estimated exit fee)
+                    let entry_fee = position.entry_price * position.quantity * self.trading_fee;
+                    let estimated_exit_fee = price * position.quantity * self.trading_fee;
+                    let total_fees = entry_fee + estimated_exit_fee;
+                    
+                    // Net unrealized PnL after fees
+                    gross_pnl - total_fees
                 } else {
                     0.0
                 }
@@ -162,11 +203,7 @@ impl TradeManager {
     }
 }
 
-impl Default for TradeManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
 
 #[derive(Debug, Clone)]
 pub struct PerformanceMetrics {

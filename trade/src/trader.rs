@@ -35,8 +35,17 @@ impl std::fmt::Display for Position {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ExchangeInfo {
+    pub name: String,
+    pub trading_fee: f64,
+}
+
 #[async_trait::async_trait]
 pub trait Trader {
+    // Exchange information
+    fn get_info(&self) -> &ExchangeInfo;
+
     // Centralized metrics access
     fn get_metrics(&self) -> &PerformanceMetrics;
     fn get_trade_manager(&self) -> &TradeManager;

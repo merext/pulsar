@@ -87,11 +87,8 @@ impl ScalpingHftStrategy {
             return 0.0;
         }
         
-        let recent_prices: Vec<f64> = prices.iter().rev().take(period).cloned().collect();
-        let older_prices: Vec<f64> = prices.iter().rev().skip(period).take(period).cloned().collect();
-        
-        let recent_avg = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
-        let older_avg = older_prices.iter().sum::<f64>() / older_prices.len() as f64;
+        let recent_avg = prices.iter().rev().take(period).sum::<f64>() / period as f64;
+        let older_avg = prices.iter().rev().skip(period).take(period).sum::<f64>() / period as f64;
         
         if older_avg > 0.0 {
             (recent_avg - older_avg) / older_avg * 1000000.0 // Micro percentage
@@ -105,13 +102,15 @@ impl ScalpingHftStrategy {
             return (false, 0.0);
         }
         
-        let recent_prices: Vec<f64> = self.price_history.iter().rev().take(5).cloned().collect();
-        if recent_prices.len() < 5 {
+        // Calculate short-term trend using iterators directly
+        let first_price = self.price_history.back().unwrap_or(&0.0);
+        let fifth_price = self.price_history.iter().rev().nth(4).unwrap_or(&0.0);
+        
+        if *fifth_price <= 0.0 {
             return (false, 0.0);
         }
         
-        // Calculate short-term trend
-        let trend = (recent_prices[0] - recent_prices[4]) / recent_prices[4] * 1000000.0;
+        let trend = (*first_price - *fifth_price) / *fifth_price * 1000000.0;
         
         // Detect reversal if trend changes direction
         let reversal_strength = if trend.abs() > self.config.micro_movements.reversal_threshold {

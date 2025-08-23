@@ -3,15 +3,20 @@ use strategies::strategy::StrategyLogger;
 use tracing::{debug, error, info, warn};
 
 /// Trading logger that provides standardized logging for any exchange and strategy
-pub struct TradeLogger;
+pub struct TradeLogger {
+    pub exchange_name: String,
+}
 
 impl TradeLogger {
-    pub fn new() -> Self {
-        Self
+    pub fn new(exchange: String) -> Self {
+        Self {
+            exchange_name: exchange,
+        }
     }
 
     pub fn log_trade_received(&self, symbol: &str, price: f64, quantity: f64, timestamp: f64) {
         debug!(
+            exchange = %self.exchange_name,
             symbol = %symbol,
             action = "trade_received",
             price = %format!("{:.8}", price),
@@ -22,6 +27,7 @@ impl TradeLogger {
 
     pub fn log_signal_generated(&self, symbol: &str, signal: &Signal, confidence: f64, price: f64) {
         debug!(
+            exchange = %self.exchange_name,
             symbol = %symbol,
             action = "signal_generated",
             signal = %format!("{:?}", signal),
@@ -40,6 +46,7 @@ impl TradeLogger {
         match signal {
             Signal::Buy => {
                 info!(
+                    exchange = %self.exchange_name,
                     trades = %trades_info,
                     symbol = %symbol,
                     action = "buy_executed",
@@ -51,6 +58,7 @@ impl TradeLogger {
                 if let Some(pnl) = pnl {
                     if let Some(profit) = profit {
                         info!(
+                            exchange = %self.exchange_name,
                             trades = %trades_info,
                             symbol = %symbol,
                             action = "sell_executed",
@@ -61,6 +69,7 @@ impl TradeLogger {
                         );
                     } else {
                         info!(
+                            exchange = %self.exchange_name,
                             trades = %trades_info,
                             symbol = %symbol,
                             action = "sell_executed",
@@ -71,6 +80,7 @@ impl TradeLogger {
                     }
                 } else if let Some(profit) = profit {
                     info!(
+                        exchange = %self.exchange_name,
                         trades = %trades_info,
                         symbol = %symbol,
                         action = "sell_executed",
@@ -80,6 +90,7 @@ impl TradeLogger {
                     );
                 } else {
                     info!(
+                        exchange = %self.exchange_name,
                         trades = %trades_info,
                         symbol = %symbol,
                         action = "sell_executed",
@@ -96,6 +107,7 @@ impl TradeLogger {
 
     pub fn log_error(&self, symbol: &str, action: &str, error: &str) {
         error!(
+            exchange = %self.exchange_name,
             symbol = %symbol,
             action = %action,
             error = %error
@@ -104,16 +116,28 @@ impl TradeLogger {
 
     pub fn log_warning(&self, symbol: &str, action: &str, warning: &str) {
         warn!(
+            exchange = %self.exchange_name,
             symbol = %symbol,
             action = %action,
             warning = %warning
+        );
+    }
+
+    pub fn log_order_error(&self, symbol: &str, action: &str, status: &str, error: &str) {
+        error!(
+            symbol = %symbol,
+            action = %action,
+            status = %status,
+            error = %error
         );
     }
 }
 
 impl Default for TradeLogger {
     fn default() -> Self {
-        Self::new()
+        Self {
+            exchange_name: "unknown".to_string(),
+        }
     }
 }
 
