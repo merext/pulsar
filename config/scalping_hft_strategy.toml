@@ -1,0 +1,42 @@
+[general]
+strategy_name = "ScalpingHftStrategy"
+
+[scalping]
+# Minimum price movement for entry (ultra-low for scalping)
+entry_threshold = 0.0001
+# Price movement for exit (ultra-low for scalping)
+exit_threshold = 0.00005
+# Maximum time to hold position in seconds (very short for scalping)
+max_hold_time = 10.0
+# Minimum time between trades in seconds (very short for scalping)
+min_trade_interval = 2.0
+
+[micro_movements]
+# Window for price analysis (very short for scalping)
+price_window = 5
+# Momentum threshold for entry (ultra-low for micro movements)
+momentum_threshold = 0.5
+# Reversal detection threshold (ultra-low for micro movements)
+reversal_threshold = 0.3
+# Filter out market noise (ultra-low for micro movements)
+noise_filter = 0.1
+
+[risk_management]
+# Maximum position size
+max_position_size = 10.0
+# Maximum daily loss (ultra-low for scalping)
+max_daily_loss = 0.001
+# Maximum consecutive losses
+max_consecutive_losses = 5
+# Lock profits threshold (ultra-low for scalping)
+profit_lock_threshold = 0.0005
+
+[signals]
+# Minimum confidence for trade (ultra-low for scalping)
+min_confidence = 0.1
+# Profit target percentage (ultra-low for scalping)
+profit_target = 0.02
+# Stop loss percentage (ultra-tight for scalping)
+stop_loss = 0.01
+# Maximum trades per minute (high for scalping)
+max_trades_per_minute = 100

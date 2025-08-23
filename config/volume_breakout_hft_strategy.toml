@@ -1,0 +1,40 @@
+[general]
+strategy_name = "VolumeBreakoutHftStrategy"
+
+[volume]
+# Window for volume analysis
+volume_window = 10
+# Volume spike threshold (ultra-low for testing)
+volume_threshold = 1.5
+# Volume momentum threshold (ultra-low for testing)
+volume_momentum = 5.0
+# Whether to adapt volume thresholds
+adaptive_volume = false
+
+[price]
+# Window for price analysis
+price_window = 8
+# Price movement threshold (ultra-low for testing)
+price_threshold = 0.002
+# Price acceleration threshold (ultra-low for testing)
+price_acceleration = 0.001
+
+[breakout]
+# Window for breakout detection
+breakout_window = 5
+# Breakout confirmation threshold (ultra-low for testing)
+breakout_threshold = 0.001
+# Filter for false breakouts
+false_breakout_filter = 0.0005
+
+[signals]
+# Minimum confidence for trade (ultra-low for testing)
+min_confidence = 0.15
+# Maximum time to hold position in seconds (very short for HFT)
+max_position_time = 15.0
+# Profit target percentage (ultra-low for testing)
+profit_target = 0.03
+# Stop loss percentage (ultra-tight for HFT)
+stop_loss = 0.015
+# Maximum trades per minute
+max_trades_per_minute = 50

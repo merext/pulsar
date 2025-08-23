@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use strategies::strategy::StrategyLogger;
 use tracing::{error, info};
+use crate::config::BinanceTraderConfig;
 use trade::config::TradeConfig;
 use trade::logger::{StrategyLoggerAdapter, TradeLogger};
 use trade::metrics::TradeManager;
@@ -51,6 +52,7 @@ pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
     pub trade_manager: TradeManager,
     pub config: TradeConfig,
+    pub trader_config: BinanceTraderConfig,
     api_key: String,
     api_secret: String,
     logger: TradeLogger,
@@ -71,11 +73,13 @@ impl BinanceTrader {
             .map_err(|_| "BINANCE_API_SECRET environment variable not set")?;
         
         let trading_config = TradeConfig::load()?;
+        let trader_config = BinanceTraderConfig::from_file("config/binance_exchange.toml")?;
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
             trade_manager: TradeManager::new(),
             config: trading_config,
+            trader_config,
             api_key,
             api_secret,
             logger: TradeLogger::new(),
@@ -95,11 +99,33 @@ impl BinanceTrader {
         config_path: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let trading_config = TradeConfig::from_file(config_path)?;
+        let trader_config = BinanceTraderConfig::from_file("config/binance_exchange.toml")?;
 
         Ok(Self {
             connection: None, // Will be initialized in run_trading_loop if needed
             trade_manager: TradeManager::new(),
             config: trading_config,
+            trader_config,
+            api_key: api_key.to_string(),
+            api_secret: api_secret.to_string(),
+            logger: TradeLogger::new(),
+        })
+    }
+
+    /// Create a new BinanceTrader with custom BinanceTraderConfig path
+    pub async fn new_with_trader_config(
+        api_key: &str,
+        api_secret: &str,
+        trader_config_path: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let trading_config = TradeConfig::load()?;
+        let trader_config = BinanceTraderConfig::from_file(trader_config_path)?;
+
+        Ok(Self {
+            connection: None, // Will be initialized in run_trading_loop if needed
+            trade_manager: TradeManager::new(),
+            config: trading_config,
+            trader_config,
             api_key: api_key.to_string(),
             api_secret: api_secret.to_string(),
             logger: TradeLogger::new(),
@@ -183,7 +209,7 @@ impl Trader for BinanceTrader {
         _trading_size_max: f64,
         _trading_size_step: f64,
     ) -> f64 {
-        // Read limits from central TradingConfig rather than caller
+        // Use TradeConfig for position sizing limits
         let min = self.config.position_sizing.trading_size_min;
         let max = self.config.position_sizing.trading_size_max;
         let step = self.config.exchange.step_size.max(1.0); // default to 1 unit step for spot quantities
@@ -404,10 +430,13 @@ impl Trader for BinanceTrader {
 
             let client = SpotWsApi::production(config);
             self.connection = Some(
-                client
-                    .connect()
-                    .await
-                    .expect("Failed to connect to WebSocket API"),
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(self.trader_config.websocket.connection_timeout),
+                    client.connect()
+                )
+                .await
+                .expect("WebSocket connection timeout")
+                .expect("Failed to connect to WebSocket API"),
             );
         }
 

@@ -5,7 +5,6 @@ use binance_exchange::trader::BinanceTrader;
 use clap::{Parser, Subcommand};
 use std::error::Error;
 use std::fs;
-use strategies::StochasticHftStrategy;
 use strategies::strategy::Strategy;
 use toml::Value;
 use tracing::info;
@@ -88,8 +87,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .ok_or("Trading symbol not defined in configuration")?;
 
     // Create strategy and trader once
-    let mut strategy = StochasticHftStrategy::from_file("config/stochastic_hft_strategy_trend.toml")
-        .expect("Failed to load StochasticHftStrategy configuration");
+    let mut strategy = strategies::StatisticalArbitrageHftStrategy::from_file("config/statistical_arbitrage_hft_strategy.toml")
+        .expect("Failed to load StatisticalArbitrageHftStrategy configuration");
         
     info!("Trading strategy: {}", strategy.get_info());
 

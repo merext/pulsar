@@ -1,0 +1,40 @@
+[general]
+strategy_name = "StatisticalArbitrageHftStrategy"
+
+[statistical]
+# Period for statistical calculations
+lookback_period = 25
+# Z-score threshold for signals (ultra-low for testing)
+z_score_threshold = 0.5
+# Window for mean calculation
+mean_window = 15
+# Window for standard deviation
+std_window = 15
+
+[mean_reversion]
+# Strength of mean reversion
+reversion_strength = 1.5
+# Maximum deviation before extreme signal
+max_deviation = 0.01
+# Speed of mean reversion
+reversion_speed = 0.8
+
+[volatility]
+# Window for volatility calculation
+volatility_window = 10
+# Volatility threshold for trading (ultra-low for testing)
+volatility_threshold = 0.02
+# Whether to adapt thresholds
+adaptive_threshold = false
+
+[signals]
+# Minimum confidence for trade (ultra-low for testing)
+min_confidence = 0.15
+# Maximum time to hold position in seconds
+max_position_time = 20.0
+# Profit target percentage (ultra-low for testing)
+profit_target = 0.03
+# Stop loss percentage (tight for HFT)
+stop_loss = 0.015
+# Maximum trades per minute
+max_trades_per_minute = 80

@@ -1,0 +1,40 @@
+[general]
+strategy_name = "MeanReversionHftStrategy"
+
+[mean_reversion]
+# Window for calculating moving average
+mean_window = 20
+# Price deviation threshold from mean (ultra-low for stable markets)
+deviation_threshold = 0.001
+# Strength of mean reversion signal
+reversion_strength = 2.0
+# Maximum deviation before extreme signal
+max_deviation = 0.01
+
+[volatility]
+# Window for volatility calculation
+volatility_window = 10
+# Minimum volatility for trading (ultra-low for stable markets)
+volatility_threshold = 0.01
+# Whether to adapt thresholds to market
+adaptive_threshold = false
+
+[volume]
+# Window for volume analysis
+volume_window = 5
+# Minimum volume increase (ultra-low)
+volume_threshold = 1.0
+# Whether to require volume confirmation
+volume_confirmation = false
+
+[signals]
+# Minimum confidence for trade (ultra-low for testing)
+min_confidence = 0.1
+# Maximum time to hold position in seconds (very short for HFT)
+max_position_time = 20.0
+# Profit target percentage (ultra-low for stable markets)
+profit_target = 0.05
+# Stop loss percentage (ultra-tight for HFT)
+stop_loss = 0.02
+# Maximum trades per hour
+max_trades_per_hour = 100
