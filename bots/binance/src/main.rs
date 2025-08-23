@@ -87,32 +87,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .ok_or("Trading symbol not defined in configuration")?;
 
 
-    // let mut strategy = strategies::StatisticalArbitrageHftStrategy::from_file("config/statistical_arbitrage_hft_strategy.toml")
-    //     .expect("Failed to load StatisticalArbitrageHftStrategy configuration");
-    
-    // let mut strategy = strategies::VolumeBreakoutHftStrategy::from_file("config/volume_breakout_hft_strategy.toml")
-    //     .expect("Failed to load VolumeBreakoutHftStrategy configuration");
-    
-    let mut strategy = strategies::MeanReversionHftStrategy::from_file("config/mean_reversion_hft_strategy_optimized.toml")
-        .expect("Failed to load MeanReversionHftStrategy_Optimized configuration");
-    
-    // let mut strategy = strategies::TrendFollowingHftStrategy::from_file("config/trend_following_hft_strategy.toml")
-    //     .expect("Failed to load TrendFollowingHftStrategy configuration");
-    
-    // let mut strategy = strategies::ScalpingHftStrategy::from_file("config/scalping_hft_strategy.toml")
-    //     .expect("Failed to load ScalpingHftStrategy configuration");
-    
-    // let mut strategy = strategies::MeanReversionHftStrategy::from_file("config/mean_reversion_hft_strategy.toml")
-    //     .expect("Failed to load MeanReversionHftStrategy configuration");
-    
-    // let mut strategy = strategies::MeanReversionHftStrategy::from_file("config/mean_reversion_hft_strategy.toml")
-    //     .expect("Failed to load MeanReversionHftStrategy configuration");
-    
-    // let mut strategy = strategies::ScalpingHftStrategy::from_file("config/scalping_hft_strategy.toml")
-    //     .expect("Failed to load ScalpingHftStrategy configuration");
-    
-    // let mut strategy = strategies::TrendFollowingHftStrategy::from_file("config/trend_following_hft_strategy.toml")
-    //     .expect("Failed to load TrendFollowingHftStrategy configuration");
+    let mut strategy = strategies::MeanReversionHftStrategy::from_file("config/mean_reversion_hft_strategy.toml")
+        .expect("Failed to load MeanReversionHftStrategy configuration");
         
     info!("Trading strategy: {}", strategy.get_info());
 
