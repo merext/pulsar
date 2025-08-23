@@ -1,35 +1,3 @@
-[general]
-trader_name = "BinanceTrader"
-exchange = "binance"
-
 [websocket]
 # WebSocket connection timeout in seconds
 connection_timeout = 10
-# Heartbeat interval in seconds
-heartbeat_interval = 30
-# Maximum reconnection attempts
-max_reconnections = 5
-# Delay between reconnection attempts in seconds
-reconnection_delay = 5
-
-[logging]
-# Log level for trader operations
-log_level = "info"
-# Whether to log all trades
-log_all_trades = true
-# Whether to log order details
-log_order_details = false
-# Whether to log balance updates
-log_balance_updates = true
-
-[execution]
-# Order timeout in seconds
-order_timeout = 30
-# Maximum retry attempts for failed orders
-max_retries = 3
-# Delay between retries in seconds
-retry_delay = 1
-# Whether to use market orders for immediate execution
-use_market_orders = true
-# Slippage tolerance percentage
-slippage_tolerance = 0.1

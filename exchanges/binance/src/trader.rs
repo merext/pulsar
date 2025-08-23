@@ -86,51 +86,7 @@ impl BinanceTrader {
         })
     }
 
-    /// # Panics
-    ///
-    /// Panics if the Binance API configuration cannot be built or if the WebSocket API connection fails.
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if the trading config cannot be loaded from the provided path.
-    pub async fn new_with_config(
-        api_key: &str,
-        api_secret: &str,
-        config_path: &str,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let trading_config = TradeConfig::from_file(config_path)?;
-        let trader_config = BinanceTraderConfig::from_file("config/binance_exchange.toml")?;
 
-        Ok(Self {
-            connection: None, // Will be initialized in run_trading_loop if needed
-            trade_manager: TradeManager::new(),
-            config: trading_config,
-            trader_config,
-            api_key: api_key.to_string(),
-            api_secret: api_secret.to_string(),
-            logger: TradeLogger::new(),
-        })
-    }
-
-    /// Create a new BinanceTrader with custom BinanceTraderConfig path
-    pub async fn new_with_trader_config(
-        api_key: &str,
-        api_secret: &str,
-        trader_config_path: &str,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let trading_config = TradeConfig::load()?;
-        let trader_config = BinanceTraderConfig::from_file(trader_config_path)?;
-
-        Ok(Self {
-            connection: None, // Will be initialized in run_trading_loop if needed
-            trade_manager: TradeManager::new(),
-            config: trading_config,
-            trader_config,
-            api_key: api_key.to_string(),
-            api_secret: api_secret.to_string(),
-            logger: TradeLogger::new(),
-        })
-    }
 
     pub fn calculate_trade_size_impl(
         &self,
