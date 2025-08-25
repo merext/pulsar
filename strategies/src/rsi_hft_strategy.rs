@@ -61,6 +61,7 @@ pub struct RsiHftStrategy {
     last_signal_time: f64,
     trades_this_hour: usize,
     last_hour_reset: f64,
+    current_timestamp: f64,  // Store current timestamp from trades
     logger: Box<dyn StrategyLogger>,
 }
 
@@ -75,6 +76,7 @@ impl RsiHftStrategy {
             last_signal_time: 0.0,
             trades_this_hour: 0,
             last_hour_reset: 0.0,
+            current_timestamp: 0.0,
             logger: Box::new(NoOpStrategyLogger),
         }
     }
@@ -225,6 +227,9 @@ impl Strategy for RsiHftStrategy {
             self.volume_history.pop_front();
         }
 
+        // Store current timestamp
+        self.current_timestamp = trade.timestamp;
+
         // Calculate and store RSI
         if self.price_history.len() >= self.config.rsi.rsi_period + 1 {
             let rsi = self.calculate_rsi(&self.price_history, self.config.rsi.rsi_period);
@@ -258,10 +263,8 @@ impl Strategy for RsiHftStrategy {
     }
 
     fn get_signal(&mut self, current_position: Position) -> (Signal, f64) {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
+        // Use the timestamp from the last trade instead of SystemTime::now()
+        let current_time = self.current_timestamp;
 
         // Reset hourly trade counter
         self.reset_hourly_trades(current_time);
