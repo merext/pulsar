@@ -1,0 +1,45 @@
+[general]
+# Name identifier for the strategy
+strategy_name = "RsiHftStrategy"
+
+[rsi]
+# Number of price periods used to calculate RSI (lower = more sensitive)
+rsi_period = 5
+# RSI level below which market is considered oversold (buy signal)
+oversold_threshold = 35.0
+# RSI level above which market is considered overbought (sell signal)
+overbought_threshold = 65.0
+# Smoothing factor for RSI calculation (0.0 = no smoothing, 1.0 = maximum smoothing)
+rsi_smoothing = 0.1
+# Number of periods to look back for divergence detection
+divergence_lookback = 10
+
+[volatility]
+# Number of price periods used to calculate volatility
+volatility_window = 20
+# Minimum volatility percentage required to generate trading signals
+volatility_threshold = 0.5
+# Whether to automatically adjust volatility thresholds based on market conditions
+adaptive_threshold = true
+
+[volume]
+# Number of volume periods used for volume analysis
+volume_window = 15
+# Minimum volume increase percentage required for signal confirmation
+volume_threshold = 10.0
+# Whether volume confirmation is required for all trading signals
+volume_confirmation = true
+
+[signals]
+# Minimum confidence level (0.0-1.0) required to execute a trade
+min_confidence = 0.6
+# Maximum time in seconds to hold a position before forced exit
+max_position_time = 300.0
+# Profit target percentage to automatically close profitable positions
+profit_target = 0.8
+# Stop loss percentage to automatically close losing positions
+stop_loss = 0.4
+# Maximum number of trades allowed per hour to prevent overtrading
+max_trades_per_hour = 50
+# Minimum time in seconds between consecutive trading signals
+signal_cooldown = 2.0

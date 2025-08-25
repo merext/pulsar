@@ -87,8 +87,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .ok_or("Trading symbol not defined in configuration")?;
 
 
-    let mut strategy = strategies::MeanReversionHftStrategy::from_file("config/mean_reversion_hft_strategy.toml")
-        .expect("Failed to load MeanReversionHftStrategy configuration");
+    let mut strategy = strategies::RsiHftStrategy::from_file("config/rsi_hft_strategy.toml")
+        .expect("Failed to load RsiHftStrategy configuration");
         
     info!("Trading strategy: {}", strategy.get_info());
 
