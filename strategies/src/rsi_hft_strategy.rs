@@ -1,67 +1,57 @@
-use crate::models::{Position, Signal, TradeData};
-use crate::strategy::{Strategy, StrategyLogger, NoOpStrategyLogger};
-use serde::Deserialize;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::Path;
-use async_trait::async_trait;
+use crate::{models::*, strategy::{Strategy, StrategyLogger, NoOpStrategyLogger}};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RsiHftConfig {
     pub general: GeneralConfig,
     pub rsi: RsiConfig,
-    pub volatility: VolatilityConfig,
-    pub volume: VolumeConfig,
+    pub trend: TrendConfig,
     pub signals: SignalConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RsiConfig {
+    pub period: usize,
+    pub oversold_threshold: f64,
+    pub overbought_threshold: f64,
+    pub signal_strength: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrendConfig {
+    pub ma_short_period: usize,
+    pub ma_long_period: usize,
+    pub trend_strength: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     pub strategy_name: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct RsiConfig {
-    pub rsi_period: usize,           // RSI calculation period
-    pub oversold_threshold: f64,     // RSI oversold threshold
-    pub overbought_threshold: f64,   // RSI overbought threshold
-    pub rsi_smoothing: f64,          // RSI smoothing factor
-    pub divergence_lookback: usize,  // Lookback for divergence detection
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VolatilityConfig {
-    pub volatility_window: usize,    // Window for volatility calculation
-    pub volatility_threshold: f64,   // Minimum volatility for trading
-    pub adaptive_threshold: bool,    // Whether to adapt thresholds to market
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VolumeConfig {
-    pub volume_window: usize,        // Window for volume analysis
-    pub volume_threshold: f64,       // Minimum volume increase
-    pub volume_confirmation: bool,   // Whether to require volume confirmation
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalConfig {
-    pub min_confidence: f64,        // Minimum confidence for trade
-    pub max_position_time: f64,     // Maximum time to hold position
-    pub profit_target: f64,         // Profit target percentage
-    pub stop_loss: f64,             // Stop loss percentage
-    pub max_trades_per_hour: usize, // Maximum trades per hour
-    pub signal_cooldown: f64,       // Minimum time between signals
+    pub min_confidence: f64,
+    pub max_position_time: f64,
+    pub profit_target: f64,
+    pub stop_loss: f64,
+    pub max_trades_per_hour: usize,
+    pub signal_cooldown: f64,
 }
 
 pub struct RsiHftStrategy {
     config: RsiHftConfig,
     price_history: VecDeque<f64>,
-    volume_history: VecDeque<f64>,
-    rsi_history: VecDeque<f64>,
-    volatility_history: VecDeque<f64>,
+    rsi_values: VecDeque<f64>,
+    ma_short_values: VecDeque<f64>,
+    ma_long_values: VecDeque<f64>,
     last_signal_time: f64,
     trades_this_hour: usize,
     last_hour_reset: f64,
-    current_timestamp: f64,  // Store current timestamp from trades
+    current_timestamp: f64,
     logger: Box<dyn StrategyLogger>,
 }
 
@@ -70,9 +60,9 @@ impl RsiHftStrategy {
         Self {
             config,
             price_history: VecDeque::new(),
-            volume_history: VecDeque::new(),
-            rsi_history: VecDeque::new(),
-            volatility_history: VecDeque::new(),
+            rsi_values: VecDeque::new(),
+            ma_short_values: VecDeque::new(),
+            ma_long_values: VecDeque::new(),
             last_signal_time: 0.0,
             trades_this_hour: 0,
             last_hour_reset: 0.0,
@@ -83,26 +73,23 @@ impl RsiHftStrategy {
 
     fn calculate_rsi(&self, prices: &VecDeque<f64>, period: usize) -> f64 {
         if prices.len() < period + 1 {
-            return 50.0; // Neutral RSI when insufficient data
+            return 50.0; // Neutral RSI if not enough data
         }
 
-        let recent_prices: Vec<f64> = prices.iter().rev().take(period + 1).cloned().collect();
-        let mut gains = Vec::new();
-        let mut losses = Vec::new();
+        let mut gains = 0.0;
+        let mut losses = 0.0;
 
-        for i in 1..recent_prices.len() {
-            let change = recent_prices[i] - recent_prices[i-1];
+        for i in (prices.len() - period)..prices.len() {
+            let change = prices[i] - prices[i - 1];
             if change > 0.0 {
-                gains.push(change);
-                losses.push(0.0);
+                gains += change;
             } else {
-                gains.push(0.0);
-                losses.push(change.abs());
+                losses += change.abs();
             }
         }
 
-        let avg_gain: f64 = gains.iter().sum::<f64>() / gains.len() as f64;
-        let avg_loss: f64 = losses.iter().sum::<f64>() / losses.len() as f64;
+        let avg_gain = gains / period as f64;
+        let avg_loss = losses / period as f64;
 
         if avg_loss == 0.0 {
             return 100.0;
@@ -112,83 +99,152 @@ impl RsiHftStrategy {
         100.0 - (100.0 / (1.0 + rs))
     }
 
-    fn calculate_volatility(&self, prices: &VecDeque<f64>, period: usize) -> f64 {
+    fn calculate_moving_average(&self, prices: &VecDeque<f64>, period: usize) -> f64 {
         if prices.len() < period {
             return 0.0;
         }
         
         let recent_prices: Vec<f64> = prices.iter().rev().take(period).cloned().collect();
-        let mean = recent_prices.iter().sum::<f64>() / recent_prices.len() as f64;
-        
-        let variance = recent_prices.iter()
-            .map(|&p| (p - mean).powi(2))
-            .sum::<f64>() / recent_prices.len() as f64;
-        
-        variance.sqrt() / mean * 100.0
+        recent_prices.iter().sum::<f64>() / recent_prices.len() as f64
     }
 
-    fn calculate_volume_momentum(&self, volumes: &VecDeque<f64>, period: usize) -> f64 {
-        if volumes.len() < period * 2 {
-            return 0.0;
+    fn should_exit_position(&self, current_position: &Position, current_price: f64) -> bool {
+        if current_position.quantity == 0.0 {
+            return false;
         }
         
-        let recent_avg = volumes.iter().rev().take(period).sum::<f64>() / period as f64;
-        let older_avg = volumes.iter().rev().skip(period).take(period).sum::<f64>() / period as f64;
-        
-        if older_avg > 0.0 {
-            (recent_avg - older_avg) / older_avg * 100.0
+        let entry_price = current_position.entry_price;
+        let profit_pct = if current_position.quantity > 0.0 {
+            (current_price - entry_price) / entry_price * 100.0
         } else {
-            0.0
-        }
-    }
-
-    fn detect_rsi_signal(&self, current_rsi: f64, previous_rsi: f64) -> (f64, f64) {
-        let mut signal_strength = 0.0;
-        let mut signal_direction = 0.0;
-
-        // Oversold condition (RSI below threshold)
-        if current_rsi <= self.config.rsi.oversold_threshold {
-            let oversold_strength = (self.config.rsi.oversold_threshold - current_rsi) / self.config.rsi.oversold_threshold;
-            signal_strength = oversold_strength.min(1.0);
-            signal_direction = 1.0; // Buy signal
-        }
-        // Overbought condition (RSI above threshold)
-        else if current_rsi >= self.config.rsi.overbought_threshold {
-            let overbought_strength = (current_rsi - self.config.rsi.overbought_threshold) / (100.0 - self.config.rsi.overbought_threshold);
-            signal_strength = overbought_strength.min(1.0);
-            signal_direction = -1.0; // Sell signal
-        }
-
-        // RSI momentum (direction change)
-        if previous_rsi > 0.0 {
-            let rsi_change = current_rsi - previous_rsi;
-            if signal_direction > 0.0 && rsi_change > 0.0 {
-                signal_strength += 0.2; // RSI rising from oversold
-            } else if signal_direction < 0.0 && rsi_change < 0.0 {
-                signal_strength += 0.2; // RSI falling from overbought
-            }
-        }
-
-        (signal_strength, signal_direction)
-    }
-
-    fn should_exit_position(&self, current_price: f64, entry_price: f64, entry_time: f64, current_time: f64) -> bool {
-        // Time-based exit
-        if current_time - entry_time > self.config.signals.max_position_time {
-            return true;
-        }
+            (entry_price - current_price) / entry_price * 100.0
+        };
         
-        // Profit target or stop loss
-        let price_change = (current_price - entry_price) / entry_price * 100.0;
-        
-        price_change >= self.config.signals.profit_target || price_change <= -self.config.signals.stop_loss
+        profit_pct >= self.config.signals.profit_target || 
+        profit_pct <= -self.config.signals.stop_loss
     }
 
     fn reset_hourly_trades(&mut self, current_time: f64) {
-        if current_time - self.last_hour_reset >= 3600.0 { // 1 hour
+        if current_time - self.last_hour_reset >= 3600.0 {
             self.trades_this_hour = 0;
             self.last_hour_reset = current_time;
         }
+    }
+
+    fn should_generate_signal(&self, current_time: f64) -> bool {
+        let time_since_last = current_time - self.last_signal_time;
+        time_since_last >= self.config.signals.signal_cooldown
+    }
+
+    fn generate_rsi_signal(&self) -> Option<(Signal, f64)> {
+        if self.rsi_values.len() < 2 || self.ma_short_values.len() < 1 || self.ma_long_values.len() < 1 {
+            return None;
+        }
+
+        let current_rsi = *self.rsi_values.back().unwrap();
+        let previous_rsi = self.rsi_values[self.rsi_values.len() - 2];
+        let short_ma = *self.ma_short_values.back().unwrap();
+        let long_ma = *self.ma_long_values.back().unwrap();
+
+        // Determine trend direction
+        let trend_bullish = short_ma > long_ma;
+        let trend_bearish = short_ma < long_ma;
+
+        // RSI signal conditions
+        let rsi_oversold = current_rsi < self.config.rsi.oversold_threshold;
+        let rsi_overbought = current_rsi > self.config.rsi.overbought_threshold;
+        let rsi_rising = current_rsi > previous_rsi;
+        let rsi_falling = current_rsi < previous_rsi;
+
+        // Generate buy signal: oversold RSI + bullish trend + rising RSI
+        if rsi_oversold && trend_bullish && rsi_rising {
+            let confidence = (self.config.rsi.oversold_threshold - current_rsi) / 
+                           self.config.rsi.oversold_threshold * self.config.rsi.signal_strength;
+            let trend_confidence = (short_ma - long_ma) / long_ma * self.config.trend.trend_strength;
+            let final_confidence = (confidence + trend_confidence).min(0.95);
+            return Some((Signal::Buy, final_confidence.max(0.6)));
+        }
+
+        // Generate sell signal: overbought RSI + bearish trend + falling RSI
+        if rsi_overbought && trend_bearish && rsi_falling {
+            let confidence = (current_rsi - self.config.rsi.overbought_threshold) / 
+                           (100.0 - self.config.rsi.overbought_threshold) * self.config.rsi.signal_strength;
+            let trend_confidence = (long_ma - short_ma) / short_ma * self.config.trend.trend_strength;
+            let final_confidence = (confidence + trend_confidence).min(0.95);
+            return Some((Signal::Sell, final_confidence.max(0.6)));
+        }
+
+        // Additional momentum-based signals for HFT
+        if self.price_history.len() >= 11 {
+            let current_price = *self.price_history.back().unwrap();
+            let price_5_periods_ago = self.price_history[self.price_history.len() - 6];
+            let price_10_periods_ago = self.price_history[self.price_history.len() - 11];
+            
+            // Momentum breakout signals
+            let short_momentum = (current_price - price_5_periods_ago) / price_5_periods_ago * 100.0;
+            let long_momentum = (current_price - price_10_periods_ago) / price_10_periods_ago * 100.0;
+            
+            // Strong upward momentum with RSI confirmation
+            if short_momentum > 0.3 && long_momentum > 0.1 && current_rsi > 45.0 && current_rsi < 75.0 && trend_bullish {
+                let momentum_confidence = (short_momentum / 1.0).min(0.8);
+                let rsi_confidence = if current_rsi > 50.0 { 0.7 } else { 0.5 };
+                let final_confidence = (momentum_confidence + rsi_confidence) / 2.0;
+                return Some((Signal::Buy, final_confidence.max(0.6)));
+            }
+            
+            // Strong downward momentum with RSI confirmation
+            if short_momentum < -0.3 && long_momentum < -0.1 && current_rsi < 55.0 && current_rsi > 25.0 && trend_bearish {
+                let momentum_confidence = (short_momentum.abs() / 1.0).min(0.8);
+                let rsi_confidence = if current_rsi < 50.0 { 0.7 } else { 0.5 };
+                let final_confidence = (momentum_confidence + rsi_confidence) / 2.0;
+                return Some((Signal::Sell, final_confidence.max(0.6)));
+            }
+        }
+
+        // Mean reversion signals for sideways markets
+        if self.price_history.len() >= 21 {
+            let current_price = *self.price_history.back().unwrap();
+            let price_20_periods_ago = self.price_history[self.price_history.len() - 21];
+            let mean_reversion = (current_price - price_20_periods_ago) / price_20_periods_ago * 100.0;
+            
+            // Buy when price is significantly below 20-period average
+            if mean_reversion < -0.5 && current_rsi < 50.0 && !trend_bearish {
+                let reversion_confidence = (mean_reversion.abs() / 2.0).min(0.7);
+                return Some((Signal::Buy, reversion_confidence.max(0.6)));
+            }
+            
+            // Sell when price is significantly above 20-period average
+            if mean_reversion > 0.5 && current_rsi > 50.0 && !trend_bullish {
+                let reversion_confidence = (mean_reversion / 2.0).min(0.7);
+                return Some((Signal::Sell, reversion_confidence.max(0.6)));
+            }
+        }
+
+        // Breakout signals for trending markets
+        if self.price_history.len() >= 15 {
+            let current_price = *self.price_history.back().unwrap();
+            
+            // Calculate recent high and low levels
+            let recent_prices: Vec<f64> = self.price_history.iter().rev().take(15).cloned().collect();
+            let recent_high = recent_prices.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let recent_low = recent_prices.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+            
+            // Breakout above recent high with volume confirmation (RSI not overbought)
+            if current_price > recent_high * 0.9995 && current_rsi < 70.0 && trend_bullish {
+                let breakout_strength = (current_price - recent_high) / recent_high * 1000.0;
+                let breakout_confidence = (breakout_strength / 2.0).min(0.8);
+                return Some((Signal::Buy, breakout_confidence.max(0.6)));
+            }
+            
+            // Breakdown below recent low with volume confirmation (RSI not oversold)
+            if current_price < recent_low * 1.0005 && current_rsi > 30.0 && trend_bearish {
+                let breakdown_strength = (recent_low - current_price) / recent_low * 1000.0;
+                let breakdown_confidence = (breakdown_strength / 2.0).min(0.8);
+                return Some((Signal::Sell, breakdown_confidence.max(0.6)));
+            }
+        }
+
+        None
     }
 }
 
@@ -205,65 +261,65 @@ impl Strategy for RsiHftStrategy {
     }
 
     fn get_info(&self) -> String {
+        let current_price = self.price_history.back().unwrap_or(&0.0);
+        let current_rsi = self.rsi_values.back().unwrap_or(&50.0);
+        let short_ma = self.ma_short_values.back().unwrap_or(&0.0);
+        let long_ma = self.ma_long_values.back().unwrap_or(&0.0);
+        
+        let time_since_last = if self.last_signal_time > 0.0 {
+            self.current_timestamp - self.last_signal_time
+        } else {
+            0.0
+        };
+        
         format!(
-            "RsiHftStrategy - Price: {:.8}, Data Points: {}, RSI: {:.2}, Volatility: {:.4}",
-            self.price_history.back().unwrap_or(&0.0),
-            self.price_history.len(),
-            self.rsi_history.back().unwrap_or(&50.0),
-            self.volatility_history.back().unwrap_or(&0.0)
+            "RSI HFT Strategy - Price: {:.8}, RSI: {:.2}, Short MA: {:.8}, Long MA: {:.8}, Trades this hour: {}, Last signal: {:.1}s ago",
+            current_price, current_rsi, short_ma, long_ma, self.trades_this_hour, time_since_last
         )
     }
 
     async fn on_trade(&mut self, trade: TradeData) {
+        self.current_timestamp = trade.timestamp;
+
         // Update price history
         self.price_history.push_back(trade.price);
-        if self.price_history.len() > self.config.rsi.rsi_period * 5 {
+        if self.price_history.len() > 1000 {
             self.price_history.pop_front();
         }
 
-        // Update volume history
-        self.volume_history.push_back(trade.quantity);
-        if self.volume_history.len() > self.config.volume.volume_window * 3 {
-            self.volume_history.pop_front();
+        // Calculate RSI
+        let rsi = self.calculate_rsi(&self.price_history, self.config.rsi.period);
+        self.rsi_values.push_back(rsi);
+        if self.rsi_values.len() > 1000 {
+            self.rsi_values.pop_front();
         }
 
-        // Store current timestamp
-        self.current_timestamp = trade.timestamp;
-
-        // Calculate and store RSI
-        if self.price_history.len() >= self.config.rsi.rsi_period + 1 {
-            let rsi = self.calculate_rsi(&self.price_history, self.config.rsi.rsi_period);
-            self.rsi_history.push_back(rsi);
-            if self.rsi_history.len() > 100 {
-                self.rsi_history.pop_front();
-            }
+        // Calculate moving averages
+        let short_ma = self.calculate_moving_average(&self.price_history, self.config.trend.ma_short_period);
+        let long_ma = self.calculate_moving_average(&self.price_history, self.config.trend.ma_long_period);
+        
+        self.ma_short_values.push_back(short_ma);
+        self.ma_long_values.push_back(long_ma);
+        
+        if self.ma_short_values.len() > 1000 {
+            self.ma_short_values.pop_front();
+        }
+        if self.ma_long_values.len() > 1000 {
+            self.ma_long_values.pop_front();
         }
 
-        // Calculate and store volatility
-        if self.price_history.len() >= self.config.volatility.volatility_window {
-            let volatility = self.calculate_volatility(&self.price_history, self.config.volatility.volatility_window);
-            self.volatility_history.push_back(volatility);
-            if self.volatility_history.len() > 100 {
-                self.volatility_history.pop_front();
-            }
-        }
-
-        // Debug logging every 100 trades with confidence information
+        // Log every 100 trades
         if self.price_history.len() % 100 == 0 {
-            let rsi_value = self.rsi_history.back().unwrap_or(&50.0);
-            
-            // Log RSI and confidence information
             self.logger.log_signal_generated(
                 &trade.symbol,
                 &Signal::Hold,
-                *rsi_value / 100.0, // Use RSI as confidence (0.0-1.0)
+                0.5,
                 trade.price,
             );
         }
     }
 
     fn get_signal(&mut self, current_position: Position) -> (Signal, f64) {
-        // Use the timestamp from the last trade instead of SystemTime::now()
         let current_time = self.current_timestamp;
 
         // Reset hourly trade counter
@@ -274,67 +330,25 @@ impl Strategy for RsiHftStrategy {
             return (Signal::Hold, 0.0);
         }
 
-        // Check signal cooldown
-        if current_time - self.last_signal_time < self.config.signals.signal_cooldown {
-            return (Signal::Hold, 0.0);
-        }
-
-        if self.price_history.len() < self.config.rsi.rsi_period + 1 {
-            return (Signal::Hold, 0.0);
-        }
-
-        let current_price = *self.price_history.back().unwrap();
-        let current_rsi = *self.rsi_history.back().unwrap();
-        let previous_rsi = self.rsi_history.iter().rev().nth(1).unwrap_or(&50.0);
-
-        // Check if we should exit existing position
-        if current_position.quantity > 0.0 {
-            if self.should_exit_position(current_price, current_position.entry_price, current_time, current_time) {
-                return (Signal::Sell, 0.9);
+        // Check if we should exit current position
+        if let Some(current_price) = self.price_history.back() {
+            if self.should_exit_position(&current_position, *current_price) {
+                return (Signal::Hold, 0.0);
             }
         }
 
-        // Detect RSI signal
-        let (rsi_strength, rsi_direction) = self.detect_rsi_signal(current_rsi, *previous_rsi);
-        
-        // Calculate volatility
-        let volatility = self.calculate_volatility(&self.price_history, self.config.volatility.volatility_window);
-        
-        // Calculate volume momentum
-        let volume_momentum = self.calculate_volume_momentum(&self.volume_history, self.config.volume.volume_window);
-
-        // Generate final signal
-        let mut signal_strength = rsi_strength;
-
-        // Volatility analysis
-        if volatility > self.config.volatility.volatility_threshold {
-            signal_strength += 0.2;
-        }
-
-        // Volume analysis
-        if self.config.volume.volume_confirmation {
-            if volume_momentum > self.config.volume.volume_threshold {
-                signal_strength += 0.2;
+        // Check if it's time to generate a signal
+        if self.should_generate_signal(current_time) {
+            // Generate RSI-based signal
+            if let Some((signal, confidence)) = self.generate_rsi_signal() {
+                if confidence >= self.config.signals.min_confidence {
+                    self.last_signal_time = current_time;
+                    self.trades_this_hour += 1;
+                    return (signal, confidence);
+                }
             }
-        } else {
-            // Volume not required for confirmation
-            signal_strength += 0.1;
         }
 
-        // Generate final signal
-        if signal_strength >= self.config.signals.min_confidence {
-            self.last_signal_time = current_time;
-            self.trades_this_hour += 1;
-            
-            if rsi_direction > 0.0 && current_position.quantity == 0.0 {
-                (Signal::Buy, signal_strength)
-            } else if rsi_direction < 0.0 && current_position.quantity > 0.0 {
-                (Signal::Sell, signal_strength)
-            } else {
-                (Signal::Hold, 0.0)
-            }
-        } else {
-            (Signal::Hold, 0.0)
-        }
+        (Signal::Hold, 0.0)
     }
 }

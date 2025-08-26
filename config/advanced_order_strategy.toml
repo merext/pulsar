@@ -1,0 +1,47 @@
+[general]
+# Name identifier for the strategy
+strategy_name = "Advanced Order Strategy"
+
+[twap]
+# Duration of each time slice in seconds (2 minutes for HFT)
+time_slice_duration = 120.0
+# Maximum number of time slices for TWAP execution
+max_slices = 8
+# Minimum order size per slice
+min_slice_size = 3.0
+# Maximum price deviation from target (0.3%)
+price_deviation_limit = 0.003
+
+[vwap]
+# Period for VWAP calculation (15 periods for HFT)
+calculation_period = 15
+# Price deviation threshold from VWAP (0.2%)
+deviation_threshold = 0.002
+# Volume threshold for signal generation (2.0x average)
+volume_threshold = 2.0
+# Strength of mean reversion signal
+reversion_strength = 0.9
+
+[order_types]
+# IOC order timeout in seconds
+ioc_timeout = 3.0
+# Minimum fill ratio for FOK orders (90%)
+fok_min_fill_ratio = 0.9
+# Market impact threshold for volatility detection
+market_impact_threshold = 0.0015
+# Slippage tolerance percentage (0.15%)
+slippage_tolerance = 0.0015
+
+[signals]
+# Minimum confidence level required to execute a trade
+min_confidence = 0.7
+# Maximum time in seconds to hold a position before forced exit
+max_position_time = 900.0
+# Profit target percentage for profitable positions
+profit_target = 0.8
+# Stop loss percentage for losing positions
+stop_loss = 0.5
+# Maximum number of trades allowed per hour
+max_trades_per_hour = 10
+# Minimum time in seconds between consecutive trading signals
+signal_cooldown = 35.0
