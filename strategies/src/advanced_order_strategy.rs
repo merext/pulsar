@@ -5,20 +5,10 @@ use std::path::Path;
 use crate::{models::*, strategy::{Strategy, StrategyLogger, NoOpStrategyLogger}};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdvancedOrderConfig {
-    pub general: GeneralConfig,
-    pub twap: TwapConfig,
-    pub vwap: VwapConfig,
-    pub order_types: OrderTypeConfig,
-    pub signals: SignalConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TwapConfig {
     pub time_slice_duration: f64,  // Duration of each time slice in seconds
-    pub max_slices: usize,          // Maximum number of time slices
-    pub min_slice_size: f64,        // Minimum order size per slice
     pub price_deviation_limit: f64, // Maximum price deviation from target
+    pub min_confidence: f64,        // Minimum confidence for TWAP signals
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,14 +17,30 @@ pub struct VwapConfig {
     pub deviation_threshold: f64,   // Price deviation threshold from VWAP
     pub volume_threshold: f64,      // Volume threshold for signal generation
     pub reversion_strength: f64,    // Strength of mean reversion signal
+    pub base_confidence_divisor: f64, // Base confidence divisor for VWAP signals
+    pub min_vwap_confidence: f64,   // Minimum confidence for VWAP signals
+    pub max_vwap_confidence: f64,   // Maximum confidence for VWAP signals
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MomentumConfig {
+    pub momentum_threshold: f64,    // Momentum threshold for signal generation
+    pub volume_ratio_threshold: f64, // Volume ratio threshold for momentum signals
+    pub momentum_confidence: f64,   // Confidence for momentum signals
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderTypeConfig {
-    pub ioc_timeout: f64,           // IOC order timeout in seconds
-    pub fok_min_fill_ratio: f64,    // Minimum fill ratio for FOK orders
     pub market_impact_threshold: f64, // Market impact threshold
     pub slippage_tolerance: f64,    // Slippage tolerance percentage
+    pub price_change_threshold: f64, // Price change threshold for IOC signals
+    pub volume_spike_threshold: f64, // Volume spike threshold for IOC signals
+    pub low_volatility_multiplier: f64, // Low volatility multiplier for FOK signals
+    pub high_volume_spike_threshold: f64, // High volume spike threshold for FOK signals
+    pub volume_confidence_divisor: f64, // Volume confidence divisor for FOK signals
+    pub ioc_base_confidence: f64,   // Base confidence for IOC signals
+    pub min_ioc_confidence: f64,    // Minimum confidence for IOC signals
+    pub max_ioc_confidence: f64,    // Maximum confidence for IOC signals
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,8 +54,24 @@ pub struct SignalConfig {
     pub max_position_time: f64,
     pub profit_target: f64,
     pub stop_loss: f64,
-    pub max_trades_per_hour: usize,
-    pub signal_cooldown: f64,
+
+    pub exit_signal_confidence: f64, // Exit signal confidence
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryConfig {
+    pub max_history_size: usize,    // Maximum history size for price and volume data
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdvancedOrderConfig {
+    pub general: GeneralConfig,
+    pub twap: TwapConfig,
+    pub vwap: VwapConfig,
+    pub momentum: MomentumConfig,
+    pub order_types: OrderTypeConfig,
+    pub signals: SignalConfig,
+    pub history: HistoryConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -76,9 +98,6 @@ pub struct AdvancedOrderStrategy {
     volume_history: VecDeque<f64>,
     twap_executions: VecDeque<TwapExecution>,
     vwap_data: VwapData,
-    last_signal_time: f64,
-    trades_this_hour: usize,
-    last_hour_reset: f64,
     current_timestamp: f64,
     logger: Box<dyn StrategyLogger>,
 }
@@ -96,9 +115,6 @@ impl AdvancedOrderStrategy {
                 price_profile: VecDeque::new(),
                 last_update: 0.0,
             },
-            last_signal_time: 0.0,
-            trades_this_hour: 0,
-            last_hour_reset: 0.0,
             current_timestamp: 0.0,
             logger: Box::new(NoOpStrategyLogger),
         }
@@ -146,17 +162,7 @@ impl AdvancedOrderStrategy {
         profit_pct <= -self.config.signals.stop_loss
     }
 
-    fn reset_hourly_trades(&mut self, current_time: f64) {
-        if current_time - self.last_hour_reset >= 3600.0 {
-            self.trades_this_hour = 0;
-            self.last_hour_reset = current_time;
-        }
-    }
 
-    fn should_generate_signal(&self, current_time: f64) -> bool {
-        let time_since_last = current_time - self.last_signal_time;
-        time_since_last >= self.config.signals.signal_cooldown
-    }
 
     fn generate_twap_signal(&self, current_price: f64, _current_volume: f64) -> Option<(Signal, f64)> {
         if self.twap_executions.is_empty() {
@@ -175,7 +181,7 @@ impl AdvancedOrderStrategy {
                 let price_deviation = (current_price - current_execution.target_price).abs() / current_execution.target_price;
                 
                 if price_deviation <= self.config.twap.price_deviation_limit {
-                    let confidence = (1.0 - price_deviation / self.config.twap.price_deviation_limit).max(0.6);
+                    let confidence = (1.0 - price_deviation / self.config.twap.price_deviation_limit).max(self.config.twap.min_confidence);
                     return Some((Signal::Buy, confidence));
                 }
             }
@@ -201,12 +207,12 @@ impl AdvancedOrderStrategy {
         if price_deviation.abs() > self.config.vwap.deviation_threshold {
             if price_deviation < -self.config.vwap.deviation_threshold && volume_ratio > self.config.vwap.volume_threshold {
                 // Price below VWAP with high volume - buy signal
-                let confidence = (price_deviation.abs() / 0.1).min(0.9) * self.config.vwap.reversion_strength;
-                return Some((Signal::Buy, confidence.max(0.7)));
+                let confidence = (price_deviation.abs() / self.config.vwap.base_confidence_divisor).min(self.config.vwap.max_vwap_confidence) * self.config.vwap.reversion_strength;
+                return Some((Signal::Buy, confidence.max(self.config.vwap.min_vwap_confidence)));
             } else if price_deviation > self.config.vwap.deviation_threshold && volume_ratio > self.config.vwap.volume_threshold {
                 // Price above VWAP with high volume - sell signal
-                let confidence = (price_deviation / 0.1).min(0.9) * self.config.vwap.reversion_strength;
-                return Some((Signal::Sell, confidence.max(0.7)));
+                let confidence = (price_deviation / self.config.vwap.base_confidence_divisor).min(self.config.vwap.max_vwap_confidence) * self.config.vwap.reversion_strength;
+                return Some((Signal::Sell, confidence.max(self.config.vwap.min_vwap_confidence)));
             }
         }
 
@@ -217,11 +223,11 @@ impl AdvancedOrderStrategy {
             let momentum = (current_price - avg_price) / avg_price;
             
             // Strong momentum with volume confirmation
-            if momentum.abs() > 0.002 && volume_ratio > 1.8 {
-                if momentum > 0.002 {
-                    return Some((Signal::Buy, 0.8));
+            if momentum.abs() > self.config.momentum.momentum_threshold && volume_ratio > self.config.momentum.volume_ratio_threshold {
+                if momentum > self.config.momentum.momentum_threshold {
+                    return Some((Signal::Buy, self.config.momentum.momentum_confidence));
                 } else {
-                    return Some((Signal::Sell, 0.8));
+                    return Some((Signal::Sell, self.config.momentum.momentum_confidence));
                 }
             }
         }
@@ -251,23 +257,23 @@ impl AdvancedOrderStrategy {
 
         // IOC signals for high volatility periods with improved thresholds
         if volatility > self.config.order_types.market_impact_threshold {
-            if price_change > 0.0015 && volume_spike > 1.8 {
+            if price_change > self.config.order_types.price_change_threshold && volume_spike > self.config.order_types.volume_spike_threshold {
                 // Strong upward move with volume - IOC buy
-                let confidence = (price_change / 0.01).min(0.85);
-                return Some((Signal::Buy, confidence.max(0.7)));
-            } else if price_change < -0.0015 && volume_spike > 1.8 {
+                let confidence = (price_change / self.config.order_types.ioc_base_confidence).min(self.config.order_types.max_ioc_confidence);
+                return Some((Signal::Buy, confidence.max(self.config.order_types.min_ioc_confidence)));
+            } else if price_change < -self.config.order_types.price_change_threshold && volume_spike > self.config.order_types.volume_spike_threshold {
                 // Strong downward move with volume - IOC sell
-                let confidence = (price_change.abs() / 0.01).min(0.85);
-                return Some((Signal::Sell, confidence.max(0.7)));
+                let confidence = (price_change.abs() / self.config.order_types.ioc_base_confidence).min(self.config.order_types.max_ioc_confidence);
+                return Some((Signal::Sell, confidence.max(self.config.order_types.min_ioc_confidence)));
             }
         }
 
         // FOK signals for low volatility, high volume periods
-        if volatility < self.config.order_types.market_impact_threshold * 0.6 && volume_spike > 2.2 {
+        if volatility < self.config.order_types.market_impact_threshold * self.config.order_types.low_volatility_multiplier && volume_spike > self.config.order_types.high_volume_spike_threshold {
             if price_change.abs() < self.config.order_types.slippage_tolerance {
                 // Stable price with high volume - FOK order
-                let confidence = (volume_spike / 3.0).min(0.9);
-                return Some((Signal::Buy, confidence.max(0.7)));
+                let confidence = (volume_spike / self.config.order_types.volume_confidence_divisor).min(self.config.vwap.max_vwap_confidence);
+                return Some((Signal::Buy, confidence.max(self.config.order_types.min_ioc_confidence)));
             }
         }
 
@@ -276,14 +282,14 @@ impl AdvancedOrderStrategy {
 
     fn generate_advanced_signal(&self, current_price: f64, current_volume: f64) -> Option<(Signal, f64)> {
         // Try VWAP signal first (most profitable)
-        if let Some(signal) = self.generate_vwap_signal(current_price, current_volume) {
-            return Some(signal);
-        }
+        // if let Some(signal) = self.generate_vwap_signal(current_price, current_volume) {
+        //     return Some(signal);
+        // }
 
         // Try IOC/FOK signal (good for momentum)
-        if let Some(signal) = self.generate_ioc_fok_signal(current_price, current_volume) {
-            return Some(signal);
-        }
+        // if let Some(signal) = self.generate_ioc_fok_signal(current_price, current_volume) {
+        //     return Some(signal);
+        // }
 
         // Try TWAP signal last (most conservative)
         if let Some(signal) = self.generate_twap_signal(current_price, current_volume) {
@@ -330,15 +336,9 @@ impl Strategy for AdvancedOrderStrategy {
         let vwap = self.vwap_data.vwap_value;
         let active_twap = self.twap_executions.len();
         
-        let time_since_last = if self.last_signal_time > 0.0 {
-            self.current_timestamp - self.last_signal_time
-        } else {
-            0.0
-        };
-        
         format!(
-            "Advanced Order Strategy - Price: {:.8}, Volume: {:.2}, VWAP: {:.8}, Active TWAP: {}, Trades this hour: {}, Last signal: {:.1}s ago",
-            current_price, current_volume, vwap, active_twap, self.trades_this_hour, time_since_last
+            "Advanced Order Strategy - Price: {:.8}, Volume: {:.2}, VWAP: {:.8}, Active TWAP: {}",
+            current_price, current_volume, vwap, active_twap
         )
     }
 
@@ -349,10 +349,10 @@ impl Strategy for AdvancedOrderStrategy {
         self.price_history.push_back(trade.price);
         self.volume_history.push_back(trade.quantity);
         
-        if self.price_history.len() > 1000 {
+        if self.price_history.len() > self.config.history.max_history_size {
             self.price_history.pop_front();
         }
-        if self.volume_history.len() > 1000 {
+        if self.volume_history.len() > self.config.history.max_history_size {
             self.volume_history.pop_front();
         }
 
@@ -362,62 +362,37 @@ impl Strategy for AdvancedOrderStrategy {
         self.vwap_data.price_profile.push_back(trade.price);
         self.vwap_data.volume_profile.push_back(trade.quantity);
         
-        if self.vwap_data.price_profile.len() > 1000 {
+        if self.vwap_data.price_profile.len() > self.config.history.max_history_size {
             self.vwap_data.price_profile.pop_front();
         }
-        if self.vwap_data.volume_profile.len() > 1000 {
+        if self.vwap_data.volume_profile.len() > self.config.history.max_history_size {
             self.vwap_data.volume_profile.pop_front();
         }
 
         // Update TWAP executions
         self.update_twap_executions();
-
-        // Log every 100 trades
-        if self.price_history.len() % 100 == 0 {
-            self.logger.log_signal_generated(
-                &trade.symbol,
-                &Signal::Hold,
-                0.5,
-                trade.price,
-            );
-        }
     }
 
     fn get_signal(&mut self, current_position: Position) -> (Signal, f64) {
-        let current_time = self.current_timestamp;
-
-        // Reset hourly trade counter
-        self.reset_hourly_trades(current_time);
-
-        // Check if we've exceeded hourly trade limit
-        if self.trades_this_hour >= self.config.signals.max_trades_per_hour {
-            return (Signal::Hold, 0.0);
-        }
-
         // Check if we should exit current position
         if let Some(current_price) = self.price_history.back() {
             if self.should_exit_position(&current_position, *current_price) {
                 // Return exit signal instead of hold
                 if current_position.quantity > 0.0 {
-                    return (Signal::Sell, 0.9);
+                    return (Signal::Sell, self.config.signals.exit_signal_confidence);
                 } else if current_position.quantity < 0.0 {
-                    return (Signal::Buy, 0.9);
+                    return (Signal::Buy, self.config.signals.exit_signal_confidence);
                 }
             }
         }
 
-        // Check if it's time to generate a signal
-        if self.should_generate_signal(current_time) {
-            let current_price = *self.price_history.back().unwrap_or(&0.0);
-            let current_volume = *self.volume_history.back().unwrap_or(&0.0);
+        // Generate advanced signal
+        let current_price = *self.price_history.back().unwrap_or(&0.0);
+        let current_volume = *self.volume_history.back().unwrap_or(&0.0);
 
-            // Generate advanced signal
-            if let Some((signal, confidence)) = self.generate_advanced_signal(current_price, current_volume) {
-                if confidence >= self.config.signals.min_confidence {
-                    self.last_signal_time = current_time;
-                    self.trades_this_hour += 1;
-                    return (signal, confidence);
-                }
+        if let Some((signal, confidence)) = self.generate_advanced_signal(current_price, current_volume) {
+            if confidence >= self.config.signals.min_confidence {
+                return (signal, confidence);
             }
         }
 
