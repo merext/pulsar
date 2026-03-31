@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 use toml::Value;
 use tracing::info;
@@ -59,8 +60,35 @@ struct Cli {
     #[arg(long)]
     duration_secs: Option<u64>,
 
+    #[arg(long, default_value = "trade-flow-momentum")]
+    strategy: String,
+
     #[command(subcommand)]
     command: Commands,
+}
+
+fn build_strategy(
+    strategy_name: &str,
+) -> Result<Box<dyn Strategy>, Box<dyn Error + Send + Sync>> {
+    match strategy_name {
+        "trade-flow-momentum" => Ok(Box::new(
+            strategies::TradeFlowMomentumStrategy::from_file(
+                "config/strategies/trade_flow_momentum.toml",
+            )
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        )),
+        "liquidity-sweep-reversal" => Ok(Box::new(
+            strategies::LiquiditySweepReversalStrategy::from_file(
+                "config/strategies/liquidity_sweep_reversal.toml",
+            )
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        )),
+        _ => Err(format!(
+            "Unknown strategy '{}'. Available: trade-flow-momentum, liquidity-sweep-reversal",
+            strategy_name
+        )
+        .into()),
+    }
 }
 
 #[derive(Subcommand)]
@@ -93,8 +121,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .ok_or("Trading symbol not defined in configuration")?;
 
     let mut binance_trader = BinanceTrader::new().await?;
-    let mut strategy = strategies::NullStrategy::from_file("/dev/null")
-        .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?;
+    let mut strategy = build_strategy(&cli.strategy)?;
 
     match cli.command {
         Commands::Trade => {
@@ -104,6 +131,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             return Err("Live emulation remains disabled until new HFT strategies are implemented.".into());
         }
         Commands::Backtest { uri } => {
+            let uri_path = Path::new(&uri);
+            info!(strategy = %cli.strategy, strategy_info = %strategy.get_info(), uri = %uri, exists = uri_path.exists(), "Starting strategy backtest");
             info!("Verified historical market data access from: {}", uri);
 
             let trading_stream = BinanceClient::trade_data_from_uri(&uri)
@@ -118,7 +147,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             binance_trader
                 .trade(
                     trading_stream,
-                    &mut strategy,
+                    strategy.as_mut(),
                     &trading_symbol,
                     TradeMode::Backtest,
                 )

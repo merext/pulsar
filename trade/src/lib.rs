@@ -10,7 +10,7 @@ pub mod simulation;
 pub mod strategy;
 pub mod trader;
 
-pub use backtest::{BacktestEngine, SimulatedExecution};
+pub use backtest::{BacktestEngine, MarketPrice, SimulatedExecution};
 pub use config::TradeConfig;
 pub use execution::{ExecutionReport, ExecutionStatus, OrderIntent, Side, TimeInForce};
 pub use logger::{StrategyLoggerAdapter, TradeLogger};

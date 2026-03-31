@@ -73,3 +73,27 @@ fn market_state_trims_old_trades() {
     assert_eq!(stats.trade_count, 1);
     assert_eq!(stats.last_price, 0.1001);
 }
+
+#[test]
+fn market_state_tracks_latest_event_time_across_event_types() {
+    let mut state = MarketState::new("DOGEUSDT", 1_000);
+
+    state.apply(&MarketEvent::Trade(Trade {
+        trade_time: 1_000,
+        ..Default::default()
+    }));
+    state.apply(&MarketEvent::BookTicker(BookTicker {
+        bid: BookLevel {
+            price: 0.1000,
+            quantity: 100.0,
+        },
+        ask: BookLevel {
+            price: 0.1001,
+            quantity: 100.0,
+        },
+        event_time: 1_500,
+    }));
+
+    assert_eq!(state.last_event_time_millis(), Some(1_500));
+    assert_eq!(state.last_event_time_secs(), Some(1.5));
+}

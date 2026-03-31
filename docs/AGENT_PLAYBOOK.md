@@ -70,6 +70,7 @@ Always keep these documents current when major changes happen:
 - `docs/ROADMAP.md`
 - `docs/SESSION_STATE.md`
 - `docs/AGENT_PLAYBOOK.md`
+- `docs/strategies/` - one document per strategy with hypothesis, inputs, decision rules, parameters, risks, and validation notes
 
 ## Recovery Procedure After Crash / Restart
 

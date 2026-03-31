@@ -20,17 +20,25 @@
 ## Phase 2 - Emulator V2
 
 - [ ] Trade-only taker execution realism improvements
-- [ ] Quote-aware execution pricing at bid/ask
+- [x] Quote-aware execution pricing at bid/ask
 - [ ] Latency and impact accounting cleanup
 - [ ] Inventory and drawdown guardrails
 - [ ] Better evaluation metrics and attribution
 
 ## Phase 3 - First Research Models
 
-- [ ] Trade-flow momentum taker
-- [ ] Liquidity sweep / exhaustion taker
+- [x] Create `docs/strategies/` documentation for every implemented strategy
+- [x] Add CLI-level strategy selection so the same orchestration can run multiple models
+- [ ] Trade-flow momentum taker refinement after first multi-day replay
+- [x] Liquidity sweep / exhaustion taker baseline
 - [ ] Multi-day comparison harness
 - [ ] Parameter search scaffolding
+
+## Backlog - Secondary Improvements
+
+- [ ] Shared position-sizing adapter inside strategies to avoid duplicate ad hoc target notional logic
+- [ ] Richer per-trade attribution export for replay analysis
+- [ ] Regime tags on replay runs
 
 ## Phase 4 - Quote/Depth Infrastructure
 

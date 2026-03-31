@@ -47,6 +47,9 @@ pub trait Strategy: Send + Sync {
         Self: Sized;
 
     fn get_info(&self) -> String;
+    fn market_state_window_millis(&self) -> u64 {
+        1_000
+    }
     async fn on_event(&mut self, event: &MarketEvent, market_state: &MarketState);
     fn decide(&mut self, market_state: &MarketState, context: &StrategyContext) -> StrategyDecision;
 }

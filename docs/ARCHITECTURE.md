@@ -25,9 +25,10 @@ The project is evolving into a layered HFT research platform.
    - optional local depth book
 
 4. Strategy Layer
-   - consumes `MarketState`
-   - produces `OrderIntent`
-   - no exchange-specific logic
+    - consumes `MarketState`
+    - produces `OrderIntent`
+    - no exchange-specific logic
+    - selected by orchestration CLI so multiple models can share the same replay and live plumbing
 
 5. Execution / Simulation Layer
    - validates intents
@@ -50,6 +51,9 @@ The project is evolving into a layered HFT research platform.
   - orchestration CLI for replay, emulate, live validation, dataset capture
 - `strategies/`
   - future strategy implementations only; currently reset for redesign
+- `docs/strategies/`
+  - strategy specifications and research notes
+  - each strategy must have a dedicated document kept in sync with implementation and validation
 
 ## Refactor Direction
 

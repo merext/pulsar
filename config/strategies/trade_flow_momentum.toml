@@ -1,0 +1,13 @@
+trade_window_millis = 1500
+min_trades_in_window = 12
+min_trade_flow_imbalance = 0.18
+min_price_drift_bps = 6.0
+max_price_drift_bps = 35.0
+max_spread_bps = 12.0
+min_burst_per_second = 10.0
+position_size_confidence_floor = 0.72
+entry_cooldown_millis = 2500
+hold_time_millis = 4000
+exit_on_flow_reversal = -0.05
+stop_loss_bps = 18.0
+take_profit_bps = 24.0

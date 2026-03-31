@@ -2,6 +2,34 @@ use crate::config::TradeConfig;
 use crate::signal::Signal;
 
 #[derive(Debug, Clone, Copy)]
+pub enum MarketPrice {
+    Trade(f64),
+    Quote { bid: f64, ask: f64 },
+}
+
+impl MarketPrice {
+    pub fn decision_reference_price(self) -> f64 {
+        match self {
+            Self::Trade(price) => price,
+            Self::Quote { bid, ask } => (bid + ask) / 2.0,
+        }
+    }
+
+    pub fn execution_reference_price(self, signal: Signal) -> f64 {
+        match (self, signal) {
+            (Self::Trade(price), _) => price,
+            (Self::Quote { ask, .. }, Signal::Buy) => ask,
+            (Self::Quote { bid, .. }, Signal::Sell) => bid,
+            (Self::Quote { bid, ask }, Signal::Hold) => (bid + ask) / 2.0,
+        }
+    }
+
+    pub fn has_explicit_quote(self) -> bool {
+        matches!(self, Self::Quote { .. })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct SimulatedExecution {
     pub execution_price: f64,
     pub executed_quantity: f64,
@@ -47,9 +75,25 @@ impl BacktestEngine {
         requested_quantity: f64,
         available_cash: f64,
     ) -> SimulatedExecution {
+        self.execute_with_constraints_at(
+            signal,
+            MarketPrice::Trade(market_price),
+            requested_quantity,
+            available_cash,
+        )
+    }
+
+    pub fn execute_with_constraints_at(
+        &self,
+        signal: Signal,
+        market_price: MarketPrice,
+        requested_quantity: f64,
+        available_cash: f64,
+    ) -> SimulatedExecution {
         if matches!(signal, Signal::Hold) {
+            let reference_price = market_price.execution_reference_price(signal);
             return SimulatedExecution {
-                execution_price: market_price,
+                execution_price: reference_price,
                 executed_quantity: 0.0,
                 fee_paid: 0.0,
                 notional_value: 0.0,
@@ -60,8 +104,9 @@ impl BacktestEngine {
         }
 
         if requested_quantity <= 0.0 {
+            let reference_price = market_price.execution_reference_price(signal);
             return SimulatedExecution {
-                execution_price: market_price,
+                execution_price: reference_price,
                 executed_quantity: 0.0,
                 fee_paid: 0.0,
                 notional_value: 0.0,
@@ -72,14 +117,19 @@ impl BacktestEngine {
         }
 
         let latency_seconds = self.estimate_latency_seconds(requested_quantity);
-        let spread = self.estimate_spread();
+        let spread = if market_price.has_explicit_quote() {
+            0.0
+        } else {
+            self.estimate_spread()
+        };
         let slippage = self.estimate_slippage(signal, requested_quantity);
         let latency_impact = self.estimate_latency_impact(latency_seconds);
         let half_spread = spread / 2.0;
+        let reference_price = market_price.execution_reference_price(signal);
         let execution_price = match signal {
-            Signal::Buy => market_price * (1.0 + half_spread + slippage + latency_impact),
-            Signal::Sell => market_price * (1.0 - half_spread - slippage - latency_impact),
-            Signal::Hold => market_price,
+            Signal::Buy => reference_price * (1.0 + half_spread + slippage + latency_impact),
+            Signal::Sell => reference_price * (1.0 - half_spread - slippage - latency_impact),
+            Signal::Hold => reference_price,
         };
 
         let mut executed_quantity = self.round_down_to_step(requested_quantity);

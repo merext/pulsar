@@ -103,6 +103,22 @@ impl MarketState {
         self.last_trade.as_ref().map(|trade| trade.price)
     }
 
+    pub fn last_event_time_millis(&self) -> Option<u64> {
+        [
+            self.last_trade.as_ref().map(|trade| trade.trade_time),
+            self.top_of_book.as_ref().map(|book| book.event_time),
+            self.depth.as_ref().map(|depth| depth.event_time),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+    }
+
+    pub fn last_event_time_secs(&self) -> Option<f64> {
+        self.last_event_time_millis()
+            .map(|time| time as f64 / 1000.0)
+    }
+
     pub fn mid_price(&self) -> Option<f64> {
         self.top_of_book
             .as_ref()
@@ -163,6 +179,26 @@ impl MarketState {
         }
 
         stats
+    }
+
+    pub fn recent_trades(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &Trade> + ExactSizeIterator + '_ {
+        self.trades.iter()
+    }
+
+    pub fn trade_window_low_price(&self) -> Option<f64> {
+        self.trades
+            .iter()
+            .map(|trade| trade.price)
+            .min_by(f64::total_cmp)
+    }
+
+    pub fn trade_window_high_price(&self) -> Option<f64> {
+        self.trades
+            .iter()
+            .map(|trade| trade.price)
+            .max_by(f64::total_cmp)
     }
 
     pub fn trade_flow_imbalance(&self) -> f64 {

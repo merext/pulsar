@@ -10,7 +10,7 @@ use rust_decimal::Decimal;
 use tracing::info;
 
 use crate::config::BinanceTraderConfig;
-use trade::backtest::BacktestEngine;
+use trade::backtest::{BacktestEngine, MarketPrice};
 use trade::config::TradeConfig;
 use trade::execution::{ExecutionReport, ExecutionStatus, OrderIntent, Side, TimeInForce};
 use trade::logger::{StrategyLoggerAdapter, TradeLogger};
@@ -215,6 +215,30 @@ impl BinanceTrader {
             latency_seconds: execution.latency_seconds,
             reason: execution.rejected_reason,
             expected_edge_bps,
+        }
+    }
+
+    fn market_price_from_state(&self, market_state: &MarketState) -> Option<MarketPrice> {
+        market_state
+            .top_of_book()
+            .map(|book| MarketPrice::Quote {
+                bid: book.bid.price,
+                ask: book.ask.price,
+            })
+            .or_else(|| market_state.last_price().map(MarketPrice::Trade))
+    }
+
+    fn execution_reference_price_for_intent(
+        &self,
+        market_price: MarketPrice,
+        intent: &OrderIntent,
+    ) -> f64 {
+        match intent {
+            OrderIntent::Place { side, .. } => match side {
+                Side::Buy => market_price.execution_reference_price(trade::signal::Signal::Buy),
+                Side::Sell => market_price.execution_reference_price(trade::signal::Signal::Sell),
+            },
+            OrderIntent::NoAction | OrderIntent::Cancel { .. } => market_price.decision_reference_price(),
         }
     }
 }
@@ -488,25 +512,22 @@ impl Trader for BinanceTrader {
         tokio::pin!(trading_stream);
 
         let backtest_engine = BacktestEngine::new(self.config.clone());
-        let mut market_state = MarketState::new(trading_symbol.to_string(), 1_000);
+        let mut market_state =
+            MarketState::new(trading_symbol.to_string(), trading_strategy.market_state_window_millis());
         let mut last_trade_price = None;
-        let mut last_trade_time = None;
 
         while let Some(event) = trading_stream.next().await {
             self.trade_manager.increment_ticks();
             market_state.apply(&event);
             trading_strategy.on_event(&event, &market_state).await;
 
-            let Some(reference_price) = market_state
-                .mid_price()
-                .or_else(|| market_state.last_price())
-            else {
+            let Some(market_price) = self.market_price_from_state(&market_state) else {
                 continue;
             };
+            let decision_reference_price = market_price.decision_reference_price();
 
             if let Some(last_trade) = market_state.last_trade() {
                 last_trade_price = Some(last_trade.price);
-                last_trade_time = Some(last_trade.timestamp_secs());
                 let _ = self.trade_manager.mark_to_market(trading_symbol, last_trade.price);
             }
 
@@ -536,20 +557,30 @@ impl Trader for BinanceTrader {
                     trading_symbol,
                     &decision.intent,
                     decision.confidence,
-                    reference_price,
+                    decision_reference_price,
                 );
             }
+
+            let execution_reference_price =
+                self.execution_reference_price_for_intent(market_price, &decision.intent);
 
             match trading_mode {
                 TradeMode::Real => {
                     let report = self
-                        .on_order_intent(trading_symbol, reference_price, decision.intent)
+                        .on_order_intent(
+                            trading_symbol,
+                            execution_reference_price,
+                            decision.intent,
+                        )
                         .await;
 
                     let pnl = if report.side == Some(Side::Sell) {
                         report.execution_price.map(|price| {
-                            self.trade_manager
-                                .close_position(trading_symbol, price, last_trade_time.unwrap_or(0.0))
+                            self.trade_manager.close_position(
+                                trading_symbol,
+                                price,
+                                market_state.last_event_time_secs().unwrap_or(0.0),
+                            )
                         })
                     } else if report.side == Some(Side::Buy)
                         && report.executed_quantity > 0.0
@@ -559,7 +590,7 @@ impl Trader for BinanceTrader {
                                 trading_symbol,
                                 price,
                                 report.executed_quantity,
-                                last_trade_time.unwrap_or(0.0),
+                                market_state.last_event_time_secs().unwrap_or(0.0),
                             );
                         }
                         None
@@ -599,9 +630,9 @@ impl Trader for BinanceTrader {
                                 Side::Sell => trade::signal::Signal::Sell,
                             };
 
-                            let execution = backtest_engine.execute_with_constraints(
+                            let execution = backtest_engine.execute_with_constraints_at(
                                 signal,
-                                reference_price,
+                                market_price,
                                 requested_quantity,
                                 self.trade_manager.available_cash(),
                             );
@@ -645,7 +676,7 @@ impl Trader for BinanceTrader {
                                     trading_symbol,
                                     price,
                                     report.executed_quantity,
-                                    last_trade_time.unwrap_or(0.0),
+                                    market_state.last_event_time_secs().unwrap_or(0.0),
                                 ) {
                                     self.logger.log_order_error(
                                         trading_symbol,
@@ -658,8 +689,11 @@ impl Trader for BinanceTrader {
                             None
                         }
                         Some(Side::Sell) if report.executed_quantity > 0.0 => report.execution_price.map(|price| {
-                            self.trade_manager
-                                .close_position(trading_symbol, price, last_trade_time.unwrap_or(0.0))
+                            self.trade_manager.close_position(
+                                trading_symbol,
+                                price,
+                                market_state.last_event_time_secs().unwrap_or(0.0),
+                            )
                         }),
                         _ => None,
                     };
@@ -680,28 +714,35 @@ impl Trader for BinanceTrader {
 
         if matches!(trading_mode, TradeMode::Backtest | TradeMode::Emulated)
             && self.current_position(trading_symbol).quantity > 0.0
-            && let (Some(last_price), Some(last_time)) = (last_trade_price, last_trade_time)
         {
             let position = self.current_position(trading_symbol);
-            let execution = backtest_engine.execute_with_constraints(
-                trade::signal::Signal::Sell,
-                last_price,
-                position.quantity,
-                self.trade_manager.available_cash(),
-            );
-            if !execution.is_rejected() {
-                let report = self.simulated_report_from_sell(position.quantity, 0.0, execution);
-                let pnl = self
-                    .trade_manager
-                    .close_position(trading_symbol, execution.execution_price, last_time);
-                let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
-                strategy_logger.log_execution(
-                    trading_symbol,
-                    &report,
-                    Some(pnl),
-                    Some(self.trade_manager.get_metrics().realized_pnl()),
-                    Some(self.trade_manager.get_trade_summary()),
+            let liquidation_market_price = self
+                .market_price_from_state(&market_state)
+                .or_else(|| last_trade_price.map(MarketPrice::Trade));
+
+            if let Some(liquidation_market_price) = liquidation_market_price {
+                let execution = backtest_engine.execute_with_constraints_at(
+                    trade::signal::Signal::Sell,
+                    liquidation_market_price,
+                    position.quantity,
+                    self.trade_manager.available_cash(),
                 );
+                if !execution.is_rejected() {
+                    let report = self.simulated_report_from_sell(position.quantity, 0.0, execution);
+                    let pnl = self.trade_manager.close_position(
+                        trading_symbol,
+                        execution.execution_price,
+                        market_state.last_event_time_secs().unwrap_or(0.0),
+                    );
+                    let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
+                    strategy_logger.log_execution(
+                        trading_symbol,
+                        &report,
+                        Some(pnl),
+                        Some(self.trade_manager.get_metrics().realized_pnl()),
+                        Some(self.trade_manager.get_trade_summary()),
+                    );
+                }
             }
         }
 
