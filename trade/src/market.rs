@@ -1,26 +1,27 @@
 use crate::models::Trade;
+use serde::Serialize;
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct BookLevel {
     pub price: f64,
     pub quantity: f64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct BookTicker {
     pub bid: BookLevel,
     pub ask: BookLevel,
     pub event_time: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct DepthLevel {
     pub price: f64,
     pub quantity: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct DepthSnapshot {
     pub bids: Vec<DepthLevel>,
     pub asks: Vec<DepthLevel>,
@@ -155,10 +156,24 @@ impl MarketState {
     }
 
     pub fn trade_window_stats(&self) -> TradeWindowStats {
+        Self::build_trade_window_stats(self.trades.iter())
+    }
+
+    pub fn recent_trade_window_stats(&self, trade_count: usize) -> TradeWindowStats {
+        if trade_count == 0 {
+            return TradeWindowStats::default();
+        }
+
+        Self::build_trade_window_stats(self.trades.iter().rev().take(trade_count).rev())
+    }
+
+    fn build_trade_window_stats<'a>(
+        trades: impl IntoIterator<Item = &'a Trade>,
+    ) -> TradeWindowStats {
         let mut stats = TradeWindowStats::default();
         let mut first_price = None;
 
-        for trade in &self.trades {
+        for trade in trades {
             stats.trade_count += 1;
             stats.volume += trade.quantity;
             stats.notional += trade.quantity * trade.price;
@@ -179,6 +194,14 @@ impl MarketState {
         }
 
         stats
+    }
+
+    pub fn trade_window_vwap(&self) -> Option<f64> {
+        Self::vwap_from_stats(&self.trade_window_stats())
+    }
+
+    pub fn recent_trade_window_vwap(&self, trade_count: usize) -> Option<f64> {
+        Self::vwap_from_stats(&self.recent_trade_window_stats(trade_count))
     }
 
     pub fn recent_trades(
@@ -202,13 +225,11 @@ impl MarketState {
     }
 
     pub fn trade_flow_imbalance(&self) -> f64 {
-        let stats = self.trade_window_stats();
-        let total = stats.buyer_initiated_volume + stats.seller_initiated_volume;
-        if total <= f64::EPSILON {
-            0.0
-        } else {
-            (stats.buyer_initiated_volume - stats.seller_initiated_volume) / total
-        }
+        Self::trade_flow_imbalance_from_stats(&self.trade_window_stats())
+    }
+
+    pub fn recent_trade_flow_imbalance(&self, trade_count: usize) -> f64 {
+        Self::trade_flow_imbalance_from_stats(&self.recent_trade_window_stats(trade_count))
     }
 
     fn trim_trade_window(&mut self, current_time: u64) {
@@ -218,6 +239,23 @@ impl MarketState {
             } else {
                 break;
             }
+        }
+    }
+
+    fn trade_flow_imbalance_from_stats(stats: &TradeWindowStats) -> f64 {
+        let total = stats.buyer_initiated_volume + stats.seller_initiated_volume;
+        if total <= f64::EPSILON {
+            0.0
+        } else {
+            (stats.buyer_initiated_volume - stats.seller_initiated_volume) / total
+        }
+    }
+
+    fn vwap_from_stats(stats: &TradeWindowStats) -> Option<f64> {
+        if stats.volume <= f64::EPSILON {
+            None
+        } else {
+            Some(stats.notional / stats.volume)
         }
     }
 }

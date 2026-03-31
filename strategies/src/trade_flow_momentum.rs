@@ -10,10 +10,13 @@ pub struct TradeFlowMomentumConfig {
     pub trade_window_millis: u64,
     pub min_trades_in_window: usize,
     pub min_trade_flow_imbalance: f64,
+    pub min_recent_trade_flow_imbalance: f64,
     pub min_price_drift_bps: f64,
     pub max_price_drift_bps: f64,
+    pub max_drift_above_vwap_bps: f64,
     pub max_spread_bps: f64,
     pub min_burst_per_second: f64,
+    pub min_order_book_imbalance: f64,
     pub position_size_confidence_floor: f64,
     pub entry_cooldown_millis: u64,
     pub hold_time_millis: u64,
@@ -28,10 +31,13 @@ impl Default for TradeFlowMomentumConfig {
             trade_window_millis: 1_500,
             min_trades_in_window: 12,
             min_trade_flow_imbalance: 0.18,
+            min_recent_trade_flow_imbalance: 0.24,
             min_price_drift_bps: 6.0,
             max_price_drift_bps: 35.0,
+            max_drift_above_vwap_bps: 8.0,
             max_spread_bps: 12.0,
             min_burst_per_second: 10.0,
+            min_order_book_imbalance: 0.03,
             position_size_confidence_floor: 0.72,
             entry_cooldown_millis: 2_500,
             hold_time_millis: 4_000,
@@ -83,6 +89,27 @@ impl TradeFlowMomentumStrategy {
         }
     }
 
+    fn recent_trade_flow_imbalance(&self, market_state: &MarketState) -> f64 {
+        let sample_size = (self.config.min_trades_in_window / 2).max(6);
+        market_state.recent_trade_flow_imbalance(sample_size)
+    }
+
+    fn drift_above_vwap_bps(&self, market_state: &MarketState) -> f64 {
+        let reference_price = market_state
+            .mid_price()
+            .or_else(|| market_state.last_price())
+            .unwrap_or(0.0);
+        let Some(vwap) = market_state.trade_window_vwap() else {
+            return 0.0;
+        };
+
+        if reference_price <= f64::EPSILON || vwap <= f64::EPSILON {
+            0.0
+        } else {
+            (reference_price - vwap) / vwap * 10_000.0
+        }
+    }
+
     fn entry_confidence(&self, flow_imbalance: f64, drift_bps: f64, burst_per_second: f64) -> f64 {
         let flow_component =
             (flow_imbalance.abs() / self.config.min_trade_flow_imbalance.max(f64::EPSILON)).min(2.0);
@@ -112,8 +139,23 @@ impl TradeFlowMomentumStrategy {
             return false;
         }
 
+        if self.recent_trade_flow_imbalance(market_state) < self.config.min_recent_trade_flow_imbalance {
+            return false;
+        }
+
         let drift_bps = self.price_drift_bps(market_state);
         if drift_bps < self.config.min_price_drift_bps || drift_bps > self.config.max_price_drift_bps {
+            return false;
+        }
+
+        if self.drift_above_vwap_bps(market_state) > self.config.max_drift_above_vwap_bps {
+            return false;
+        }
+
+        if market_state
+            .order_book_imbalance()
+            .is_some_and(|imbalance| imbalance < self.config.min_order_book_imbalance)
+        {
             return false;
         }
 
@@ -139,7 +181,7 @@ impl TradeFlowMomentumStrategy {
             return Some("take_profit");
         }
 
-        if market_state.trade_flow_imbalance() <= self.config.exit_on_flow_reversal {
+        if self.recent_trade_flow_imbalance(market_state) <= self.config.exit_on_flow_reversal {
             return Some("flow_reversal");
         }
 

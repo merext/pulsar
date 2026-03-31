@@ -97,3 +97,41 @@ fn market_state_tracks_latest_event_time_across_event_types() {
     assert_eq!(state.last_event_time_millis(), Some(1_500));
     assert_eq!(state.last_event_time_secs(), Some(1.5));
 }
+
+#[test]
+fn market_state_computes_recent_trade_stats_and_vwap() {
+    let mut state = MarketState::new("DOGEUSDT", 1_000);
+
+    state.apply(&MarketEvent::Trade(Trade {
+        price: 0.1000,
+        quantity: 10.0,
+        trade_time: 1_000,
+        is_buyer_market_maker: true,
+        ..Default::default()
+    }));
+    state.apply(&MarketEvent::Trade(Trade {
+        price: 0.1002,
+        quantity: 20.0,
+        trade_time: 1_100,
+        is_buyer_market_maker: false,
+        ..Default::default()
+    }));
+    state.apply(&MarketEvent::Trade(Trade {
+        price: 0.1004,
+        quantity: 30.0,
+        trade_time: 1_200,
+        is_buyer_market_maker: false,
+        ..Default::default()
+    }));
+
+    let recent_stats = state.recent_trade_window_stats(2);
+    assert_eq!(recent_stats.trade_count, 2);
+    assert_eq!(recent_stats.last_price, 0.1004);
+    assert!(state.recent_trade_flow_imbalance(2) > 0.0);
+
+    let recent_vwap = state
+        .recent_trade_window_vwap(2)
+        .expect("recent vwap available");
+    assert!(recent_vwap > 0.1002);
+    assert!(recent_vwap < 0.1004);
+}

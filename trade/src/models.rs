@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Position {
     pub symbol: String,
@@ -81,7 +83,7 @@ impl std::fmt::Display for Position {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Trade {
     pub event_type: String,
     pub event_time: u64,

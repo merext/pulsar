@@ -37,6 +37,34 @@ Completed:
 - Backtest CLI now supports strategy selection instead of hardwiring a single model
 - Multi-day replay was run on three DOGEUSDT archives and the first model is currently unprofitable on all three days
 - Comparative replay now exists for two taker baselines over the same three-day batch
+- Added minimal compare workflow in CLI:
+  - `compare --uris ... --strategies ...`
+  - emits CSV summary for identical strategy/dataset batch runs
+- Added first major refinement pass to `LiquiditySweepReversalStrategy`:
+  - recent-flow confirmation
+  - VWAP reclaim filter
+  - quote-side order book support filter
+- The first major sweep refinement did not materially improve the current three-day compare batch
+- Added first major refinement pass to `TradeFlowMomentumStrategy`:
+  - recent-flow confirmation
+  - VWAP stretch filter
+  - quote-side order book support filter
+- The first major momentum refinement slightly improved `2026-03-30` and left the rest of the three-day batch broadly unchanged
+- Live and emulated CLI orchestration now uses quote-aware mixed market events:
+  - `BinanceClient::market_event_stream()` feeds `trade + bookTicker`
+  - `trade` command uses real execution path on the mixed stream
+  - `emulate` command uses simulated execution path on the mixed stream
+  - trader now logs market data source status for backtest vs live/emulate paths
+- Added initial quote/depth capture pipeline:
+  - `BinanceClient::market_event_stream_with_depth()` now multiplexes `trade + bookTicker + depth`
+  - CLI command `capture` writes raw JSONL under user-selected path
+  - short capture run verified with real mixed events written to disk
+  - pipeline documented in `docs/CAPTURE_PIPELINE.md`
+- Added captured JSONL mixed-event replay support:
+  - `BinanceClient::market_event_data_from_uri()` now loads captured JSONL as normalized `MarketEvent` replay
+  - `backtest` and `compare` now auto-detect `.jsonl` / `.ndjson` and use mixed-event replay instead of trade-only replay
+  - replay logging now distinguishes captured historical replay from trade-only historical replay
+  - short end-to-end replay on `/tmp/pulsar_capture.jsonl` verified successfully for both baseline taker models
 
 ## Last Verified Commands
 
@@ -47,6 +75,14 @@ Completed:
 - `cargo run -p binance-bot -- backtest --uri data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2026-03-30.zip`
 - `cargo run -p binance-bot -- --strategy trade-flow-momentum backtest --uri data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-06-28.zip`
 - `cargo run -p binance-bot -- --strategy liquidity-sweep-reversal backtest --uri data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-08-08.zip`
+- `cargo run -p binance-bot -- compare --uris data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-06-28.zip data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-08-08.zip data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2026-03-30.zip`
+- `cargo test -p binance-exchange -p trade -p strategies`
+- `cargo run -p binance-bot -- capture --output /tmp/pulsar_capture.jsonl --duration-secs 2`
+- `cargo test -p binance-exchange --test client_parse_tests`
+- `cargo test -p binance-bot`
+- `cargo run -p binance-bot -- --strategy trade-flow-momentum backtest --uri /tmp/pulsar_capture.jsonl`
+- `cargo run -p binance-bot -- --strategy liquidity-sweep-reversal backtest --uri /tmp/pulsar_capture.jsonl`
+- `cargo run -p binance-bot -- compare --uris /tmp/pulsar_capture.jsonl --strategies trade-flow-momentum,liquidity-sweep-reversal`
 
 ## Important Constraints
 
@@ -54,6 +90,7 @@ Completed:
 - Do not restore deleted RSI / mean reversion / advanced-order strategies.
 - Do not pretend maker backtests are realistic without quote/depth history and queue logic.
 - Every strategy must be documented under `docs/strategies/`.
+- Do not discard a model after shallow iteration; require deep tuning and live emulation evidence before rejecting it.
 
 ## Immediate Next Steps
 
@@ -61,10 +98,11 @@ Completed:
    - market events
    - market state
    - execution intents / reports
-2. Route live orchestration to `market_event_stream()` where appropriate.
-3. Promote `LiquiditySweepReversalStrategy` as the current lead taker baseline for the next refinement loop.
-4. Refine `TradeFlowMomentumStrategy` only at the major-filter level, not by deep sub-variant exploration.
-5. Add a simple same-dataset comparison harness/reporting flow.
+2. Promote `LiquiditySweepReversalStrategy` as the current lead taker baseline for the next refinement loop.
+3. Keep `TradeFlowMomentumStrategy` refinements at the major-filter level, not deep sub-variant exploration.
+4. Extend the new compare workflow only if a major architecture need appears; keep secondary reporting wishes in backlog.
+5. Keep both models alive until deep tuning plus live emulation justify rejection.
+6. Next major architecture step after this is replay observability plus normalized captured dataset structure for larger quote/depth research batches.
 
 ## Architectural Guidance
 
@@ -106,6 +144,14 @@ Comparison takeaway:
 - liquidity sweep baseline currently looks more promising because it loses less while trading less often
 - next iteration should focus on major-quality filters and better comparison/reporting, not local micro-tuning
 
+Refinement takeaway:
+
+- first major refinement of liquidity sweep improved structure but not the current three-day results
+- this is evidence to continue disciplined tuning, not to discard the model
+- first major refinement of momentum improved one day slightly but did not change the broader ordering of the two models
+- captured mixed-event replay now works end-to-end, but the verified fixture was only a short 32-event sample and produced zero trades for both baselines
+- next validation should use materially longer captured sessions before drawing any quote-aware model conclusions
+
 ## Resume Checklist
 
 - Read `docs/AGENT_PLAYBOOK.md`
@@ -113,4 +159,4 @@ Comparison takeaway:
 - Read `docs/ROADMAP.md`
 - Read this file
 - Run `cargo check`
-- Continue from the first unchecked item in Phase 1
+- Continue from the next unchecked roadmap item in Phase 2 / Phase 4

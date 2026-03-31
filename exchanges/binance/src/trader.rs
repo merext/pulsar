@@ -19,7 +19,7 @@ use trade::metrics::TradeManager;
 use trade::models::Position;
 use trade::simulation::{PositionSizer, VolatilityFactors};
 use trade::strategy::{Strategy, StrategyContext, StrategyLogger};
-use trade::trader::{OrderType, TradeMode, Trader};
+use trade::trader::{MarketDataSourceKind, OrderType, TradeMode, Trader};
 
 pub struct BinanceTrader {
     connection: Option<WebsocketApi>,
@@ -488,6 +488,7 @@ impl Trader for BinanceTrader {
         trading_strategy: &mut dyn Strategy,
         trading_symbol: &str,
         trading_mode: TradeMode,
+        market_data_source: MarketDataSourceKind,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if trading_mode == TradeMode::Real && self.connection.is_none() {
             let (api_key, api_secret) = self.credentials()?;
@@ -508,6 +509,13 @@ impl Trader for BinanceTrader {
                 .expect("Failed to connect to WebSocket API"),
             );
         }
+
+        self.logger
+            .log_market_data_source(
+                trading_symbol,
+                market_data_source.source(),
+                market_data_source.status(),
+            );
 
         tokio::pin!(trading_stream);
 

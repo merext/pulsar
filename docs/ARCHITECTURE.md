@@ -10,6 +10,9 @@ The project is evolving into a layered HFT research platform.
    - Binance websocket adapters
    - historical archive loaders
    - live capture writers for raw datasets
+   - live trade/emulate now consume mixed `trade + bookTicker` streams through shared orchestration
+   - capture pipeline now supports mixed `trade + bookTicker + depth` JSONL output for future replay
+   - historical replay now supports both trade-only archives and captured mixed-event JSONL datasets
 
 2. Normalized Event Layer
    - `MarketEvent`
@@ -40,15 +43,17 @@ The project is evolving into a layered HFT research platform.
    - drawdown / exposure / fill quality
    - regime analysis
    - multi-day comparison
+   - orchestration-level batch comparison across multiple strategies and identical datasets
 
 ## Current Repository Roles
 
 - `trade/`
   - shared domain types, strategy interfaces, market state, execution simulation, metrics
 - `exchanges/binance/`
-  - websocket clients, archive parsing, real exchange adapter, live capture integration
+  - websocket clients, archive parsing, captured JSONL replay parsing, real exchange adapter, live capture integration
 - `bots/binance/`
   - orchestration CLI for replay, emulate, live validation, dataset capture
+  - now also owns cross-strategy batch comparison for identical replay inputs and replay source selection
 - `strategies/`
   - future strategy implementations only; currently reset for redesign
 - `docs/strategies/`
@@ -69,6 +74,12 @@ The project is evolving into a layered HFT research platform.
 - strategy returns `OrderIntent`
 - execution layer simulates or routes intents
 - trader/orchestrator manages streams and reports
+
+## Replay Modes
+
+- trade-only archive replay remains the baseline validation path for taker models on large historical batches
+- captured JSONL replay is now the quote/depth-aware validation path for mixed-event datasets captured from live websocket flow
+- maker research still remains blocked on queue/fill realism even though quote/depth replay now exists
 
 ## Key Shared Types To Maintain
 

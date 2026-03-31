@@ -1,4 +1,5 @@
 use strategies::TradeFlowMomentumStrategy;
+use std::fs;
 use trade::market::{BookLevel, BookTicker, MarketEvent, MarketState};
 use trade::strategy::{Strategy, StrategyContext};
 use trade::{OrderIntent, Position, Trade};
@@ -19,7 +20,14 @@ fn context_with_position(quantity: f64, entry_price: f64, entry_time: f64) -> St
 
 #[tokio::test]
 async fn enters_on_strong_trade_flow_burst() {
-    let mut strategy = TradeFlowMomentumStrategy::from_file("/dev/null").expect("strategy loads");
+    let config_path = std::env::temp_dir().join("trade_flow_momentum_test.toml");
+    fs::write(
+        &config_path,
+        "trade_window_millis = 1500\nmin_trades_in_window = 12\nmin_trade_flow_imbalance = 0.18\nmin_recent_trade_flow_imbalance = 0.10\nmin_price_drift_bps = 6.0\nmax_price_drift_bps = 35.0\nmax_drift_above_vwap_bps = 20.0\nmax_spread_bps = 12.0\nmin_burst_per_second = 10.0\nmin_order_book_imbalance = -1.0\nposition_size_confidence_floor = 0.72\nentry_cooldown_millis = 2500\nhold_time_millis = 4000\nexit_on_flow_reversal = -0.05\nstop_loss_bps = 18.0\ntake_profit_bps = 24.0\n",
+    )
+    .expect("write temp config");
+
+    let mut strategy = TradeFlowMomentumStrategy::from_file(&config_path).expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     market_state.apply(&MarketEvent::BookTicker(BookTicker {
@@ -55,6 +63,8 @@ async fn enters_on_strong_trade_flow_burst() {
         }
         _ => panic!("expected buy intent"),
     }
+
+    let _ = fs::remove_file(config_path);
 }
 
 #[tokio::test]
@@ -94,4 +104,42 @@ async fn exits_on_flow_reversal_when_position_open() {
         }
         _ => panic!("expected sell intent"),
     }
+}
+
+#[tokio::test]
+async fn rejects_entry_when_recent_flow_or_book_support_is_weak() {
+    let mut strategy = TradeFlowMomentumStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
+
+    market_state.apply(&MarketEvent::BookTicker(BookTicker {
+        bid: BookLevel {
+            price: 0.1002,
+            quantity: 800.0,
+        },
+        ask: BookLevel {
+            price: 0.1003,
+            quantity: 1400.0,
+        },
+        event_time: 1_500,
+    }));
+
+    let prices = [
+        0.1000, 0.1001, 0.1002, 0.1003, 0.1004, 0.1005, 0.1006, 0.1007, 0.1008, 0.1009, 0.1010,
+        0.1011,
+    ];
+
+    for (index, price) in prices.into_iter().enumerate() {
+        let event = MarketEvent::Trade(Trade {
+            price,
+            quantity: 1400.0,
+            trade_time: 100 + index as u64 * 90,
+            is_buyer_market_maker: index < 8,
+            ..Default::default()
+        });
+        strategy.on_event(&event, &market_state).await;
+        market_state.apply(&event);
+    }
+
+    let decision = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
+    assert!(matches!(decision.intent, OrderIntent::NoAction));
 }

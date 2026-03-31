@@ -23,7 +23,7 @@ async fn enters_after_local_sweep_and_reclaim() {
     let config_path = std::env::temp_dir().join("liquidity_sweep_reversal_test.toml");
     fs::write(
         &config_path,
-        "trade_window_millis = 2000\nmin_trades_in_window = 18\nmin_sweep_drop_bps = 10.0\nmin_buyer_reclaim_imbalance = -0.05\nmin_reclaim_bps = 2.0\nmax_reclaim_bps = 20.0\nmax_spread_bps = 14.0\nmin_large_trade_ratio = 0.10\nstop_loss_bps = 16.0\ntake_profit_bps = 20.0\nhold_time_millis = 5000\nentry_cooldown_millis = 3000\n",
+        "trade_window_millis = 2000\nmin_trades_in_window = 18\nmin_sweep_drop_bps = 10.0\nmin_buyer_reclaim_imbalance = -0.05\nmin_recent_buyer_imbalance = -0.05\nmin_reclaim_bps = 2.0\nmax_reclaim_bps = 20.0\nmax_reclaim_above_vwap_bps = 50.0\nmax_spread_bps = 14.0\nmin_large_trade_ratio = 0.10\nmin_order_book_imbalance = -1.0\nstop_loss_bps = 16.0\ntake_profit_bps = 20.0\nhold_time_millis = 5000\nentry_cooldown_millis = 3000\n",
     )
     .expect("write temp config");
 
@@ -115,4 +115,42 @@ async fn exits_when_reversal_fails() {
         }
         _ => panic!("expected sell intent"),
     }
+}
+
+#[tokio::test]
+async fn rejects_entry_when_recent_flow_or_book_support_is_weak() {
+    let mut strategy = LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
+
+    let prices = [
+        0.1012, 0.1010, 0.1008, 0.1006, 0.1002, 0.0998, 0.0994, 0.0990, 0.0988, 0.0989, 0.0990,
+        0.0991, 0.09915, 0.09918, 0.09920, 0.09919, 0.09918, 0.09917,
+    ];
+
+    for (index, price) in prices.into_iter().enumerate() {
+        let event = MarketEvent::Trade(Trade {
+            price,
+            quantity: 2200.0,
+            trade_time: 100 + index as u64 * 90,
+            is_buyer_market_maker: index < 12,
+            ..Default::default()
+        });
+        strategy.on_event(&event, &market_state).await;
+        market_state.apply(&event);
+    }
+
+    market_state.apply(&MarketEvent::BookTicker(BookTicker {
+        bid: BookLevel {
+            price: 0.09915,
+            quantity: 900.0,
+        },
+        ask: BookLevel {
+            price: 0.09920,
+            quantity: 1600.0,
+        },
+        event_time: 2_000,
+    }));
+
+    let decision = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
+    assert!(matches!(decision.intent, OrderIntent::NoAction));
 }

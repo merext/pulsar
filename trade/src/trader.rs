@@ -19,6 +19,32 @@ pub enum TradeMode {
     Backtest,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketDataSourceKind {
+    HistoricalTradeReplay,
+    HistoricalCapturedReplay,
+    WebsocketTradeBookTicker,
+}
+
+impl MarketDataSourceKind {
+    pub fn status(self) -> &'static str {
+        match self {
+            Self::HistoricalTradeReplay => "historical_trade_replay",
+            Self::HistoricalCapturedReplay => "historical_captured_replay",
+            Self::WebsocketTradeBookTicker => "websocket_trade_bookticker",
+        }
+    }
+
+    pub fn source(self) -> &'static str {
+        match self {
+            Self::HistoricalTradeReplay | Self::HistoricalCapturedReplay => {
+                "binance_market_event_stream"
+            }
+            Self::WebsocketTradeBookTicker => "binance_market_event_stream",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExchangeInfo {
     pub name: String,
@@ -61,5 +87,6 @@ pub trait Trader {
         trading_strategy: &mut dyn Strategy,
         trading_symbol: &str,
         trading_mode: TradeMode,
+        market_data_source: MarketDataSourceKind,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }

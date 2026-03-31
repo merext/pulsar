@@ -48,6 +48,7 @@ Core competencies to apply in every step:
   - depth-aware models
 - Do not compare models fairly unless they are tested on the same regime set.
 - Prefer walk-forward and out-of-sample thinking from the beginning.
+- Do not discard a model after an early weak result alone; reject it only after sufficiently deep tuning and live emulation provide strong evidence of structurally poor performance.
 
 ## Current Strategic Direction
 

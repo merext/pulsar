@@ -11,10 +11,13 @@ pub struct LiquiditySweepReversalConfig {
     pub min_trades_in_window: usize,
     pub min_sweep_drop_bps: f64,
     pub min_buyer_reclaim_imbalance: f64,
+    pub min_recent_buyer_imbalance: f64,
     pub min_reclaim_bps: f64,
     pub max_reclaim_bps: f64,
+    pub max_reclaim_above_vwap_bps: f64,
     pub max_spread_bps: f64,
     pub min_large_trade_ratio: f64,
+    pub min_order_book_imbalance: f64,
     pub stop_loss_bps: f64,
     pub take_profit_bps: f64,
     pub hold_time_millis: u64,
@@ -28,10 +31,13 @@ impl Default for LiquiditySweepReversalConfig {
             min_trades_in_window: 18,
             min_sweep_drop_bps: 10.0,
             min_buyer_reclaim_imbalance: 0.12,
+            min_recent_buyer_imbalance: 0.20,
             min_reclaim_bps: 2.0,
             max_reclaim_bps: 20.0,
+            max_reclaim_above_vwap_bps: 6.0,
             max_spread_bps: 14.0,
             min_large_trade_ratio: 0.12,
+            min_order_book_imbalance: 0.05,
             stop_loss_bps: 16.0,
             take_profit_bps: 20.0,
             hold_time_millis: 5_000,
@@ -83,6 +89,25 @@ impl LiquiditySweepReversalStrategy {
         (high - low) / high * 10_000.0
     }
 
+    fn reclaim_above_vwap_bps(&self, market_state: &MarketState) -> f64 {
+        let Some(current_price) = self.current_reference_price(market_state) else {
+            return 0.0;
+        };
+        let Some(vwap) = market_state.trade_window_vwap() else {
+            return 0.0;
+        };
+        if vwap <= f64::EPSILON {
+            return 0.0;
+        }
+
+        (current_price - vwap) / vwap * 10_000.0
+    }
+
+    fn recent_buyer_imbalance(&self, market_state: &MarketState) -> f64 {
+        let sample_size = (self.config.min_trades_in_window / 2).max(6);
+        market_state.recent_trade_flow_imbalance(sample_size)
+    }
+
     fn large_trade_ratio(&self, market_state: &MarketState) -> f64 {
         let stats = market_state.trade_window_stats();
         if stats.trade_count == 0 {
@@ -128,6 +153,21 @@ impl LiquiditySweepReversalStrategy {
             return false;
         }
 
+        if self.recent_buyer_imbalance(market_state) < self.config.min_recent_buyer_imbalance {
+            return false;
+        }
+
+        if self.reclaim_above_vwap_bps(market_state) > self.config.max_reclaim_above_vwap_bps {
+            return false;
+        }
+
+        if market_state
+            .order_book_imbalance()
+            .is_some_and(|imbalance| imbalance < self.config.min_order_book_imbalance)
+        {
+            return false;
+        }
+
         self.large_trade_ratio(market_state) >= self.config.min_large_trade_ratio
     }
 
@@ -149,7 +189,7 @@ impl LiquiditySweepReversalStrategy {
         if pnl_bps >= self.config.take_profit_bps {
             return Some("take_profit");
         }
-        if market_state.trade_flow_imbalance() < -0.08 {
+        if self.recent_buyer_imbalance(market_state) < -0.08 {
             return Some("reversal_failed");
         }
 

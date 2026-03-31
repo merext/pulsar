@@ -1,10 +1,13 @@
 trade_window_millis = 1500
 min_trades_in_window = 12
 min_trade_flow_imbalance = 0.18
+min_recent_trade_flow_imbalance = 0.24
 min_price_drift_bps = 6.0
 max_price_drift_bps = 35.0
+max_drift_above_vwap_bps = 8.0
 max_spread_bps = 12.0
 min_burst_per_second = 10.0
+min_order_book_imbalance = 0.03
 position_size_confidence_floor = 0.72
 entry_cooldown_millis = 2500
 hold_time_millis = 4000

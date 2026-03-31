@@ -3,17 +3,39 @@ use bytes::Bytes;
 use csv::ReaderBuilder;
 use futures_util::{SinkExt, StreamExt, stream::{self, Stream}};
 use serde::Deserialize;
+use std::collections::BTreeSet;
+use std::borrow::Cow;
 use std::io::Cursor;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
-use trade::market::{BookLevel, BookTicker, MarketEvent};
+use trade::market::{BookLevel, BookTicker, DepthLevel, DepthSnapshot, MarketEvent};
 use trade::models::Trade as PulsarTrade;
 use zip::read::ZipArchive;
 
 pub struct BinanceClient;
+
+#[derive(Debug, Clone, Default)]
+pub struct CapturedMarketDataSummary {
+    pub total_lines: usize,
+    pub parsed_events: usize,
+    pub trade_events: usize,
+    pub book_ticker_events: usize,
+    pub depth_events: usize,
+    pub parse_errors: usize,
+    pub first_event_time: Option<u64>,
+    pub last_event_time: Option<u64>,
+    pub event_time_regressions: usize,
+    pub symbols: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ParsedMarketEventData {
+    pub events: Vec<MarketEvent>,
+    pub summary: CapturedMarketDataSummary,
+}
 
 #[derive(Debug, Deserialize)]
 struct BinanceTradeMessage {
@@ -38,7 +60,9 @@ struct BinanceTradeMessage {
 #[derive(Debug, Deserialize)]
 struct BinanceBookTickerMessage {
     #[serde(rename = "E")]
-    event_time: u64,
+    event_time: Option<u64>,
+    #[serde(rename = "u")]
+    update_id: Option<u64>,
     #[serde(rename = "b")]
     bid_price: String,
     #[serde(rename = "B")]
@@ -47,6 +71,57 @@ struct BinanceBookTickerMessage {
     ask_price: String,
     #[serde(rename = "A")]
     ask_quantity: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BinanceDepthMessage {
+    #[serde(rename = "E")]
+    event_time: Option<u64>,
+    #[serde(rename = "lastUpdateId")]
+    last_update_id: u64,
+    #[serde(rename = "bids")]
+    bids: Vec<[String; 2]>,
+    #[serde(rename = "asks")]
+    asks: Vec<[String; 2]>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CapturedDepthLevel {
+    price: f64,
+    quantity: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "event_type", rename_all = "snake_case")]
+enum CapturedMarketEventRecord {
+    Trade {
+        event_time: u64,
+        symbol: String,
+        trade_id: u64,
+        price: f64,
+        quantity: f64,
+        trade_time: u64,
+        is_buyer_market_maker: bool,
+    },
+    BookTicker {
+        event_time: u64,
+        bid_price: f64,
+        bid_quantity: f64,
+        ask_price: f64,
+        ask_quantity: f64,
+    },
+    Depth {
+        event_time: u64,
+        bids: Vec<CapturedDepthLevel>,
+        asks: Vec<CapturedDepthLevel>,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CapturedMarketEventKind {
+    Trade,
+    BookTicker,
+    Depth,
 }
 
 impl BinanceTradeMessage {
@@ -68,6 +143,7 @@ impl BinanceTradeMessage {
 
 impl BinanceBookTickerMessage {
     fn into_book_ticker(self) -> Option<BookTicker> {
+        let event_time = self.event_time?;
         Some(BookTicker {
             bid: BookLevel {
                 price: self.bid_price.parse().ok()?,
@@ -77,8 +153,128 @@ impl BinanceBookTickerMessage {
                 price: self.ask_price.parse().ok()?,
                 quantity: self.ask_quantity.parse().ok()?,
             },
-            event_time: self.event_time,
+            event_time,
         })
+    }
+}
+
+impl BinanceDepthMessage {
+    fn into_depth_snapshot(self) -> Option<DepthSnapshot> {
+        let event_time = self.event_time?;
+        let bids = self
+            .bids
+            .into_iter()
+            .map(|level| {
+                Some(DepthLevel {
+                    price: level[0].parse().ok()?,
+                    quantity: level[1].parse().ok()?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let asks = self
+            .asks
+            .into_iter()
+            .map(|level| {
+                Some(DepthLevel {
+                    price: level[0].parse().ok()?,
+                    quantity: level[1].parse().ok()?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        Some(DepthSnapshot {
+            bids,
+            asks,
+            event_time,
+        })
+    }
+}
+
+impl CapturedMarketEventRecord {
+    fn kind(&self) -> CapturedMarketEventKind {
+        match self {
+            Self::Trade { .. } => CapturedMarketEventKind::Trade,
+            Self::BookTicker { .. } => CapturedMarketEventKind::BookTicker,
+            Self::Depth { .. } => CapturedMarketEventKind::Depth,
+        }
+    }
+
+    fn event_time(&self) -> u64 {
+        match self {
+            Self::Trade { event_time, .. }
+            | Self::BookTicker { event_time, .. }
+            | Self::Depth { event_time, .. } => *event_time,
+        }
+    }
+
+    fn symbol(&self) -> Option<&str> {
+        match self {
+            Self::Trade { symbol, .. } => Some(symbol),
+            Self::BookTicker { .. } | Self::Depth { .. } => None,
+        }
+    }
+
+    fn into_market_event(self) -> MarketEvent {
+        match self {
+            Self::Trade {
+                event_time,
+                symbol,
+                trade_id,
+                price,
+                quantity,
+                trade_time,
+                is_buyer_market_maker,
+            } => MarketEvent::Trade(PulsarTrade {
+                event_type: "trade".to_string(),
+                event_time,
+                symbol,
+                trade_id,
+                price,
+                quantity,
+                buyer_order_id: None,
+                seller_order_id: None,
+                trade_time,
+                is_buyer_market_maker,
+            }),
+            Self::BookTicker {
+                event_time,
+                bid_price,
+                bid_quantity,
+                ask_price,
+                ask_quantity,
+            } => MarketEvent::BookTicker(BookTicker {
+                bid: BookLevel {
+                    price: bid_price,
+                    quantity: bid_quantity,
+                },
+                ask: BookLevel {
+                    price: ask_price,
+                    quantity: ask_quantity,
+                },
+                event_time,
+            }),
+            Self::Depth {
+                event_time,
+                bids,
+                asks,
+            } => MarketEvent::Depth(DepthSnapshot {
+                bids: bids
+                    .into_iter()
+                    .map(|level| DepthLevel {
+                        price: level.price,
+                        quantity: level.quantity,
+                    })
+                    .collect(),
+                asks: asks
+                    .into_iter()
+                    .map(|level| DepthLevel {
+                        price: level.price,
+                        quantity: level.quantity,
+                    })
+                    .collect(),
+                event_time,
+            }),
+        }
     }
 }
 
@@ -287,6 +483,81 @@ impl BinanceClient {
         Ok(UnboundedReceiverStream::new(rx))
     }
 
+    pub async fn market_event_stream_with_depth(
+        self,
+        symbol: &str,
+        depth_levels: u32,
+    ) -> Result<impl futures_util::Stream<Item = MarketEvent>, Box<dyn std::error::Error + Send + Sync>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let stream_symbol = symbol.to_lowercase();
+        let stream_symbol_for_log = symbol.to_string();
+        let depth_levels = depth_levels.max(5);
+
+        tokio::spawn(async move {
+            let url = format!(
+                "wss://stream.binance.com:9443/stream?streams={}@trade/{}@bookTicker/{}@depth{}@100ms",
+                stream_symbol, stream_symbol, stream_symbol, depth_levels
+            );
+
+            loop {
+                info!(symbol = %stream_symbol_for_log, url = %url, source = "websocket", "Connecting to multiplexed market data source with depth");
+                let connection = tokio::time::timeout(Duration::from_secs(20), connect_async(&url)).await;
+
+                let Ok(connection) = connection else {
+                    warn!(url = %url, "Multiplexed market data with depth timed out; retrying websocket only");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                };
+
+                let Ok((ws_stream, _response)) = connection else {
+                    warn!(url = %url, "Multiplexed market data with depth failed; retrying websocket only");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                };
+
+                info!(symbol = %stream_symbol_for_log, url = %url, "Multiplexed websocket market data with depth connected");
+                let (mut write, mut read) = ws_stream.split();
+
+                while let Some(message) = read.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => match parse_market_event_message(&text) {
+                            Some(event) => {
+                                if tx.send(event).is_err() {
+                                    return;
+                                }
+                            }
+                            None => {
+                                warn!(payload = %text, "Failed to decode multiplexed market+depth payload");
+                            }
+                        },
+                        Ok(Message::Ping(payload)) => {
+                            if let Err(err) = write.send(Message::Pong(payload)).await {
+                                warn!(error = ?err, "Failed to respond to websocket ping");
+                                break;
+                            }
+                        }
+                        Ok(Message::Pong(_)) => {}
+                        Ok(Message::Binary(_)) => {}
+                        Ok(Message::Frame(_)) => {}
+                        Ok(Message::Close(frame)) => {
+                            warn!(?frame, "Multiplexed market+depth stream closed by server; reconnecting");
+                            break;
+                        }
+                        Err(err) => {
+                            warn!(error = ?err, "Multiplexed market+depth read error; reconnecting");
+                            break;
+                        }
+                    }
+                }
+
+                warn!(url = %url, "Multiplexed websocket market+depth ended; retrying websocket only");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+
+        Ok(UnboundedReceiverStream::new(rx))
+    }
+
     /// # Errors
     ///
     /// Will return `Err` if the HTTP request fails or the data cannot be parsed.
@@ -318,6 +589,32 @@ impl BinanceClient {
         }
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if the file cannot be read or the captured JSONL cannot be parsed.
+    /// This method automatically detects whether the input is a URL or local file path.
+    pub async fn market_event_data_from_uri(
+        uri: &str,
+    ) -> Result<impl Stream<Item = MarketEvent>, Box<dyn std::error::Error + Send + Sync>> {
+        let parsed = Self::load_captured_market_event_data_from_uri(uri).await?;
+        Ok(stream::iter(parsed.events))
+    }
+
+    /// # Errors
+    ///
+    /// Will return `Err` if the file cannot be read or the captured JSONL cannot be parsed.
+    pub async fn load_captured_market_event_data_from_uri(
+        uri: &str,
+    ) -> Result<ParsedMarketEventData, Box<dyn std::error::Error + Send + Sync>> {
+        let payload = if uri.starts_with("http://") || uri.starts_with("https://") {
+            reqwest::get(uri).await?.bytes().await?
+        } else {
+            Bytes::from(tokio::fs::read(uri).await?)
+        };
+
+        Self::parse_market_event_data(payload)
+    }
+
     fn parse_trade_data(
         data: Bytes,
     ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
@@ -332,6 +629,66 @@ impl BinanceClient {
 
         // If ZIP fails, try to parse as plain CSV
         Self::parse_csv_from_reader(cursor)
+    }
+
+    fn parse_market_event_data(
+        data: Bytes,
+    ) -> Result<ParsedMarketEventData, Box<dyn std::error::Error + Send + Sync>> {
+        let text: Cow<'_, str> = String::from_utf8_lossy(&data);
+        let mut events = Vec::new();
+        let mut saw_non_empty_line = false;
+        let mut symbols = BTreeSet::new();
+        let mut summary = CapturedMarketDataSummary::default();
+        let mut previous_event_time = None;
+
+        for (line_index, raw_line) in text.lines().enumerate() {
+            let line = raw_line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            saw_non_empty_line = true;
+            summary.total_lines += 1;
+            match serde_json::from_str::<CapturedMarketEventRecord>(line) {
+                Ok(record) => {
+                    summary.parsed_events += 1;
+                    match record.kind() {
+                        CapturedMarketEventKind::Trade => summary.trade_events += 1,
+                        CapturedMarketEventKind::BookTicker => summary.book_ticker_events += 1,
+                        CapturedMarketEventKind::Depth => summary.depth_events += 1,
+                    }
+
+                    if let Some(symbol) = record.symbol() {
+                        symbols.insert(symbol.to_string());
+                    }
+
+                    let event_time = record.event_time();
+                    summary.first_event_time = Some(summary.first_event_time.map_or(event_time, |current| current.min(event_time)));
+                    summary.last_event_time = Some(summary.last_event_time.map_or(event_time, |current| current.max(event_time)));
+
+                    if let Some(previous_event_time) = previous_event_time
+                        && event_time < previous_event_time
+                    {
+                        summary.event_time_regressions += 1;
+                    }
+                    previous_event_time = Some(event_time);
+
+                    events.push(record.into_market_event());
+                }
+                Err(err) => {
+                    summary.parse_errors += 1;
+                    error!(error = ?err, line = line_index + 1, payload = %line, "Failed to parse captured market event record.");
+                }
+            }
+        }
+
+        if saw_non_empty_line && events.is_empty() {
+            return Err("failed to parse any captured market events from JSONL".into());
+        }
+
+        summary.symbols = symbols.into_iter().collect();
+
+        Ok(ParsedMarketEventData { events, summary })
     }
 
     fn parse_csv_from_reader<R: std::io::Read>(
@@ -465,6 +822,11 @@ impl BinanceClient {
         let trades = Self::parse_trade_data(Bytes::from(file_content))?;
         Ok(stream::iter(trades))
     }
+
+    #[cfg(test)]
+    pub fn parse_market_event_message_for_test(payload: &str) -> Option<MarketEvent> {
+        parse_market_event_message(payload)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -488,6 +850,13 @@ fn parse_market_event_message(payload: &str) -> Option<MarketEvent> {
             .ok()?
             .into_book_ticker()?;
         return Some(MarketEvent::BookTicker(book_ticker));
+    }
+
+    if envelope.stream.contains("@depth") {
+        let depth = serde_json::from_value::<BinanceDepthMessage>(envelope.data)
+            .ok()?
+            .into_depth_snapshot()?;
+        return Some(MarketEvent::Depth(depth));
     }
 
     None
