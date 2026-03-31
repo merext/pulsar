@@ -40,6 +40,7 @@ pub struct SignalConfig {
     pub stop_loss: f64,
     pub max_trades_per_hour: usize,
     pub signal_cooldown: f64,
+    pub exit_signal_confidence: f64,
 }
 
 pub struct RsiHftStrategy {
@@ -174,30 +175,30 @@ impl RsiHftStrategy {
             return Some((Signal::Sell, final_confidence.max(0.6)));
         }
 
-        // Additional momentum-based signals for HFT
-        if self.price_history.len() >= 11 {
+        // Additional momentum-based signals for HFT (more aggressive)
+        if self.price_history.len() >= 7 {
             let current_price = *self.price_history.back().unwrap();
-            let price_5_periods_ago = self.price_history[self.price_history.len() - 6];
-            let price_10_periods_ago = self.price_history[self.price_history.len() - 11];
+            let price_3_periods_ago = self.price_history[self.price_history.len() - 4];
+            let price_6_periods_ago = self.price_history[self.price_history.len() - 7];
             
-            // Momentum breakout signals
-            let short_momentum = (current_price - price_5_periods_ago) / price_5_periods_ago * 100.0;
-            let long_momentum = (current_price - price_10_periods_ago) / price_10_periods_ago * 100.0;
+            // Momentum breakout signals (more sensitive)
+            let short_momentum = (current_price - price_3_periods_ago) / price_3_periods_ago * 100.0;
+            let long_momentum = (current_price - price_6_periods_ago) / price_6_periods_ago * 100.0;
             
-            // Strong upward momentum with RSI confirmation
-            if short_momentum > 0.3 && long_momentum > 0.1 && current_rsi > 45.0 && current_rsi < 75.0 && trend_bullish {
-                let momentum_confidence = (short_momentum / 1.0).min(0.8);
-                let rsi_confidence = if current_rsi > 50.0 { 0.7 } else { 0.5 };
+            // Strong upward momentum (even with high RSI)
+            if short_momentum > 0.1 && long_momentum > 0.05 && trend_bullish {
+                let momentum_confidence = (short_momentum / 0.5).min(0.9);
+                let rsi_confidence = if current_rsi > 50.0 { 0.8 } else { 0.6 };
                 let final_confidence = (momentum_confidence + rsi_confidence) / 2.0;
-                return Some((Signal::Buy, final_confidence.max(0.6)));
+                return Some((Signal::Buy, final_confidence.max(0.5)));
             }
             
-            // Strong downward momentum with RSI confirmation
-            if short_momentum < -0.3 && long_momentum < -0.1 && current_rsi < 55.0 && current_rsi > 25.0 && trend_bearish {
-                let momentum_confidence = (short_momentum.abs() / 1.0).min(0.8);
-                let rsi_confidence = if current_rsi < 50.0 { 0.7 } else { 0.5 };
+            // Strong downward momentum (even with low RSI)
+            if short_momentum < -0.1 && long_momentum < -0.05 && trend_bearish {
+                let momentum_confidence = (short_momentum.abs() / 0.5).min(0.9);
+                let rsi_confidence = if current_rsi < 50.0 { 0.8 } else { 0.6 };
                 let final_confidence = (momentum_confidence + rsi_confidence) / 2.0;
-                return Some((Signal::Sell, final_confidence.max(0.6)));
+                return Some((Signal::Sell, final_confidence.max(0.5)));
             }
         }
 
@@ -308,19 +309,23 @@ impl Strategy for RsiHftStrategy {
             self.ma_long_values.pop_front();
         }
 
-        // Log every 100 trades
-        if self.price_history.len() % 100 == 0 {
-            self.logger.log_signal_generated(
-                &trade.symbol,
-                &Signal::Hold,
-                0.5,
+        // Log every 10 trades for debugging
+        if self.price_history.len() % 10 == 0 {
+            println!("DEBUG: Processed {} trades, current price: {:.8}, RSI: {:.2}", 
+                self.price_history.len(), 
                 trade.price,
-            );
+                self.rsi_values.back().unwrap_or(&50.0));
         }
     }
 
     fn get_signal(&mut self, current_position: Position) -> (Signal, f64) {
         let current_time = self.current_timestamp;
+        
+        // Debug current position
+        if current_position.quantity != 0.0 {
+            println!("DEBUG: Current position - quantity: {:.2}, entry_price: {:.8}", 
+                current_position.quantity, current_position.entry_price);
+        }
 
         // Reset hourly trade counter
         self.reset_hourly_trades(current_time);
@@ -333,7 +338,15 @@ impl Strategy for RsiHftStrategy {
         // Check if we should exit current position
         if let Some(current_price) = self.price_history.back() {
             if self.should_exit_position(&current_position, *current_price) {
-                return (Signal::Hold, 0.0);
+                println!("DEBUG: Should exit position - quantity: {:.2}, entry_price: {:.8}, current_price: {:.8}", 
+                    current_position.quantity, current_position.entry_price, *current_price);
+                if current_position.quantity > 0.0 {
+                    println!("DEBUG: Returning Sell signal for exit");
+                    return (Signal::Sell, self.config.signals.exit_signal_confidence);
+                } else if current_position.quantity < 0.0 {
+                    println!("DEBUG: Returning Buy signal for exit");
+                    return (Signal::Buy, self.config.signals.exit_signal_confidence);
+                }
             }
         }
 
@@ -341,12 +354,20 @@ impl Strategy for RsiHftStrategy {
         if self.should_generate_signal(current_time) {
             // Generate RSI-based signal
             if let Some((signal, confidence)) = self.generate_rsi_signal() {
+                println!("DEBUG: Generated signal {:?} with confidence {:.3}", signal, confidence);
                 if confidence >= self.config.signals.min_confidence {
                     self.last_signal_time = current_time;
                     self.trades_this_hour += 1;
+                    println!("DEBUG: Executing signal {:?} with confidence {:.3}", signal, confidence);
                     return (signal, confidence);
+                } else {
+                    println!("DEBUG: Signal confidence {:.3} below minimum {:.3}", confidence, self.config.signals.min_confidence);
                 }
+            } else {
+                println!("DEBUG: No signal generated");
             }
+        } else {
+            println!("DEBUG: Signal cooldown active");
         }
 
         (Signal::Hold, 0.0)

@@ -242,6 +242,10 @@ impl Strategy for MeanReversionHftStrategy {
             if self.should_exit_position(current_price, current_position.entry_price, current_time, current_time) {
                 return (Signal::Sell, 0.9);
             }
+        } else if current_position.quantity < 0.0 {
+            if self.should_exit_position(current_price, current_position.entry_price, current_time, current_time) {
+                return (Signal::Buy, 0.9);
+            }
         }
 
         // Detect mean reversion opportunity
@@ -295,9 +299,9 @@ impl Strategy for MeanReversionHftStrategy {
             self.last_signal_time = current_time;
             self.trades_this_hour += 1;
             
-            if signal_direction > 0.0 && current_position.quantity == 0.0 {
+            if signal_direction > 0.0 && current_position.quantity <= 0.0 {
                 (Signal::Buy, signal_strength)
-            } else if signal_direction < 0.0 && current_position.quantity > 0.0 {
+            } else if signal_direction < 0.0 && current_position.quantity >= 0.0 {
                 (Signal::Sell, signal_strength)
             } else {
                 (Signal::Hold, 0.0)

@@ -57,14 +57,14 @@ min_ioc_confidence = 0.7
 max_ioc_confidence = 0.85
 
 [signals]
-# Minimum confidence level required to execute a trade
-min_confidence = 0.7
+# Minimum confidence level required to execute a trade (increased for better signal quality)
+min_confidence = 0.8
 # Maximum time in seconds to hold a position before forced exit
-max_position_time = 900.0
-# Profit target percentage for profitable positions
-profit_target = 0.8
-# Stop loss percentage for losing positions
-stop_loss = 0.8
+max_position_time = 600.0
+# Profit target percentage for profitable positions (increased for better risk/reward)
+profit_target = 0.6
+# Stop loss percentage for losing positions (increased for better risk management)
+stop_loss = 0.3
 # Exit signal confidence
 exit_signal_confidence = 0.9
 

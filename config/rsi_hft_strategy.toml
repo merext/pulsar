@@ -4,32 +4,34 @@ strategy_name = "RSI HFT Strategy"
 
 [rsi]
 # RSI calculation period (reduced for HFT)
-period = 7
+period = 5
 # RSI oversold threshold (less extreme for HFT)
-oversold_threshold = 40.0
+oversold_threshold = 35.0
 # RSI overbought threshold (less extreme for HFT)
-overbought_threshold = 60.0
+overbought_threshold = 65.0
 # Signal strength multiplier for RSI signals
-signal_strength = 1.0
+signal_strength = 1.2
 
 [trend]
 # Short-term moving average period (faster for HFT)
-ma_short_period = 5
+ma_short_period = 3
 # Long-term moving average period (faster for HFT)
-ma_long_period = 20
+ma_long_period = 10
 # Trend strength multiplier for signal confidence
-trend_strength = 0.8
+trend_strength = 1.0
 
 [signals]
-# Minimum confidence level (reduced to allow more trades)
-min_confidence = 0.6
+# Minimum confidence level (lowered for testing)
+min_confidence = 0.5
 # Maximum time in seconds to hold a position before forced exit
-max_position_time = 900.0
-# Profit target percentage (reduced for more realistic targets)
-profit_target = 1.5
-# Stop loss percentage (tightened for HFT)
-stop_loss = 1.0
-# Maximum number of trades allowed per hour (increased for HFT)
-max_trades_per_hour = 8
-# Minimum time in seconds between consecutive trading signals (reduced for HFT)
-signal_cooldown = 30.0
+max_position_time = 600.0
+# Profit target percentage (increased for better risk/reward)
+profit_target = 0.8
+# Stop loss percentage (increased for better risk management)
+stop_loss = 0.4
+# Maximum number of trades allowed per hour (reduced to prevent overtrading)
+max_trades_per_hour = 5
+# Minimum time in seconds between consecutive trading signals
+signal_cooldown = 60.0
+# Exit signal confidence
+exit_signal_confidence = 0.9

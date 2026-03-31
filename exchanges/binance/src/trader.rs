@@ -152,6 +152,38 @@ impl BinanceTrader {
             .min(trading_size_max)
     }
 
+    fn validate_trade_size(&self, symbol: &str, quantity: f64, price: f64) -> bool {
+        let notional = quantity * price;
+        let max_position = self.config.risk_management.max_position_size;
+        let current_position = self.trade_manager.get_position(symbol)
+            .map(|p| p.quantity * p.entry_price)
+            .unwrap_or(0.0);
+        
+        // Check if trade would exceed maximum position size
+        if notional > max_position || (current_position + notional) > max_position {
+            self.logger.log_order_error(
+                symbol,
+                "position_size_limit",
+                "exceeded",
+                &format!("Trade size {} exceeds max position {}", notional, max_position)
+            );
+            return false;
+        }
+        
+        // Check minimum notional
+        if notional < self.config.exchange.min_notional {
+            self.logger.log_order_error(
+                symbol,
+                "min_notional",
+                "below_minimum",
+                &format!("Trade size {} below minimum {}", notional, self.config.exchange.min_notional)
+            );
+            return false;
+        }
+        
+        true
+    }
+
     fn estimate_volatility(&self, _current_price: f64) -> f64 {
         // Simple volatility estimation based on recent price movements
         // In a real implementation, this would track price history
@@ -187,6 +219,12 @@ impl Trader for BinanceTrader {
     #[allow(clippy::too_many_lines)]
     async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64) {
         let symbol = self.trade_manager.get_current_trade_symbol();
+        
+        // Validate trade size before proceeding
+        if !self.validate_trade_size(&symbol, quantity, price) {
+            return;
+        }
+        
         let quantity = Decimal::from_f64(quantity).expect("Failed to convert quantity to Decimal");
 
         let Some(connection) = &self.connection else {
@@ -271,28 +309,58 @@ impl Trader for BinanceTrader {
                     && current_position.quantity > 0.0
                 {
                     let symbol = current_position.symbol.clone();
-                    let _pnl = self.trade_manager.close_position(&symbol, price, 0.0);
+                    let quantity_to_sell = Decimal::from_f64(current_position.quantity).expect("Invalid quantity");
+                    
                     let params = OrderPlaceParams::builder(
                         symbol.clone(),
                         OrderPlaceSideEnum::Sell,
                         OrderPlaceTypeEnum::Market,
                     )
-                    .quantity(quantity)
+                    .quantity(quantity_to_sell)
                     .build()
                     .expect("Failed to build order parameters");
 
-                    if let Err(e) = connection.order_place(params).await {
+                    let Ok(response) = connection.order_place(params).await else {
                         self.logger.log_order_error(
                             &symbol,
                             "place_sell_order",
                             "failed",
-                            &format!("Failed to place sell order: {}", e)
+                            "Failed to place sell order"
                         );
                         return;
-                    }
+                    };
+                    
+                    let Ok(data) = response.data() else {
+                        self.logger.log_order_error(
+                            &symbol,
+                            "sell_order_data",
+                            "failed",
+                            "Failed to get order data"
+                        );
+                        return;
+                    };
 
-                    // Sell order executed - position reset and PnL recorded
-                    // Position is already closed by close_position call above
+                    let Some(fills) = data.fills.as_ref() else {
+                        self.logger.log_order_error(
+                            &symbol,
+                            "sell_order_fills",
+                            "missing",
+                            "No fills found in order response"
+                        );
+                        return;
+                    };
+
+                    let exit_price = fills
+                        .first()
+                        .expect("No fills found in sell order response")
+                        .price
+                        .as_ref()
+                        .expect("Price not found in fill")
+                        .parse()
+                        .expect("Failed to parse exit price");
+
+                    // Close position with actual execution price
+                    let _pnl = self.trade_manager.close_position(&symbol, exit_price, 0.0);
                 }
             }
             Signal::Hold => {

@@ -28,13 +28,13 @@ volume_threshold = 1.0
 volume_confirmation = false
 
 [signals]
-# Minimum confidence for trade (ultra-low for testing)
-min_confidence = 0.1
-# Maximum time to hold position in seconds (very short for HFT)
-max_position_time = 20.0
-# Profit target percentage (ultra-low for stable markets)
-profit_target = 0.05
-# Stop loss percentage (ultra-tight for HFT)
-stop_loss = 0.02
-# Maximum trades per hour
-max_trades_per_hour = 100
+# Minimum confidence for trade (increased for better signal quality)
+min_confidence = 0.6
+# Maximum time to hold position in seconds (increased for better profit potential)
+max_position_time = 300.0
+# Profit target percentage (increased for better risk/reward)
+profit_target = 0.5
+# Stop loss percentage (increased for better risk management)
+stop_loss = 0.3
+# Maximum trades per hour (reduced to prevent overtrading)
+max_trades_per_hour = 10

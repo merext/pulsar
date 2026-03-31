@@ -282,14 +282,14 @@ impl AdvancedOrderStrategy {
 
     fn generate_advanced_signal(&self, current_price: f64, current_volume: f64) -> Option<(Signal, f64)> {
         // Try VWAP signal first (most profitable)
-        // if let Some(signal) = self.generate_vwap_signal(current_price, current_volume) {
-        //     return Some(signal);
-        // }
+        if let Some(signal) = self.generate_vwap_signal(current_price, current_volume) {
+            return Some(signal);
+        }
 
         // Try IOC/FOK signal (good for momentum)
-        // if let Some(signal) = self.generate_ioc_fok_signal(current_price, current_volume) {
-        //     return Some(signal);
-        // }
+        if let Some(signal) = self.generate_ioc_fok_signal(current_price, current_volume) {
+            return Some(signal);
+        }
 
         // Try TWAP signal last (most conservative)
         if let Some(signal) = self.generate_twap_signal(current_price, current_volume) {

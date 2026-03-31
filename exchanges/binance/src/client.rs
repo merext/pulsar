@@ -191,9 +191,10 @@ impl BinanceClient {
                 }
             };
 
-            if is_buyer_market_maker {
-                continue; // Ignore trades from market makers
-            }
+            // Optional: Filter out market maker trades (commented out for testing)
+            // if is_buyer_market_maker {
+            //     continue; // Ignore trades from market makers
+            // }
 
             trades.push(PulsarTrade {
                 trade_id,
