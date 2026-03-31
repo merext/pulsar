@@ -94,6 +94,20 @@ Completed:
   - new CLI command `capture-batch --batch-id ... --parts ... --duration-secs ...`
   - batch capture reuses the normal capture path and writes sequentially named JSONL + sidecar files
   - verified on a two-part DOGEUSDT smoke batch
+- Completed Phase 2 latency and impact accounting cleanup:
+  - backtest execution now tracks synthetic spread, slippage, latency impact, and market impact as separate components
+  - latency impact is now separated from market impact instead of double-counting shared impact terms
+  - execution reports now expose per-component bps fields so later attribution work has a cleaner base
+  - verified with focused backtest tests and downstream bot tests
+- Completed the remaining Phase 2 horizontal items:
+  - trade-only taker execution realism now uses separate slippage, latency, and market-impact components with explicit attribution fields
+  - shared backtest/emulation flow now applies inventory and drawdown guardrails before allowing further entries
+  - performance metrics now track fill ratio, rejection rate, average latency, and average execution attribution components
+  - replay observability now reports event-mix diagnostics, including trade/quote/depth counts and stale/missing quote relationships
+- Added Phase 3 parameter search scaffolding:
+  - new CLI command `search --strategy ... --parameter ... --values ... --uris ...`
+  - search reuses the existing backtest flow and injects one parameter override at a time via temporary strategy config materialization
+  - smoke-tested on `trade-flow-momentum` with `min_price_drift_bps` over a daily DOGEUSDT trade dataset
 
 ## Last Verified Commands
 
@@ -124,6 +138,10 @@ Completed:
 - `cargo run -p binance-bot -- capture-index --root data/binance/capture --symbol DOGEUSDT --min-book-ticker-events 1 --require-captured-at`
 - `cargo run -p binance-bot -- capture-compare --root data/binance/capture --symbol DOGEUSDT --min-book-ticker-events 1 --require-captured-at --limit 5 --strategies trade-flow-momentum,liquidity-sweep-reversal`
 - `cargo run -p binance-bot -- capture-batch --batch-id smoke_batch --parts 2 --duration-secs 3 --depth-levels 5`
+- `cargo test -p trade --test backtest_tests`
+- `cargo test -p trade`
+- `cargo test -p binance-bot`
+- `cargo run -p binance-bot -- search --strategy trade-flow-momentum --parameter min_price_drift_bps --values 6.0,9.0 --uris data/binance/daily/trades/DOGEUSDT/DOGEUSDT-trades-2025-06-28.zip`
 
 ## Important Constraints
 
@@ -143,7 +161,7 @@ Completed:
 3. Keep `TradeFlowMomentumStrategy` refinements at the major-filter level, not deep sub-variant exploration.
 4. Extend the new compare workflow only if a major architecture need appears; keep secondary reporting wishes in backlog.
 5. Keep both models alive until deep tuning plus live emulation justify rejection.
-6. Next major architecture step after this is using batch capture plus filters to build materially longer quote-aware validation sets before any maker-research transition.
+6. Next major architecture step after this is choosing the next horizontal roadmap target instead of deepening the new search scaffolding.
 
 ## Architectural Guidance
 

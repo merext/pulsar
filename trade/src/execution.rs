@@ -49,6 +49,10 @@ pub struct ExecutionReport {
     pub execution_price: Option<f64>,
     pub fee_paid: f64,
     pub latency_seconds: f64,
+    pub synthetic_half_spread_bps: f64,
+    pub slippage_bps: f64,
+    pub latency_impact_bps: f64,
+    pub market_impact_bps: f64,
     pub reason: Option<&'static str>,
     pub expected_edge_bps: f64,
 }
@@ -64,6 +68,10 @@ impl ExecutionReport {
             execution_price: None,
             fee_paid: 0.0,
             latency_seconds: 0.0,
+            synthetic_half_spread_bps: 0.0,
+            slippage_bps: 0.0,
+            latency_impact_bps: 0.0,
+            market_impact_bps: 0.0,
             reason: None,
             expected_edge_bps: 0.0,
         }

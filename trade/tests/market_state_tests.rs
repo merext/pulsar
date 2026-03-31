@@ -135,3 +135,38 @@ fn market_state_computes_recent_trade_stats_and_vwap() {
     assert!(recent_vwap > 0.1002);
     assert!(recent_vwap < 0.1004);
 }
+
+#[test]
+fn market_state_tracks_event_mix_diagnostics() {
+    let mut state = MarketState::new("DOGEUSDT", 1_000);
+
+    state.apply(&MarketEvent::Trade(Trade {
+        price: 0.1000,
+        quantity: 1.0,
+        trade_time: 1_000,
+        ..Default::default()
+    }));
+    state.apply(&MarketEvent::BookTicker(BookTicker {
+        bid: BookLevel {
+            price: 0.0999,
+            quantity: 10.0,
+        },
+        ask: BookLevel {
+            price: 0.1001,
+            quantity: 12.0,
+        },
+        event_time: 1_100,
+    }));
+    state.apply(&MarketEvent::Trade(Trade {
+        price: 0.1002,
+        quantity: 2.0,
+        trade_time: 1_050,
+        ..Default::default()
+    }));
+
+    let diagnostics = state.event_mix_diagnostics();
+    assert_eq!(diagnostics.trade_events, 2);
+    assert_eq!(diagnostics.book_ticker_events, 1);
+    assert_eq!(diagnostics.trade_without_quote_events, 1);
+    assert_eq!(diagnostics.stale_quote_events, 1);
+}

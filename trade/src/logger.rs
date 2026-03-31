@@ -89,6 +89,11 @@ impl TradeLogger {
             execution_price = report.execution_price,
             fee_paid = report.fee_paid,
             latency_seconds = report.latency_seconds,
+            synthetic_half_spread_bps = report.synthetic_half_spread_bps,
+            slippage_bps = report.slippage_bps,
+            latency_impact_bps = report.latency_impact_bps,
+            market_impact_bps = report.market_impact_bps,
+            expected_edge_bps = report.expected_edge_bps,
             reason = report.reason,
             pnl,
             realized_pnl
@@ -123,6 +128,29 @@ impl TradeLogger {
             spread_bps,
             trade_flow_imbalance,
             order_book_imbalance
+        );
+    }
+
+    pub fn log_replay_event_mix(
+        &self,
+        symbol: &str,
+        trade_events: usize,
+        book_ticker_events: usize,
+        depth_events: usize,
+        trade_without_quote_events: usize,
+        stale_quote_events: usize,
+        stale_depth_events: usize,
+    ) {
+        info!(
+            exchange = %self.exchange_name,
+            symbol = %symbol,
+            trade_events,
+            book_ticker_events,
+            depth_events,
+            trade_without_quote_events,
+            stale_quote_events,
+            stale_depth_events,
+            action = "replay_event_mix"
         );
     }
 
@@ -168,6 +196,14 @@ impl TradeLogger {
         profit_factor: f64,
         avg_pnl_per_trade: f64,
         max_drawdown: f64,
+        fill_ratio: f64,
+        rejection_rate: f64,
+        avg_latency_seconds: f64,
+        avg_synthetic_half_spread_bps: f64,
+        avg_slippage_bps: f64,
+        avg_latency_impact_bps: f64,
+        avg_market_impact_bps: f64,
+        avg_expected_edge_bps: f64,
     ) {
         info!(
             exchange = %self.exchange_name,
@@ -183,6 +219,14 @@ impl TradeLogger {
             profit_factor,
             avg_pnl_per_trade,
             max_drawdown,
+            fill_ratio,
+            rejection_rate,
+            avg_latency_seconds,
+            avg_synthetic_half_spread_bps,
+            avg_slippage_bps,
+            avg_latency_impact_bps,
+            avg_market_impact_bps,
+            avg_expected_edge_bps,
             action = "session_summary"
         );
     }

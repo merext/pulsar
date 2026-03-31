@@ -36,6 +36,10 @@ pub struct SimulatedExecution {
     pub fee_paid: f64,
     pub notional_value: f64,
     pub latency_seconds: f64,
+    pub synthetic_half_spread_rate: f64,
+    pub slippage_rate: f64,
+    pub latency_impact_rate: f64,
+    pub market_impact_rate: f64,
     pub rejected_reason: Option<&'static str>,
     pub partially_filled: bool,
 }
@@ -51,6 +55,13 @@ impl SimulatedExecution {
 
     pub fn is_rejected(&self) -> bool {
         self.executed_quantity <= 0.0 || self.rejected_reason.is_some()
+    }
+
+    pub fn total_price_offset_rate(&self) -> f64 {
+        self.synthetic_half_spread_rate
+            + self.slippage_rate
+            + self.latency_impact_rate
+            + self.market_impact_rate
     }
 }
 
@@ -98,6 +109,10 @@ impl BacktestEngine {
                 fee_paid: 0.0,
                 notional_value: 0.0,
                 latency_seconds: 0.0,
+                synthetic_half_spread_rate: 0.0,
+                slippage_rate: 0.0,
+                latency_impact_rate: 0.0,
+                market_impact_rate: 0.0,
                 rejected_reason: None,
                 partially_filled: false,
             };
@@ -111,6 +126,10 @@ impl BacktestEngine {
                 fee_paid: 0.0,
                 notional_value: 0.0,
                 latency_seconds: 0.0,
+                synthetic_half_spread_rate: 0.0,
+                slippage_rate: 0.0,
+                latency_impact_rate: 0.0,
+                market_impact_rate: 0.0,
                 rejected_reason: Some("quantity_below_step"),
                 partially_filled: false,
             };
@@ -124,11 +143,16 @@ impl BacktestEngine {
         };
         let slippage = self.estimate_slippage(signal, requested_quantity);
         let latency_impact = self.estimate_latency_impact(latency_seconds);
+        let market_impact = self.estimate_market_impact(requested_quantity);
         let half_spread = spread / 2.0;
         let reference_price = market_price.execution_reference_price(signal);
         let execution_price = match signal {
-            Signal::Buy => reference_price * (1.0 + half_spread + slippage + latency_impact),
-            Signal::Sell => reference_price * (1.0 - half_spread - slippage - latency_impact),
+            Signal::Buy => {
+                reference_price * (1.0 + half_spread + slippage + latency_impact + market_impact)
+            }
+            Signal::Sell => {
+                reference_price * (1.0 - half_spread - slippage - latency_impact - market_impact)
+            }
             Signal::Hold => reference_price,
         };
 
@@ -160,6 +184,10 @@ impl BacktestEngine {
                 fee_paid: 0.0,
                 notional_value: 0.0,
                 latency_seconds,
+                synthetic_half_spread_rate: half_spread,
+                slippage_rate: slippage,
+                latency_impact_rate: latency_impact,
+                market_impact_rate: market_impact,
                 rejected_reason: Some("insufficient_balance"),
                 partially_filled: false,
             };
@@ -172,6 +200,10 @@ impl BacktestEngine {
                 fee_paid: 0.0,
                 notional_value: 0.0,
                 latency_seconds,
+                synthetic_half_spread_rate: half_spread,
+                slippage_rate: slippage,
+                latency_impact_rate: latency_impact,
+                market_impact_rate: market_impact,
                 rejected_reason: Some("min_notional"),
                 partially_filled: false,
             };
@@ -185,6 +217,10 @@ impl BacktestEngine {
             fee_paid,
             notional_value,
             latency_seconds,
+            synthetic_half_spread_rate: half_spread,
+            slippage_rate: slippage,
+            latency_impact_rate: latency_impact,
+            market_impact_rate: market_impact,
             rejected_reason: None,
             partially_filled,
         }
@@ -198,7 +234,11 @@ impl BacktestEngine {
         let min = self.config.slippage.min_slippage;
         let max = self.config.slippage.max_slippage;
         let size_factor = (quantity / self.config.exchange.max_order_size).clamp(0.0, 1.0);
-        let volatility_component = self.config.slippage.market_order_volatility;
+        let volatility_component = self
+            .config
+            .slippage
+            .market_order_volatility
+            .max(self.config.slippage.taker_order_volatility);
         let raw = min
             + volatility_component * self.config.slippage.volatility_multiplier
             + size_factor * self.config.slippage.size_multiplier * min;
@@ -257,13 +297,35 @@ impl BacktestEngine {
         self.config
             .backtest_settings
             .as_ref()
-            .map_or(0.0, |settings| {
+            .map_or(0.0, |_settings| {
                 if latency_seconds <= 0.0 {
                     0.0
                 } else {
-                    (settings.market_impact_factor + self.config.slippage.market_order_volatility)
+                    self.config
+                        .slippage
+                        .market_order_volatility
+                        .max(self.config.slippage.taker_order_volatility)
                         * latency_seconds
                 }
+            })
+    }
+
+    fn estimate_market_impact(&self, quantity: f64) -> f64 {
+        self.config
+            .backtest_settings
+            .as_ref()
+            .map_or(0.0, |settings| {
+                if !settings.simulate_market_impact {
+                    return 0.0;
+                }
+
+                let size_factor = (quantity / self.config.exchange.max_order_size).clamp(0.0, 1.0);
+                if size_factor <= 0.0 {
+                    return 0.0;
+                }
+
+                let decay_dampener = 1.0 / (1.0 + settings.impact_decay_rate.max(0.0));
+                settings.market_impact_factor * size_factor * decay_dampener
             })
     }
 

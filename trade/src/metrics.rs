@@ -1,3 +1,4 @@
+use crate::execution::{ExecutionReport, ExecutionStatus};
 use crate::models::{Position, SimulationAccount};
 use crate::signal::Signal;
 use std::collections::HashMap;
@@ -213,6 +214,10 @@ impl TradeManager {
         &self.metrics
     }
 
+    pub fn record_execution_report(&mut self, report: &ExecutionReport) {
+        self.metrics.record_execution_report(report);
+    }
+
     pub fn get_positions(&self) -> &HashMap<String, Position> {
         &self.positions
     }
@@ -250,6 +255,11 @@ impl TradeManager {
         self.account.max_drawdown
     }
 
+    pub fn current_drawdown(&self, symbol: &str, mark_price: f64) -> f64 {
+        self.account
+            .current_drawdown(mark_price, self.positions.get(symbol))
+    }
+
     pub fn mark_to_market(&mut self, symbol: &str, mark_price: f64) -> f64 {
         let equity = self
             .account
@@ -273,6 +283,19 @@ pub struct PerformanceMetrics {
     total_trades: usize,
     entry_trades: usize,
     closed_trades: usize,
+    filled_orders: usize,
+    partially_filled_orders: usize,
+    rejected_orders: usize,
+    cancelled_orders: usize,
+    ignored_decisions: usize,
+    total_requested_quantity: f64,
+    total_executed_quantity: f64,
+    total_latency_seconds: f64,
+    total_synthetic_half_spread_bps: f64,
+    total_slippage_bps: f64,
+    total_latency_impact_bps: f64,
+    total_market_impact_bps: f64,
+    total_expected_edge_bps: f64,
     fees_paid: f64,
     current_cash: f64,
     last_equity: f64,
@@ -290,6 +313,19 @@ impl PerformanceMetrics {
             total_trades: 0,
             entry_trades: 0,
             closed_trades: 0,
+            filled_orders: 0,
+            partially_filled_orders: 0,
+            rejected_orders: 0,
+            cancelled_orders: 0,
+            ignored_decisions: 0,
+            total_requested_quantity: 0.0,
+            total_executed_quantity: 0.0,
+            total_latency_seconds: 0.0,
+            total_synthetic_half_spread_bps: 0.0,
+            total_slippage_bps: 0.0,
+            total_latency_impact_bps: 0.0,
+            total_market_impact_bps: 0.0,
+            total_expected_edge_bps: 0.0,
             fees_paid: 0.0,
             current_cash: 0.0,
             last_equity: 0.0,
@@ -315,6 +351,31 @@ impl PerformanceMetrics {
         }
         self.total_trades += 1;
         self.trades.push(trade);
+    }
+
+    pub fn record_execution_report(&mut self, report: &ExecutionReport) {
+        match report.status {
+            ExecutionStatus::Filled => self.filled_orders += 1,
+            ExecutionStatus::PartiallyFilled => self.partially_filled_orders += 1,
+            ExecutionStatus::Rejected => self.rejected_orders += 1,
+            ExecutionStatus::Cancelled => self.cancelled_orders += 1,
+            ExecutionStatus::Ignored => self.ignored_decisions += 1,
+        }
+
+        self.total_requested_quantity += report.requested_quantity;
+        self.total_executed_quantity += report.executed_quantity;
+
+        if matches!(
+            report.status,
+            ExecutionStatus::Filled | ExecutionStatus::PartiallyFilled
+        ) {
+            self.total_latency_seconds += report.latency_seconds;
+            self.total_synthetic_half_spread_bps += report.synthetic_half_spread_bps;
+            self.total_slippage_bps += report.slippage_bps;
+            self.total_latency_impact_bps += report.latency_impact_bps;
+            self.total_market_impact_bps += report.market_impact_bps;
+            self.total_expected_edge_bps += report.expected_edge_bps;
+        }
     }
 
     pub fn realized_pnl(&self) -> f64 {
@@ -412,6 +473,105 @@ impl PerformanceMetrics {
 
     pub fn max_drawdown(&self) -> f64 {
         self.max_drawdown
+    }
+
+    pub fn filled_orders(&self) -> usize {
+        self.filled_orders
+    }
+
+    pub fn partially_filled_orders(&self) -> usize {
+        self.partially_filled_orders
+    }
+
+    pub fn rejected_orders(&self) -> usize {
+        self.rejected_orders
+    }
+
+    pub fn cancelled_orders(&self) -> usize {
+        self.cancelled_orders
+    }
+
+    pub fn ignored_decisions(&self) -> usize {
+        self.ignored_decisions
+    }
+
+    pub fn fill_ratio(&self) -> f64 {
+        if self.total_requested_quantity <= f64::EPSILON {
+            0.0
+        } else {
+            (self.total_executed_quantity / self.total_requested_quantity).clamp(0.0, 1.0)
+        }
+    }
+
+    pub fn rejection_rate(&self) -> f64 {
+        let total_reports = self.filled_orders
+            + self.partially_filled_orders
+            + self.rejected_orders
+            + self.cancelled_orders
+            + self.ignored_decisions;
+        if total_reports == 0 {
+            0.0
+        } else {
+            self.rejected_orders as f64 / total_reports as f64
+        }
+    }
+
+    fn executed_report_count(&self) -> usize {
+        self.filled_orders + self.partially_filled_orders
+    }
+
+    pub fn avg_latency_seconds(&self) -> f64 {
+        let count = self.executed_report_count();
+        if count == 0 {
+            0.0
+        } else {
+            self.total_latency_seconds / count as f64
+        }
+    }
+
+    pub fn avg_synthetic_half_spread_bps(&self) -> f64 {
+        let count = self.executed_report_count();
+        if count == 0 {
+            0.0
+        } else {
+            self.total_synthetic_half_spread_bps / count as f64
+        }
+    }
+
+    pub fn avg_slippage_bps(&self) -> f64 {
+        let count = self.executed_report_count();
+        if count == 0 {
+            0.0
+        } else {
+            self.total_slippage_bps / count as f64
+        }
+    }
+
+    pub fn avg_latency_impact_bps(&self) -> f64 {
+        let count = self.executed_report_count();
+        if count == 0 {
+            0.0
+        } else {
+            self.total_latency_impact_bps / count as f64
+        }
+    }
+
+    pub fn avg_market_impact_bps(&self) -> f64 {
+        let count = self.executed_report_count();
+        if count == 0 {
+            0.0
+        } else {
+            self.total_market_impact_bps / count as f64
+        }
+    }
+
+    pub fn avg_expected_edge_bps(&self) -> f64 {
+        let count = self.executed_report_count();
+        if count == 0 {
+            0.0
+        } else {
+            self.total_expected_edge_bps / count as f64
+        }
     }
 }
 

@@ -87,3 +87,50 @@ fn quote_aware_sell_uses_bid_without_extra_synthetic_spread() {
     assert!(quoted.execution_price <= 99.9);
     assert!(quoted.execution_price > trade_only.execution_price);
 }
+
+#[test]
+fn quote_aware_execution_has_zero_synthetic_spread_bps() {
+    let config = load_test_config();
+    let engine = BacktestEngine::new(config);
+
+    let quoted = engine.execute_with_constraints_at(
+        Signal::Buy,
+        MarketPrice::Quote {
+            bid: 100.0,
+            ask: 100.1,
+        },
+        1.0,
+        f64::INFINITY,
+    );
+
+    assert_eq!(quoted.synthetic_half_spread_rate, 0.0);
+    assert!(quoted.slippage_rate > 0.0);
+}
+
+#[test]
+fn trade_only_execution_applies_separate_latency_and_market_impact_components() {
+    let config = load_test_config();
+    let engine = BacktestEngine::new(config);
+
+    let execution = engine.execute_with_constraints(Signal::Buy, 100.0, 10.0, f64::INFINITY);
+
+    assert!(execution.latency_seconds > 0.0);
+    assert!(execution.latency_impact_rate > 0.0);
+    assert!(execution.market_impact_rate > 0.0);
+    assert!(
+        execution.total_price_offset_rate()
+            >= execution.latency_impact_rate + execution.market_impact_rate
+    );
+}
+
+#[test]
+fn market_impact_grows_with_order_size() {
+    let config = load_test_config();
+    let engine = BacktestEngine::new(config);
+
+    let small = engine.execute_with_constraints(Signal::Buy, 100.0, 1.0, f64::INFINITY);
+    let large = engine.execute_with_constraints(Signal::Buy, 100.0, 200.0, f64::INFINITY);
+
+    assert!(large.market_impact_rate >= small.market_impact_rate);
+    assert!(large.execution_price >= small.execution_price);
+}

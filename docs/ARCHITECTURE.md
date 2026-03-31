@@ -43,14 +43,17 @@ The project is evolving into a layered HFT research platform.
 5. Execution / Simulation Layer
    - validates intents
    - simulates fills, latency, queue effects, and fees
+   - now separates synthetic spread, slippage, latency impact, and market impact for cleaner execution attribution
+   - now enforces inventory and drawdown guardrails in shared backtest/emulation orchestration
    - returns `ExecutionReport`
 
 6. Evaluation Layer
-   - PnL attribution
-   - drawdown / exposure / fill quality
-   - regime analysis
-   - multi-day comparison
-   - orchestration-level batch comparison across multiple strategies and identical datasets
+    - PnL attribution
+    - drawdown / exposure / fill quality
+    - regime analysis
+    - multi-day comparison
+    - orchestration-level batch comparison across multiple strategies and identical datasets
+    - replay observability now includes event-mix diagnostics for trade/quote/depth coverage quality
 
 ## Current Repository Roles
 
@@ -60,6 +63,7 @@ The project is evolving into a layered HFT research platform.
   - websocket clients, archive parsing, captured JSONL replay parsing, real exchange adapter, live capture integration
 - `bots/binance/`
   - orchestration CLI for replay, emulate, live validation, dataset capture
+  - now also provides minimal parameter-search scaffolding over the shared backtest flow
   - now also owns cross-strategy batch comparison for identical replay inputs and replay source selection
 - `strategies/`
   - future strategy implementations only; currently reset for redesign

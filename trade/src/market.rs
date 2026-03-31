@@ -46,6 +46,16 @@ pub struct TradeWindowStats {
     pub last_price: f64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EventMixDiagnostics {
+    pub trade_events: usize,
+    pub book_ticker_events: usize,
+    pub depth_events: usize,
+    pub stale_quote_events: usize,
+    pub stale_depth_events: usize,
+    pub trade_without_quote_events: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct MarketState {
     symbol: String,
@@ -54,6 +64,7 @@ pub struct MarketState {
     depth: Option<DepthSnapshot>,
     trades: VecDeque<Trade>,
     trade_window_millis: u64,
+    event_mix: EventMixDiagnostics,
 }
 
 impl MarketState {
@@ -65,20 +76,40 @@ impl MarketState {
             depth: None,
             trades: VecDeque::new(),
             trade_window_millis,
+            event_mix: EventMixDiagnostics::default(),
         }
     }
 
     pub fn apply(&mut self, event: &MarketEvent) {
         match event {
             MarketEvent::Trade(trade) => {
+                self.event_mix.trade_events += 1;
+                if self.top_of_book.is_none() {
+                    self.event_mix.trade_without_quote_events += 1;
+                } else if self
+                    .top_of_book
+                    .as_ref()
+                    .is_some_and(|book| trade.trade_time < book.event_time)
+                {
+                    self.event_mix.stale_quote_events += 1;
+                }
+                if self
+                    .depth
+                    .as_ref()
+                    .is_some_and(|depth| trade.trade_time < depth.event_time)
+                {
+                    self.event_mix.stale_depth_events += 1;
+                }
                 self.last_trade = Some(trade.clone());
                 self.trades.push_back(trade.clone());
                 self.trim_trade_window(trade.trade_time);
             }
             MarketEvent::BookTicker(book_ticker) => {
+                self.event_mix.book_ticker_events += 1;
                 self.top_of_book = Some(*book_ticker);
             }
             MarketEvent::Depth(depth) => {
+                self.event_mix.depth_events += 1;
                 self.depth = Some(depth.clone());
             }
         }
@@ -157,6 +188,10 @@ impl MarketState {
 
     pub fn trade_window_stats(&self) -> TradeWindowStats {
         Self::build_trade_window_stats(self.trades.iter())
+    }
+
+    pub fn event_mix_diagnostics(&self) -> &EventMixDiagnostics {
+        &self.event_mix
     }
 
     pub fn recent_trade_window_stats(&self, trade_count: usize) -> TradeWindowStats {

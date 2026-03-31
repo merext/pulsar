@@ -14,7 +14,7 @@ pub use backtest::{BacktestEngine, MarketPrice, SimulatedExecution};
 pub use config::TradeConfig;
 pub use execution::{ExecutionReport, ExecutionStatus, OrderIntent, Side, TimeInForce};
 pub use logger::{StrategyLoggerAdapter, TradeLogger};
-pub use market::{BookLevel, BookTicker, DepthLevel, DepthSnapshot, MarketEvent, MarketState, TradeWindowStats};
+pub use market::{BookLevel, BookTicker, DepthLevel, DepthSnapshot, EventMixDiagnostics, MarketEvent, MarketState, TradeWindowStats};
 pub use metrics::{PerformanceMetrics, TradeManager, TradeRecord};
 pub use models::{Position, SimulationAccount, Trade};
 pub use signal::Signal;

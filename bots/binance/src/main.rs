@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
 use std::pin::Pin;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use toml::Value;
 use tracing::info;
@@ -116,6 +116,33 @@ struct ReplayDatasetSummary {
     symbols: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ParameterSearchResult {
+    strategy: String,
+    uri: String,
+    parameter: String,
+    value: f64,
+    total_ticks: usize,
+    entries: usize,
+    closed_trades: usize,
+    realized_pnl: f64,
+    fees_paid: f64,
+    ending_cash: f64,
+    ending_equity: f64,
+    win_rate: f64,
+    profit_factor: f64,
+    avg_pnl_per_trade: f64,
+    max_drawdown: f64,
+}
+
+#[derive(Debug, Clone)]
+struct ParameterSearchSpec {
+    strategy: String,
+    parameter: String,
+    values: Vec<f64>,
+    uris: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HistoricalMarketDataFormat {
     TradeCsv,
@@ -174,7 +201,9 @@ enum CaptureRecord {
 }
 
 #[allow(clippy::too_many_lines)]
-fn load_config<P: AsRef<std::path::Path>>(config_path: P) -> Result<Value, Box<dyn Error>> {
+fn load_config<P: AsRef<std::path::Path>>(
+    config_path: P,
+) -> Result<Value, Box<dyn Error + Send + Sync>> {
     let content = fs::read_to_string(config_path)?;
     let config = content.parse::<Value>()?;
     Ok(config)
@@ -233,13 +262,13 @@ fn build_strategy(
     match strategy_name {
         "trade-flow-momentum" => Ok(Box::new(
             strategies::trade_flow_momentum::TradeFlowMomentumStrategy::from_file(
-                "config/strategies/trade_flow_momentum.toml",
+                resolve_workspace_path("config/strategies/trade_flow_momentum.toml"),
             )
             .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
         )),
         "liquidity-sweep-reversal" => Ok(Box::new(
             strategies::liquidity_sweep_reversal::LiquiditySweepReversalStrategy::from_file(
-                "config/strategies/liquidity_sweep_reversal.toml",
+                resolve_workspace_path("config/strategies/liquidity_sweep_reversal.toml"),
             )
             .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
         )),
@@ -249,6 +278,95 @@ fn build_strategy(
         )
         .into()),
     }
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+}
+
+fn resolve_workspace_path(relative_path: &str) -> PathBuf {
+    workspace_root().join(relative_path)
+}
+
+fn strategy_config_path(strategy_name: &str) -> Result<&'static str, Box<dyn Error + Send + Sync>> {
+    match strategy_name {
+        "trade-flow-momentum" => Ok("config/strategies/trade_flow_momentum.toml"),
+        "liquidity-sweep-reversal" => Ok("config/strategies/liquidity_sweep_reversal.toml"),
+        _ => Err(format!("Unknown strategy '{}'.", strategy_name).into()),
+    }
+}
+
+fn set_config_value(config: &mut Value, key: &str, value: f64) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let keys: Vec<&str> = key.split('.').collect();
+    let Some((last, parents)) = keys.split_last() else {
+        return Err("parameter key cannot be empty".into());
+    };
+
+    let mut current = config;
+    for parent in parents {
+        current = current
+            .get_mut(parent)
+            .ok_or_else(|| format!("Missing config section '{}'.", parent))?;
+    }
+
+    let target = current
+        .get_mut(last)
+        .ok_or_else(|| format!("Missing config key '{}'.", key))?;
+    *target = Value::Float(value);
+    Ok(())
+}
+
+fn parse_parameter_values(raw: &str) -> Result<Vec<f64>, Box<dyn Error + Send + Sync>> {
+    let mut values = Vec::new();
+    for item in raw.split(',') {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        values.push(trimmed.parse::<f64>()?);
+    }
+
+    if values.is_empty() {
+        return Err("parameter values cannot be empty".into());
+    }
+
+    Ok(values)
+}
+
+fn build_strategy_from_search_spec(
+    strategy_name: &str,
+    parameter: &str,
+    value: f64,
+) -> Result<Box<dyn Strategy>, Box<dyn Error + Send + Sync>> {
+    let config_path = strategy_config_path(strategy_name)?;
+    let mut config = load_config(resolve_workspace_path(config_path))?;
+    set_config_value(&mut config, parameter, value)?;
+
+    let temp_dir = std::env::temp_dir();
+    let temp_path = temp_dir.join(format!(
+        "pulsar_search_{}_{}_{}.toml",
+        strategy_name.replace('-', "_"),
+        parameter.replace('.', "_"),
+        value.to_string().replace('.', "_")
+    ));
+    fs::write(&temp_path, toml::to_string_pretty(&config)?)?;
+
+    let strategy = match strategy_name {
+        "trade-flow-momentum" => Box::new(
+            strategies::trade_flow_momentum::TradeFlowMomentumStrategy::from_file(&temp_path)
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        ) as Box<dyn Strategy>,
+        "liquidity-sweep-reversal" => Box::new(
+            strategies::liquidity_sweep_reversal::LiquiditySweepReversalStrategy::from_file(&temp_path)
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        ) as Box<dyn Strategy>,
+        _ => return Err(format!("Unknown strategy '{}'.", strategy_name).into()),
+    };
+
+    let _ = fs::remove_file(&temp_path);
+    Ok(strategy)
 }
 
 fn detect_historical_market_data_format(uri: &str) -> HistoricalMarketDataFormat {
@@ -531,6 +649,25 @@ async fn run_backtest(
 ) -> Result<BacktestSummary, Box<dyn Error + Send + Sync>> {
     let mut binance_trader = BinanceTrader::new().await?;
     let mut strategy = build_strategy(strategy_name)?;
+    run_backtest_with_strategy(
+        &mut binance_trader,
+        strategy.as_mut(),
+        strategy_name,
+        uri,
+        trading_symbol,
+        duration_secs,
+    )
+    .await
+}
+
+async fn run_backtest_with_strategy(
+    binance_trader: &mut BinanceTrader,
+    strategy: &mut dyn Strategy,
+    strategy_name: &str,
+    uri: &str,
+    trading_symbol: &str,
+    duration_secs: Option<u64>,
+) -> Result<BacktestSummary, Box<dyn Error + Send + Sync>> {
     let uri_path = Path::new(uri);
     let data_format = detect_historical_market_data_format(uri);
 
@@ -581,7 +718,7 @@ async fn run_backtest(
     binance_trader
         .trade(
             trading_stream,
-            strategy.as_mut(),
+            strategy,
             trading_symbol,
             TradeMode::Backtest,
             match data_format {
@@ -668,6 +805,74 @@ fn print_compare_report(results: &[BacktestSummary]) {
             result.max_drawdown,
         );
     }
+}
+
+fn print_parameter_search_report(results: &[ParameterSearchResult]) {
+    println!("strategy,uri,parameter,value,total_ticks,entries,closed_trades,realized_pnl,fees_paid,ending_cash,ending_equity,win_rate,profit_factor,avg_pnl_per_trade,max_drawdown");
+    for result in results {
+        println!(
+            "{},{},{},{:.10},{},{},{},{:.10},{:.10},{:.10},{:.10},{:.6},{:.6},{:.10},{:.10}",
+            result.strategy,
+            result.uri,
+            result.parameter,
+            result.value,
+            result.total_ticks,
+            result.entries,
+            result.closed_trades,
+            result.realized_pnl,
+            result.fees_paid,
+            result.ending_cash,
+            result.ending_equity,
+            result.win_rate,
+            result.profit_factor,
+            result.avg_pnl_per_trade,
+            result.max_drawdown,
+        );
+    }
+}
+
+async fn run_parameter_search(
+    trading_symbol: &str,
+    spec: &ParameterSearchSpec,
+    duration_secs: Option<u64>,
+) -> Result<Vec<ParameterSearchResult>, Box<dyn Error + Send + Sync>> {
+    let mut results = Vec::new();
+
+    for value in &spec.values {
+        for uri in &spec.uris {
+            let mut binance_trader = BinanceTrader::new().await?;
+            let mut strategy = build_strategy_from_search_spec(&spec.strategy, &spec.parameter, *value)?;
+            let summary = run_backtest_with_strategy(
+                &mut binance_trader,
+                strategy.as_mut(),
+                &spec.strategy,
+                uri,
+                trading_symbol,
+                duration_secs,
+            )
+            .await?;
+
+            results.push(ParameterSearchResult {
+                strategy: summary.strategy,
+                uri: summary.uri,
+                parameter: spec.parameter.clone(),
+                value: *value,
+                total_ticks: summary.total_ticks,
+                entries: summary.entries,
+                closed_trades: summary.closed_trades,
+                realized_pnl: summary.realized_pnl,
+                fees_paid: summary.fees_paid,
+                ending_cash: summary.ending_cash,
+                ending_equity: summary.ending_equity,
+                win_rate: summary.win_rate,
+                profit_factor: summary.profit_factor,
+                avg_pnl_per_trade: summary.avg_pnl_per_trade,
+                max_drawdown: summary.max_drawdown,
+            });
+        }
+    }
+
+    Ok(results)
 }
 
 async fn run_capture(
@@ -841,7 +1046,8 @@ mod tests {
     use super::{
         CapturedDatasetFilter, CapturedDatasetIndex, CapturedDatasetIndexEntry,
         HistoricalMarketDataFormat, ReplayDatasetSummary, apply_captured_dataset_filter,
-        detect_historical_market_data_format,
+        build_strategy_from_search_spec, detect_historical_market_data_format,
+        parse_parameter_values,
     };
 
     #[test]
@@ -1048,6 +1254,24 @@ mod tests {
             "data/binance/capture/DOGEUSDT/smoke_batch_part_007.jsonl"
         );
     }
+
+    #[test]
+    fn parses_parameter_values_from_cli_input() {
+        let values = parse_parameter_values("1.0, 2.5,3.75").expect("values parse");
+        assert_eq!(values, vec![1.0, 2.5, 3.75]);
+    }
+
+    #[test]
+    fn parameter_search_strategy_builds_with_overridden_value() {
+        let strategy = build_strategy_from_search_spec(
+            "trade-flow-momentum",
+            "min_price_drift_bps",
+            9.0,
+        )
+        .expect("strategy builds from overridden config");
+
+        assert!(strategy.get_info().contains("TradeFlowMomentumStrategy"));
+    }
 }
 
 #[derive(Subcommand)]
@@ -1064,6 +1288,19 @@ enum Commands {
 
         #[arg(long, value_delimiter = ',', default_value = "trade-flow-momentum,liquidity-sweep-reversal")]
         strategies: Vec<String>,
+    },
+    Search {
+        #[arg(long)]
+        strategy: String,
+
+        #[arg(long)]
+        parameter: String,
+
+        #[arg(long)]
+        values: String,
+
+        #[arg(short, long, required = true, num_args = 1..)]
+        uris: Vec<String>,
     },
     CaptureIndex {
         #[arg(short, long, default_value = "data/binance/capture")]
@@ -1198,6 +1435,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
 
             print_compare_report(&results);
+        }
+        Commands::Search {
+            strategy,
+            parameter,
+            values,
+            uris,
+        } => {
+            let spec = ParameterSearchSpec {
+                strategy,
+                parameter,
+                values: parse_parameter_values(&values)?,
+                uris,
+            };
+            let results = run_parameter_search(&trading_symbol, &spec, cli.duration_secs).await?;
+            print_parameter_search_report(&results);
         }
         Commands::CaptureIndex {
             root,

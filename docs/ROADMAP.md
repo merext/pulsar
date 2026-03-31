@@ -19,12 +19,12 @@
 
 ## Phase 2 - Emulator V2
 
-- [ ] Trade-only taker execution realism improvements
+- [x] Trade-only taker execution realism improvements
 - [x] Quote-aware execution pricing at bid/ask
-- [ ] Latency and impact accounting cleanup
-- [ ] Inventory and drawdown guardrails
-- [ ] Better evaluation metrics and attribution
-- [ ] Quote/depth replay observability and event mix diagnostics
+- [x] Latency and impact accounting cleanup
+- [x] Inventory and drawdown guardrails
+- [x] Better evaluation metrics and attribution
+- [x] Quote/depth replay observability and event mix diagnostics
 
 ## Phase 3 - First Research Models
 
@@ -34,7 +34,7 @@
 - [x] Liquidity sweep / exhaustion taker baseline
 - [x] Liquidity sweep / exhaustion taker first major refinement pass
 - [x] Multi-day comparison harness as shared orchestration workflow
-- [ ] Parameter search scaffolding
+- [x] Parameter search scaffolding
 
 ## Backlog - Secondary Improvements
 

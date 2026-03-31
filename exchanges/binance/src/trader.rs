@@ -189,6 +189,10 @@ impl BinanceTrader {
             execution_price: Some(execution.execution_price),
             fee_paid: execution.fee_paid,
             latency_seconds: execution.latency_seconds,
+            synthetic_half_spread_bps: execution.synthetic_half_spread_rate * 10_000.0,
+            slippage_bps: execution.slippage_rate * 10_000.0,
+            latency_impact_bps: execution.latency_impact_rate * 10_000.0,
+            market_impact_bps: execution.market_impact_rate * 10_000.0,
             reason: execution.rejected_reason,
             expected_edge_bps,
         }
@@ -213,6 +217,10 @@ impl BinanceTrader {
             execution_price: Some(execution.execution_price),
             fee_paid: execution.fee_paid,
             latency_seconds: execution.latency_seconds,
+            synthetic_half_spread_bps: execution.synthetic_half_spread_rate * 10_000.0,
+            slippage_bps: execution.slippage_rate * 10_000.0,
+            latency_impact_bps: execution.latency_impact_rate * 10_000.0,
+            market_impact_bps: execution.market_impact_rate * 10_000.0,
             reason: execution.rejected_reason,
             expected_edge_bps,
         }
@@ -289,6 +297,10 @@ impl Trader for BinanceTrader {
                 execution_price: None,
                 fee_paid: 0.0,
                 latency_seconds: 0.0,
+                synthetic_half_spread_bps: 0.0,
+                slippage_bps: 0.0,
+                latency_impact_bps: 0.0,
+                market_impact_bps: 0.0,
                 reason: Some("connection_missing"),
                 expected_edge_bps: 0.0,
             };
@@ -305,6 +317,10 @@ impl Trader for BinanceTrader {
                 execution_price: None,
                 fee_paid: 0.0,
                 latency_seconds: 0.0,
+                synthetic_half_spread_bps: 0.0,
+                slippage_bps: 0.0,
+                latency_impact_bps: 0.0,
+                market_impact_bps: 0.0,
                 reason: Some(rationale),
                 expected_edge_bps: 0.0,
             },
@@ -330,6 +346,10 @@ impl Trader for BinanceTrader {
                         execution_price: None,
                         fee_paid: 0.0,
                         latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
                         reason: Some("risk_validation_failed"),
                         expected_edge_bps,
                     };
@@ -347,6 +367,10 @@ impl Trader for BinanceTrader {
                             execution_price: None,
                             fee_paid: 0.0,
                             latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
                             reason: Some("invalid_quantity"),
                             expected_edge_bps,
                         };
@@ -375,6 +399,10 @@ impl Trader for BinanceTrader {
                         execution_price: None,
                         fee_paid: 0.0,
                         latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
                         reason: Some("exchange_order_failed"),
                         expected_edge_bps,
                     };
@@ -390,6 +418,10 @@ impl Trader for BinanceTrader {
                         execution_price: None,
                         fee_paid: 0.0,
                         latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
                         reason: Some("missing_order_data"),
                         expected_edge_bps,
                     };
@@ -405,6 +437,10 @@ impl Trader for BinanceTrader {
                         execution_price: None,
                         fee_paid: 0.0,
                         latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
                         reason: Some("missing_fills"),
                         expected_edge_bps,
                     };
@@ -432,6 +468,10 @@ impl Trader for BinanceTrader {
                     execution_price,
                     fee_paid,
                     latency_seconds: 0.0,
+                    synthetic_half_spread_bps: 0.0,
+                    slippage_bps: 0.0,
+                    latency_impact_bps: 0.0,
+                    market_impact_bps: 0.0,
                     reason: None,
                     expected_edge_bps,
                 }
@@ -539,6 +579,59 @@ impl Trader for BinanceTrader {
                 let _ = self.trade_manager.mark_to_market(trading_symbol, last_trade.price);
             }
 
+            if let Some(mark_price) = market_state.last_price() {
+                let current_drawdown = self.trade_manager.current_drawdown(trading_symbol, mark_price);
+                let max_allowed_drawdown = self
+                    .config
+                    .backtest_settings
+                    .as_ref()
+                    .and_then(|settings| {
+                        if settings.disable_drawdown_limit {
+                            None
+                        } else {
+                            settings.max_drawdown_override
+                        }
+                    })
+                    .unwrap_or(self.config.risk_management.max_drawdown);
+
+                if current_drawdown >= max_allowed_drawdown {
+                    self.logger.log_warning(
+                        trading_symbol,
+                        "drawdown_guardrail",
+                        "Current drawdown exceeded configured limit; suppressing new entries",
+                    );
+
+                    if self.current_position(trading_symbol).quantity > 0.0 {
+                        let position_quantity = self.current_position(trading_symbol).quantity;
+                        let execution = backtest_engine.execute_with_constraints_at(
+                            trade::signal::Signal::Sell,
+                            market_price,
+                            position_quantity,
+                            self.trade_manager.available_cash(),
+                        );
+                        if !execution.is_rejected() {
+                            let report = self.simulated_report_from_sell(position_quantity, 0.0, execution);
+                            self.trade_manager.record_execution_report(&report);
+                            let pnl = self.trade_manager.close_position(
+                                trading_symbol,
+                                execution.execution_price,
+                                market_state.last_event_time_secs().unwrap_or(0.0),
+                            );
+                            let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
+                            strategy_logger.log_execution(
+                                trading_symbol,
+                                &report,
+                                Some(pnl),
+                                Some(self.trade_manager.get_metrics().realized_pnl()),
+                                Some(self.trade_manager.get_trade_summary()),
+                            );
+                        }
+                    }
+
+                    continue;
+                }
+            }
+
             self.logger.log_market_state_snapshot(
                 trading_symbol,
                 market_state.last_price(),
@@ -549,6 +642,17 @@ impl Trader for BinanceTrader {
             );
 
             let current_position = self.current_position(trading_symbol);
+            if current_position.quantity > 0.0
+                && current_position.quantity * decision_reference_price
+                    > self.config.position_sizing.max_position_notional
+            {
+                self.logger.log_warning(
+                    trading_symbol,
+                    "inventory_guardrail",
+                    "Current position notional exceeds configured max; suppressing new entries",
+                );
+                continue;
+            }
             let decision = trading_strategy.decide(
                 &market_state,
                 &StrategyContext {
@@ -607,6 +711,7 @@ impl Trader for BinanceTrader {
                     };
 
                     {
+                        self.trade_manager.record_execution_report(&report);
                         let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
                         strategy_logger.log_execution(
                             trading_symbol,
@@ -655,6 +760,10 @@ impl Trader for BinanceTrader {
                                     execution_price: Some(execution.execution_price),
                                     fee_paid: 0.0,
                                     latency_seconds: execution.latency_seconds,
+                                    synthetic_half_spread_bps: execution.synthetic_half_spread_rate * 10_000.0,
+                                    slippage_bps: execution.slippage_rate * 10_000.0,
+                                    latency_impact_bps: execution.latency_impact_rate * 10_000.0,
+                                    market_impact_bps: execution.market_impact_rate * 10_000.0,
                                     reason: execution.rejected_reason,
                                     expected_edge_bps,
                                 }
@@ -707,6 +816,7 @@ impl Trader for BinanceTrader {
                     };
 
                     {
+                        self.trade_manager.record_execution_report(&report);
                         let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
                         strategy_logger.log_execution(
                             trading_symbol,
@@ -737,6 +847,7 @@ impl Trader for BinanceTrader {
                 );
                 if !execution.is_rejected() {
                     let report = self.simulated_report_from_sell(position.quantity, 0.0, execution);
+                    self.trade_manager.record_execution_report(&report);
                     let pnl = self.trade_manager.close_position(
                         trading_symbol,
                         execution.execution_price,
@@ -755,6 +866,16 @@ impl Trader for BinanceTrader {
         }
 
         let metrics = self.trade_manager.get_metrics();
+        let event_mix = market_state.event_mix_diagnostics();
+        self.logger.log_replay_event_mix(
+            trading_symbol,
+            event_mix.trade_events,
+            event_mix.book_ticker_events,
+            event_mix.depth_events,
+            event_mix.trade_without_quote_events,
+            event_mix.stale_quote_events,
+            event_mix.stale_depth_events,
+        );
         self.logger.log_session_summary(
             trading_symbol,
             self.trade_manager.get_total_ticks(),
@@ -768,6 +889,14 @@ impl Trader for BinanceTrader {
             metrics.profit_factor(),
             metrics.avg_pnl_per_closed_trade(),
             metrics.max_drawdown(),
+            metrics.fill_ratio(),
+            metrics.rejection_rate(),
+            metrics.avg_latency_seconds(),
+            metrics.avg_synthetic_half_spread_bps(),
+            metrics.avg_slippage_bps(),
+            metrics.avg_latency_impact_bps(),
+            metrics.avg_market_impact_bps(),
+            metrics.avg_expected_edge_bps(),
         );
 
         Ok(())

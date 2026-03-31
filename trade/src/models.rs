@@ -65,6 +65,15 @@ impl SimulationAccount {
 
         equity
     }
+
+    pub fn current_drawdown(&self, mark_price: f64, position: Option<&Position>) -> f64 {
+        let equity = self.equity(mark_price, position);
+        if self.equity_peak <= f64::EPSILON {
+            0.0
+        } else {
+            ((self.equity_peak - equity) / self.equity_peak).max(0.0)
+        }
+    }
 }
 
 impl Default for SimulationAccount {
