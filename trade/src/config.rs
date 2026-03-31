@@ -17,6 +17,10 @@ pub struct PositionSizingConfig {
     pub trading_size_min: f64,
     pub trading_size_max: f64,
     pub trading_symbol: String,
+    pub min_trade_notional: f64,
+    pub max_trade_notional: f64,
+    pub cash_reserve_ratio: f64,
+    pub max_position_notional: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

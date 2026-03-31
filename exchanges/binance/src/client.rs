@@ -1,22 +1,85 @@
-use anyhow::{Context, Result, anyhow};
-use binance_sdk::config::ConfigurationWebsocketStreams;
-use binance_sdk::spot::{
-    SpotWsStreams,
-    websocket_streams::{TradeParams, WebsocketStreams},
-};
+use anyhow::Result;
 use bytes::Bytes;
 use csv::ReaderBuilder;
-use futures_util::stream::{self, Stream};
+use futures_util::{SinkExt, StreamExt, stream::{self, Stream}};
+use serde::Deserialize;
 use std::io::Cursor;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tracing::{debug, error, info, warn};
+use trade::market::{BookLevel, BookTicker, MarketEvent};
 use trade::models::Trade as PulsarTrade;
 use zip::read::ZipArchive;
 
-pub struct BinanceClient {
-    connection: WebsocketStreams,
+pub struct BinanceClient;
+
+#[derive(Debug, Deserialize)]
+struct BinanceTradeMessage {
+    #[serde(rename = "e")]
+    event_type: String,
+    #[serde(rename = "E")]
+    event_time: u64,
+    #[serde(rename = "s")]
+    symbol: String,
+    #[serde(rename = "t")]
+    trade_id: u64,
+    #[serde(rename = "p")]
+    price: String,
+    #[serde(rename = "q")]
+    quantity: String,
+    #[serde(rename = "T")]
+    trade_time: u64,
+    #[serde(rename = "m")]
+    is_buyer_market_maker: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct BinanceBookTickerMessage {
+    #[serde(rename = "E")]
+    event_time: u64,
+    #[serde(rename = "b")]
+    bid_price: String,
+    #[serde(rename = "B")]
+    bid_quantity: String,
+    #[serde(rename = "a")]
+    ask_price: String,
+    #[serde(rename = "A")]
+    ask_quantity: String,
+}
+
+impl BinanceTradeMessage {
+    fn into_trade(self) -> Option<PulsarTrade> {
+        Some(PulsarTrade {
+            event_type: self.event_type,
+            event_time: self.event_time,
+            symbol: self.symbol,
+            trade_id: self.trade_id,
+            price: self.price.parse().ok()?,
+            quantity: self.quantity.parse().ok()?,
+            buyer_order_id: None,
+            seller_order_id: None,
+            trade_time: self.trade_time,
+            is_buyer_market_maker: self.is_buyer_market_maker,
+        })
+    }
+}
+
+impl BinanceBookTickerMessage {
+    fn into_book_ticker(self) -> Option<BookTicker> {
+        Some(BookTicker {
+            bid: BookLevel {
+                price: self.bid_price.parse().ok()?,
+                quantity: self.bid_quantity.parse().ok()?,
+            },
+            ask: BookLevel {
+                price: self.ask_price.parse().ok()?,
+                quantity: self.ask_quantity.parse().ok()?,
+            },
+            event_time: self.event_time,
+        })
+    }
 }
 
 impl BinanceClient {
@@ -24,20 +87,7 @@ impl BinanceClient {
     ///
     /// Will return `Err` if the connection to Binance WebSocket Streams fails or times out.
     pub async fn new() -> Result<Self> {
-        let config = ConfigurationWebsocketStreams::builder()
-            .build()
-            .context("Failed to build config")?;
-
-        let client = SpotWsStreams::production(config);
-
-        let connection_result =
-            tokio::time::timeout(Duration::from_secs(10), client.connect()).await;
-
-        let connection = connection_result
-            .map_err(|_| anyhow!("Connection timed out"))?
-            .context("Failed to connect to WebSocket Streams")?;
-
-        Ok(Self { connection })
+        Ok(Self)
     }
 
     /// # Errors
@@ -50,39 +100,191 @@ impl BinanceClient {
         impl futures_util::Stream<Item = PulsarTrade>,
         Box<dyn std::error::Error + Send + Sync>,
     > {
-        let params = TradeParams::builder(symbol.to_string()).build()?;
+        let (tx, rx) = mpsc::unbounded_channel();
 
-        let ws_stream = self
-            .connection
-            .trade(params)
-            .await
-            .context("Failed to subscribe to the trade stream")?;
+        let stream_symbol = symbol.to_lowercase();
+        let stream_symbol_for_log = symbol.to_string();
+        tokio::spawn(async move {
+            let url = format!("wss://stream.binance.com:9443/ws/{}@trade", stream_symbol);
+            loop {
+                info!(symbol = %stream_symbol_for_log, url = %url, source = "websocket", "Connecting to live market data source");
+                let connection = tokio::time::timeout(Duration::from_secs(20), connect_async(&url)).await;
 
-        let (tx, rx) = mpsc::channel(10000);
+                let Ok(connection) = connection else {
+                    warn!(url = %url, "Public trade stream connection timed out; retrying websocket only");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                };
 
-        ws_stream.on_message(move |msg| {
-            let trade = PulsarTrade {
-                event_type: msg.e.clone().unwrap_or_default(),
-                #[allow(clippy::cast_sign_loss)]
-                event_time: msg.e_uppercase.unwrap_or_default() as u64,
-                symbol: msg.s.clone().unwrap_or_default(),
-                #[allow(clippy::cast_sign_loss)]
-                trade_id: msg.t.unwrap_or_default() as u64,
-                price: msg.p.as_ref().and_then(|v| v.parse().ok()).unwrap_or(0.0),
-                quantity: msg.q.as_ref().and_then(|v| v.parse().ok()).unwrap_or(0.0),
-                buyer_order_id: None,
-                seller_order_id: None,
-                #[allow(clippy::cast_sign_loss)]
-                trade_time: msg.t_uppercase.unwrap_or_default() as u64,
-                is_buyer_market_maker: msg.m.unwrap_or_default(),
-            };
+                let Ok((ws_stream, _response)) = connection else {
+                    warn!(url = %url, "Public trade stream connection failed; retrying websocket only");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                };
 
-            if let Err(err) = tx.try_send(trade) {
-                error!(error = ?err, "Failed to send trade to stream.");
+                info!(symbol = %stream_symbol_for_log, url = %url, "Websocket market data connected");
+
+                let (mut write, mut read) = ws_stream.split();
+                let mut message_count = 0_u64;
+
+                while let Some(message) = read.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => match serde_json::from_str::<BinanceTradeMessage>(&text) {
+                            Ok(parsed) => {
+                                let Some(trade) = parsed.into_trade() else {
+                                    warn!(payload = %text, "Failed to parse trade payload into numeric values");
+                                    continue;
+                                };
+
+                                if tx.send(trade).is_err() {
+                                    return;
+                                }
+
+                                message_count += 1;
+                                if message_count <= 3 || message_count % 500 == 0 {
+                                    debug!(
+                                        symbol = %stream_symbol_for_log,
+                                        source = "websocket",
+                                        messages = message_count,
+                                        "Received live market trade"
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                warn!(error = ?err, payload = %text, "Failed to decode trade stream payload");
+                            }
+                        },
+                        Ok(Message::Ping(payload)) => {
+                            if let Err(err) = write.send(Message::Pong(payload)).await {
+                                warn!(error = ?err, "Failed to respond to websocket ping");
+                                break;
+                            }
+                        }
+                        Ok(Message::Pong(_)) => {}
+                        Ok(Message::Binary(_)) => {}
+                        Ok(Message::Frame(_)) => {}
+                        Ok(Message::Close(frame)) => {
+                            warn!(?frame, "Trade stream closed by server; reconnecting");
+                            break;
+                        }
+                        Err(err) => {
+                            warn!(error = ?err, "Trade stream read error; reconnecting");
+                            break;
+                        }
+                    }
+                }
+
+                warn!(url = %url, "Websocket trade stream ended; retrying websocket only");
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         });
 
-        Ok(ReceiverStream::new(rx))
+        Ok(UnboundedReceiverStream::new(rx))
+    }
+
+    pub async fn market_event_stream(
+        self,
+        symbol: &str,
+    ) -> Result<impl futures_util::Stream<Item = MarketEvent>, Box<dyn std::error::Error + Send + Sync>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let stream_symbol = symbol.to_lowercase();
+        let stream_symbol_for_log = symbol.to_string();
+
+        tokio::spawn(async move {
+            let url = format!(
+                "wss://stream.binance.com:9443/stream?streams={}@trade/{}@bookTicker",
+                stream_symbol, stream_symbol
+            );
+
+            loop {
+                info!(symbol = %stream_symbol_for_log, url = %url, source = "websocket", "Connecting to multiplexed market data source");
+                let connection = tokio::time::timeout(Duration::from_secs(20), connect_async(&url)).await;
+
+                let Ok(connection) = connection else {
+                    warn!(url = %url, "Multiplexed market data connection timed out; retrying websocket only");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                };
+
+                let Ok((ws_stream, _response)) = connection else {
+                    warn!(url = %url, "Multiplexed market data connection failed; retrying websocket only");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                };
+
+                info!(symbol = %stream_symbol_for_log, url = %url, "Multiplexed websocket market data connected");
+                let (mut write, mut read) = ws_stream.split();
+                let mut trade_count = 0_u64;
+                let mut quote_count = 0_u64;
+
+                while let Some(message) = read.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => {
+                            match parse_market_event_message(&text) {
+                                Some(MarketEvent::Trade(trade)) => {
+                                    if tx.send(MarketEvent::Trade(trade)).is_err() {
+                                        return;
+                                    }
+
+                                    trade_count += 1;
+                                    if trade_count <= 3 || trade_count % 500 == 0 {
+                                        debug!(
+                                            symbol = %stream_symbol_for_log,
+                                            source = "websocket",
+                                            trade_messages = trade_count,
+                                            quote_messages = quote_count,
+                                            "Received multiplexed trade event"
+                                        );
+                                    }
+                                }
+                                Some(MarketEvent::BookTicker(book_ticker)) => {
+                                    if tx.send(MarketEvent::BookTicker(book_ticker)).is_err() {
+                                        return;
+                                    }
+
+                                    quote_count += 1;
+                                    if quote_count <= 3 || quote_count % 500 == 0 {
+                                        debug!(
+                                            symbol = %stream_symbol_for_log,
+                                            source = "websocket",
+                                            trade_messages = trade_count,
+                                            quote_messages = quote_count,
+                                            "Received multiplexed quote event"
+                                        );
+                                    }
+                                }
+                                Some(MarketEvent::Depth(_)) => {}
+                                None => {
+                                    warn!(payload = %text, "Failed to decode multiplexed market event payload");
+                                }
+                            }
+                        }
+                        Ok(Message::Ping(payload)) => {
+                            if let Err(err) = write.send(Message::Pong(payload)).await {
+                                warn!(error = ?err, "Failed to respond to websocket ping");
+                                break;
+                            }
+                        }
+                        Ok(Message::Pong(_)) => {}
+                        Ok(Message::Binary(_)) => {}
+                        Ok(Message::Frame(_)) => {}
+                        Ok(Message::Close(frame)) => {
+                            warn!(?frame, "Multiplexed market data stream closed by server; reconnecting");
+                            break;
+                        }
+                        Err(err) => {
+                            warn!(error = ?err, "Multiplexed market data read error; reconnecting");
+                            break;
+                        }
+                    }
+                }
+
+                warn!(url = %url, "Multiplexed websocket market data ended; retrying websocket only");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+
+        Ok(UnboundedReceiverStream::new(rx))
     }
 
     /// # Errors
@@ -146,6 +348,50 @@ impl BinanceClient {
                     continue;
                 }
             };
+
+            if record.is_empty() {
+                continue;
+            }
+
+            if record.get(0).is_some_and(|value| value.eq_ignore_ascii_case("timestamp")) {
+                continue;
+            }
+
+            if record.len() == 3 {
+                let trade_time: u64 = match record[0].parse() {
+                    Ok(time) => time,
+                    Err(e) => {
+                        error!(error = ?e, record = ?record, "Failed to parse simple CSV timestamp.");
+                        continue;
+                    }
+                };
+
+                let price: f64 = match record[1].parse() {
+                    Ok(price) => price,
+                    Err(e) => {
+                        error!(error = ?e, record = ?record, "Failed to parse simple CSV price.");
+                        continue;
+                    }
+                };
+
+                let quantity: f64 = match record[2].parse() {
+                    Ok(quantity) => quantity,
+                    Err(e) => {
+                        error!(error = ?e, record = ?record, "Failed to parse simple CSV quantity.");
+                        continue;
+                    }
+                };
+
+                trades.push(PulsarTrade {
+                    trade_id: trades.len() as u64 + 1,
+                    price,
+                    quantity,
+                    trade_time,
+                    is_buyer_market_maker: false,
+                    ..Default::default()
+                });
+                continue;
+            }
 
             if record.len() < 6 {
                 continue; // Skip incomplete records
@@ -219,4 +465,30 @@ impl BinanceClient {
         let trades = Self::parse_trade_data(Bytes::from(file_content))?;
         Ok(stream::iter(trades))
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct BinanceCombinedStreamEnvelope {
+    stream: String,
+    data: serde_json::Value,
+}
+
+fn parse_market_event_message(payload: &str) -> Option<MarketEvent> {
+    let envelope = serde_json::from_str::<BinanceCombinedStreamEnvelope>(payload).ok()?;
+
+    if envelope.stream.ends_with("@trade") {
+        let trade = serde_json::from_value::<BinanceTradeMessage>(envelope.data)
+            .ok()?
+            .into_trade()?;
+        return Some(MarketEvent::Trade(trade));
+    }
+
+    if envelope.stream.ends_with("@bookTicker") {
+        let book_ticker = serde_json::from_value::<BinanceBookTickerMessage>(envelope.data)
+            .ok()?
+            .into_book_ticker()?;
+        return Some(MarketEvent::BookTicker(book_ticker));
+    }
+
+    None
 }

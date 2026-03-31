@@ -1,11 +1,14 @@
 
+use ::trade::market::MarketEvent;
+use ::trade::Strategy;
 use ::trade::trader::{TradeMode, Trader};
 use binance_exchange::BinanceClient;
 use binance_exchange::trader::BinanceTrader;
 use clap::{Parser, Subcommand};
+use futures_util::StreamExt;
 use std::error::Error;
 use std::fs;
-use strategies::strategy::Strategy;
+use std::time::Duration;
 use toml::Value;
 use tracing::info;
 
@@ -53,6 +56,9 @@ impl ConfigValue for String {
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    #[arg(long)]
+    duration_secs: Option<u64>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -71,7 +77,7 @@ enum Commands {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Configure logging with specific levels for different modules
     let env_filter = std::env::var("RUST_LOG").map_or_else(
-        |_| "binance_bot=info,binance_sdk=warn,binance_exchange=info".to_string(),
+        |_| "binance_bot=info,binance_sdk=warn,binance_exchange=info,trade=info".to_string(),
         |rust_log| format!("{rust_log},binance_sdk=warn"),
     );
 
@@ -86,56 +92,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let trading_symbol: String = get_config_value(&trading_config, "position_sizing.trading_symbol")
         .ok_or("Trading symbol not defined in configuration")?;
 
-
-    let mut strategy = strategies::AdvancedOrderStrategy::from_file("config/advanced_order_strategy.toml")
-        .expect("Failed to load Advanced Order Strategy configuration");
-        
-    info!("Trading strategy: {}", strategy.get_info());
-
-    // Create trader once for all modes
     let mut binance_trader = BinanceTrader::new().await?;
+    let mut strategy = strategies::NullStrategy::from_file("/dev/null")
+        .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?;
 
     match cli.command {
         Commands::Trade => {
-            info!("Starting live trading for {}...", trading_symbol);
-
-            // Get live WebSocket stream
-            let binance_client = BinanceClient::new().await?;
-            let trading_stream = binance_client.trade_stream(&trading_symbol).await?;
-
-            binance_trader
-                .trade(
-                    trading_stream,
-                    &mut strategy,
-                    &trading_symbol,
-                    TradeMode::Real,
-                )
-                .await?;
+            return Err("Trading remains disabled until new HFT strategies are implemented.".into());
         }
         Commands::Emulate => {
-            info!(
-                "Starting live emulation with real WebSocket stream for {}...",
-                trading_symbol
-            );
-
-            // Get live WebSocket stream
-            let binance_client = BinanceClient::new().await?;
-            let trading_stream = binance_client.trade_stream(&trading_symbol).await?;
-
-            binance_trader
-                .trade(
-                    trading_stream,
-                    &mut strategy,
-                    &trading_symbol,
-                    TradeMode::Emulated,
-                )
-                .await?;
+            return Err("Live emulation remains disabled until new HFT strategies are implemented.".into());
         }
         Commands::Backtest { uri } => {
-            info!("Starting backtest with data from: {}", uri);
+            info!("Verified historical market data access from: {}", uri);
 
-            // Get historical data stream
-            let trading_stream = BinanceClient::trade_data_from_uri(&uri).await?;
+            let trading_stream = BinanceClient::trade_data_from_uri(&uri)
+                .await?
+                .map(MarketEvent::Trade);
+            let trading_stream = if let Some(duration_secs) = cli.duration_secs {
+                trading_stream.take_until(tokio::time::sleep(Duration::from_secs(duration_secs)))
+            } else {
+                trading_stream.take_until(tokio::time::sleep(Duration::from_secs(1_000_000_000)))
+            };
 
             binance_trader
                 .trade(

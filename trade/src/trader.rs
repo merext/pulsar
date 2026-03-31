@@ -1,6 +1,7 @@
+use crate::execution::{ExecutionReport, OrderIntent};
+use crate::market::MarketEvent;
 use crate::metrics::{PerformanceMetrics, TradeManager};
-use crate::models::Trade;
-use crate::signal::Signal;
+use crate::strategy::Strategy;
 use futures_util::Stream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,23 +17,6 @@ pub enum TradeMode {
     Real,
     Emulated,
     Backtest,
-}
-
-#[derive(Debug, Clone)]
-pub struct Position {
-    pub symbol: String,
-    pub quantity: f64,
-    pub entry_price: f64,
-}
-
-impl std::fmt::Display for Position {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Position {{ symbol: \"{}\", quantity: {:.6}, entry_price: {:.8} }}",
-            self.symbol, self.quantity, self.entry_price
-        )
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +36,12 @@ pub trait Trader {
 
     // Account and trading operations
     async fn account_status(&self) -> Result<(), anyhow::Error>;
-    async fn on_signal(&mut self, signal: Signal, price: f64, quantity: f64);
+    async fn on_order_intent(
+        &mut self,
+        symbol: &str,
+        reference_price: f64,
+        intent: OrderIntent,
+    ) -> ExecutionReport;
 
     // Exchange calculates exact trade size based on symbol, price, confidence, min/max trade sizes, and step size
     fn calculate_trade_size(
@@ -68,8 +57,8 @@ pub trait Trader {
     // Universal trading loop that handles all trading modes
     async fn trade(
         &mut self,
-        trading_stream: impl Stream<Item = Trade> + Unpin + Send,
-        trading_strategy: &mut dyn strategies::strategy::Strategy,
+        trading_stream: impl Stream<Item = MarketEvent> + Send,
+        trading_strategy: &mut dyn Strategy,
         trading_symbol: &str,
         trading_mode: TradeMode,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;

@@ -1,8 +1,7 @@
-use strategies::models::Signal;
-use strategies::strategy::StrategyLogger;
+use crate::execution::{ExecutionReport, ExecutionStatus, OrderIntent, Side};
+use crate::strategy::StrategyLogger;
 use tracing::{debug, error, info, warn};
 
-/// Trading logger that provides standardized logging for any exchange and strategy
 pub struct TradeLogger {
     pub exchange_name: String,
 }
@@ -19,90 +18,112 @@ impl TradeLogger {
             exchange = %self.exchange_name,
             symbol = %symbol,
             action = "trade_received",
-            price = %format!("{:.8}", price),
-            quantity = %format!("{:.2}", quantity),
-            timestamp = %timestamp
+            price,
+            quantity,
+            timestamp
         );
     }
 
-    pub fn log_signal_generated(&self, symbol: &str, signal: &Signal, confidence: f64, price: f64) {
+    pub fn log_decision(
+        &self,
+        symbol: &str,
+        intent: &OrderIntent,
+        confidence: f64,
+        reference_price: f64,
+    ) {
         debug!(
             exchange = %self.exchange_name,
             symbol = %symbol,
-            action = "signal_generated",
-            signal = %format!("{:?}", signal),
-            confidence = %format!("{:.4}", confidence),
-            price = %format!("{:.8}", price)
+            action = "decision_generated",
+            intent = ?intent,
+            confidence,
+            reference_price
         );
     }
 
-    pub fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>, trade_summary: Option<(usize, usize)>) {
+    pub fn log_execution(
+        &self,
+        symbol: &str,
+        report: &ExecutionReport,
+        pnl: Option<f64>,
+        realized_pnl: Option<f64>,
+        trade_summary: Option<(usize, usize)>,
+    ) {
         let trades_info = if let Some((total_ticks, total_trades)) = trade_summary {
             format!("{}/{}", total_ticks, total_trades)
         } else {
             "unknown".to_string()
         };
 
-        match signal {
-            Signal::Buy => {
-                info!(
-                    exchange = %self.exchange_name,
-                    trades = %trades_info,
-                    symbol = %symbol,
-                    action = "buy_executed",
-                    price = %format!("{:.8}", price),
-                    quantity = %format!("{:.2}", quantity)
-                );
-            }
-            Signal::Sell => {
-                if let Some(pnl) = pnl {
-                    if let Some(profit) = profit {
-                        info!(
-                            exchange = %self.exchange_name,
-                            trades = %trades_info,
-                            symbol = %symbol,
-                            action = "sell_executed",
-                            price = %format!("{:.8}", price),
-                            quantity = %format!("{:.2}", quantity),
-                            pnl = %format!("{:.6}", pnl),
-                            profit = %format!("{:.6}", profit)
-                        );
-                    } else {
-                        info!(
-                            exchange = %self.exchange_name,
-                            trades = %trades_info,
-                            symbol = %symbol,
-                            action = "sell_executed",
-                            price = %format!("{:.8}", price),
-                            quantity = %format!("{:.2}", quantity),
-                            pnl = %format!("{:.6}", pnl)
-                        );
-                    }
-                } else if let Some(profit) = profit {
-                    info!(
-                        exchange = %self.exchange_name,
-                        trades = %trades_info,
-                        symbol = %symbol,
-                        action = "sell_executed",
-                        price = %format!("{:.8}", price),
-                        quantity = %format!("{:.2}", quantity),
-                        profit = %format!("{:.6}", profit)
-                    );
-                } else {
-                    info!(
-                        exchange = %self.exchange_name,
-                        trades = %trades_info,
-                        symbol = %symbol,
-                        action = "sell_executed",
-                        price = %format!("{:.8}", price),
-                        quantity = %format!("{:.2}", quantity)
-                    );
-                }
-            }
-            Signal::Hold => {
-                // No action needed for hold signals
-            }
+        let action = match (report.status, report.side) {
+            (ExecutionStatus::Filled, Some(Side::Buy)) => "buy_executed",
+            (ExecutionStatus::Filled, Some(Side::Sell)) => "sell_executed",
+            (ExecutionStatus::PartiallyFilled, Some(Side::Buy)) => "buy_partially_filled",
+            (ExecutionStatus::PartiallyFilled, Some(Side::Sell)) => "sell_partially_filled",
+            (ExecutionStatus::Rejected, _) => "order_rejected",
+            (ExecutionStatus::Cancelled, _) => "order_cancelled",
+            (ExecutionStatus::Ignored, _) => "decision_ignored",
+            _ => "execution_report",
+        };
+
+        if report.status == ExecutionStatus::Ignored {
+            debug!(
+                exchange = %self.exchange_name,
+                trades = %trades_info,
+                symbol = %symbol,
+                action,
+                realized_pnl
+            );
+            return;
         }
+
+        info!(
+            exchange = %self.exchange_name,
+            trades = %trades_info,
+            symbol = %symbol,
+            action,
+            side = ?report.side,
+            order_type = ?report.order_type,
+            requested_quantity = report.requested_quantity,
+            executed_quantity = report.executed_quantity,
+            execution_price = report.execution_price,
+            fee_paid = report.fee_paid,
+            latency_seconds = report.latency_seconds,
+            reason = report.reason,
+            pnl,
+            realized_pnl
+        );
+    }
+
+    pub fn log_market_data_source(&self, symbol: &str, source: &str, status: &str) {
+        info!(
+            exchange = %self.exchange_name,
+            symbol = %symbol,
+            action = "market_data_source",
+            source = %source,
+            status = %status
+        );
+    }
+
+    pub fn log_market_state_snapshot(
+        &self,
+        symbol: &str,
+        last_price: Option<f64>,
+        mid_price: Option<f64>,
+        spread_bps: Option<f64>,
+        trade_flow_imbalance: f64,
+        order_book_imbalance: Option<f64>,
+    ) {
+        debug!(
+            exchange = %self.exchange_name,
+            symbol = %symbol,
+            action = "market_state_snapshot",
+            last_price,
+            mid_price,
+            spread_bps,
+            trade_flow_imbalance,
+            order_book_imbalance
+        );
     }
 
     pub fn log_error(&self, symbol: &str, action: &str, error: &str) {
@@ -125,10 +146,44 @@ impl TradeLogger {
 
     pub fn log_order_error(&self, symbol: &str, action: &str, status: &str, error: &str) {
         error!(
+            exchange = %self.exchange_name,
             symbol = %symbol,
             action = %action,
             status = %status,
             error = %error
+        );
+    }
+
+    pub fn log_session_summary(
+        &self,
+        symbol: &str,
+        total_ticks: usize,
+        entries: usize,
+        closed_trades: usize,
+        realized_pnl: f64,
+        fees_paid: f64,
+        ending_cash: f64,
+        ending_equity: f64,
+        win_rate: f64,
+        profit_factor: f64,
+        avg_pnl_per_trade: f64,
+        max_drawdown: f64,
+    ) {
+        info!(
+            exchange = %self.exchange_name,
+            symbol = %symbol,
+            total_ticks,
+            entries,
+            closed_trades,
+            realized_pnl,
+            fees_paid,
+            ending_cash,
+            ending_equity,
+            win_rate,
+            profit_factor,
+            avg_pnl_per_trade,
+            max_drawdown,
+            action = "session_summary"
         );
     }
 }
@@ -141,7 +196,6 @@ impl Default for TradeLogger {
     }
 }
 
-/// Implementation of StrategyLogger that delegates to TradeLogger
 pub struct StrategyLoggerAdapter<'a> {
     trade_logger: &'a TradeLogger,
 }
@@ -153,13 +207,26 @@ impl<'a> StrategyLoggerAdapter<'a> {
 }
 
 impl<'a> StrategyLogger for StrategyLoggerAdapter<'a> {
-    fn log_signal_generated(&self, symbol: &str, signal: &Signal, confidence: f64, price: f64) {
+    fn log_decision(
+        &self,
+        symbol: &str,
+        intent: &OrderIntent,
+        confidence: f64,
+        reference_price: f64,
+    ) {
         self.trade_logger
-            .log_signal_generated(symbol, signal, confidence, price);
+            .log_decision(symbol, intent, confidence, reference_price);
     }
 
-    fn log_trade_executed(&self, symbol: &str, signal: &Signal, price: f64, quantity: f64, pnl: Option<f64>, profit: Option<f64>, trade_summary: Option<(usize, usize)>) {
+    fn log_execution(
+        &self,
+        symbol: &str,
+        report: &ExecutionReport,
+        pnl: Option<f64>,
+        realized_pnl: Option<f64>,
+        trade_summary: Option<(usize, usize)>,
+    ) {
         self.trade_logger
-            .log_trade_executed(symbol, signal, price, quantity, pnl, profit, trade_summary);
+            .log_execution(symbol, report, pnl, realized_pnl, trade_summary);
     }
 }
