@@ -13,6 +13,13 @@ The project is evolving into a layered HFT research platform.
    - live trade/emulate now consume mixed `trade + bookTicker` streams through shared orchestration
    - capture pipeline now supports mixed `trade + bookTicker + depth` JSONL output for future replay
    - historical replay now supports both trade-only archives and captured mixed-event JSONL datasets
+   - captured mixed-event datasets now include local capture ordering (`capture_sequence`) and capture timestamps (`captured_at_ms`) for replay-safe sequencing
+   - captured datasets now also emit metadata sidecars for batch tooling and dataset introspection
+   - captured dataset discovery can now be built from sidecars via CLI without scanning all event payload files
+   - indexed captured datasets can now feed shared batch replay orchestration without custom per-file wiring
+   - legacy captured datasets can now be upgraded into the same indexed flow through sidecar backfill
+   - indexed dataset selection now supports minimal quality/time filters before replay orchestration
+   - sequential batch capture can now populate the indexed quote-aware dataset pool through repeated standard captures
 
 2. Normalized Event Layer
    - `MarketEvent`
@@ -80,6 +87,7 @@ The project is evolving into a layered HFT research platform.
 - trade-only archive replay remains the baseline validation path for taker models on large historical batches
 - captured JSONL replay is now the quote/depth-aware validation path for mixed-event datasets captured from live websocket flow
 - maker research still remains blocked on queue/fill realism even though quote/depth replay now exists
+- mixed captured replay should trust capture ordering for sequence semantics; raw exchange timing fields can remain informative but are not authoritative across event classes
 
 ## Key Shared Types To Maintain
 

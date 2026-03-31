@@ -65,6 +65,35 @@ Completed:
   - `backtest` and `compare` now auto-detect `.jsonl` / `.ndjson` and use mixed-event replay instead of trade-only replay
   - replay logging now distinguishes captured historical replay from trade-only historical replay
   - short end-to-end replay on `/tmp/pulsar_capture.jsonl` verified successfully for both baseline taker models
+- Added normalized mixed-event capture ordering and replay summaries:
+  - capture records now store `capture_sequence` and `captured_at_ms` for replay-safe ordering
+  - exchange-native timing fields are preserved as optional raw fields instead of being treated as authoritative replay time
+  - replay summary now reports event mix, parse errors, capture-order regressions, capture-time regressions, and event-time regressions
+  - verified longer dataset capture at `data/binance/capture/DOGEUSDT/session_20260331_v3.jsonl`
+  - verified longer captured replay end-to-end with both taker baselines
+- Added capture metadata sidecar support:
+  - each capture now writes `<capture>.metadata.json` next to the JSONL dataset
+  - sidecar records dataset-level counts, timing bounds, schema version, and replay ordering semantics
+  - verified sidecar generation on `data/binance/capture/DOGEUSDT/session_20260331_v4.jsonl.metadata.json`
+- Added batch captured-dataset index support:
+  - new CLI command `capture-index --root data/binance/capture`
+  - index is built from metadata sidecars without rescanning full JSONL payloads
+  - verified on current captured sessions under `data/binance/capture/`
+- Added batch replay orchestration over indexed captured datasets:
+  - new CLI command `capture-compare --root data/binance/capture ...`
+  - batch replay uses indexed sidecars to discover datasets, then runs normal replay/backtest flow on the resolved JSONL files
+  - verified on indexed DOGEUSDT capture dataset batch
+- Added legacy capture metadata backfill support:
+  - new CLI command `capture-backfill --input ...`
+  - backfill derives sidecar metadata from existing captured JSONL replay summaries
+  - verified on `session_20260331_v2.jsonl` and `session_20260331_v3.jsonl`
+- Added minimal indexed dataset filters:
+  - `capture-index` and `capture-compare` now support minimum event-count filters and capture-time presence/time filters
+  - verified that quote-aware filters exclude the trade-only backfilled dataset and retain mixed-event captures
+- Added minimal sequential capture-batch orchestration:
+  - new CLI command `capture-batch --batch-id ... --parts ... --duration-secs ...`
+  - batch capture reuses the normal capture path and writes sequentially named JSONL + sidecar files
+  - verified on a two-part DOGEUSDT smoke batch
 
 ## Last Verified Commands
 
@@ -83,6 +112,18 @@ Completed:
 - `cargo run -p binance-bot -- --strategy trade-flow-momentum backtest --uri /tmp/pulsar_capture.jsonl`
 - `cargo run -p binance-bot -- --strategy liquidity-sweep-reversal backtest --uri /tmp/pulsar_capture.jsonl`
 - `cargo run -p binance-bot -- compare --uris /tmp/pulsar_capture.jsonl --strategies trade-flow-momentum,liquidity-sweep-reversal`
+- `cargo run -p binance-bot -- capture --output data/binance/capture/DOGEUSDT/session_20260331_v3.jsonl --duration-secs 10 --depth-levels 5`
+- `cargo run -p binance-bot -- compare --uris data/binance/capture/DOGEUSDT/session_20260331_v3.jsonl --strategies trade-flow-momentum,liquidity-sweep-reversal`
+- `cargo run -p binance-bot -- capture --output data/binance/capture/DOGEUSDT/session_20260331_v4.jsonl --duration-secs 5 --depth-levels 5`
+- `cargo run -p binance-bot -- compare --uris data/binance/capture/DOGEUSDT/session_20260331_v4.jsonl --strategies trade-flow-momentum,liquidity-sweep-reversal`
+- `cargo run -p binance-bot -- capture-index --root data/binance/capture`
+- `cargo run -p binance-bot -- capture-compare --root data/binance/capture --symbol DOGEUSDT --limit 1 --strategies trade-flow-momentum,liquidity-sweep-reversal`
+- `cargo run -p binance-bot -- capture-backfill --input data/binance/capture/DOGEUSDT/session_20260331_v2.jsonl --duration-secs 10 --depth-levels 5`
+- `cargo run -p binance-bot -- capture-backfill --input data/binance/capture/DOGEUSDT/session_20260331_v3.jsonl --duration-secs 10 --depth-levels 5`
+- `cargo run -p binance-bot -- capture-compare --root data/binance/capture --symbol DOGEUSDT --limit 3 --strategies trade-flow-momentum,liquidity-sweep-reversal`
+- `cargo run -p binance-bot -- capture-index --root data/binance/capture --symbol DOGEUSDT --min-book-ticker-events 1 --require-captured-at`
+- `cargo run -p binance-bot -- capture-compare --root data/binance/capture --symbol DOGEUSDT --min-book-ticker-events 1 --require-captured-at --limit 5 --strategies trade-flow-momentum,liquidity-sweep-reversal`
+- `cargo run -p binance-bot -- capture-batch --batch-id smoke_batch --parts 2 --duration-secs 3 --depth-levels 5`
 
 ## Important Constraints
 
@@ -102,7 +143,7 @@ Completed:
 3. Keep `TradeFlowMomentumStrategy` refinements at the major-filter level, not deep sub-variant exploration.
 4. Extend the new compare workflow only if a major architecture need appears; keep secondary reporting wishes in backlog.
 5. Keep both models alive until deep tuning plus live emulation justify rejection.
-6. Next major architecture step after this is replay observability plus normalized captured dataset structure for larger quote/depth research batches.
+6. Next major architecture step after this is using batch capture plus filters to build materially longer quote-aware validation sets before any maker-research transition.
 
 ## Architectural Guidance
 
@@ -151,6 +192,15 @@ Refinement takeaway:
 - first major refinement of momentum improved one day slightly but did not change the broader ordering of the two models
 - captured mixed-event replay now works end-to-end, but the verified fixture was only a short 32-event sample and produced zero trades for both baselines
 - next validation should use materially longer captured sessions before drawing any quote-aware model conclusions
+- longer normalized capture replay now also works end-to-end on a 617-event sample, and both baselines still produced zero trades on that sample
+- replay summary shows capture ordering is stable on the normalized dataset, while exchange/native event-time ordering can still regress across mixed event types
+- this confirms replay must rely on capture-order semantics for mixed captured datasets rather than raw exchange timing across event classes
+- metadata sidecar now gives a stable dataset contract for future batch tooling without forcing replay code to rescan JSONL for basic dataset facts
+- batch index now provides the first lightweight dataset-discovery layer needed for quote-aware validation over multiple captured sessions
+- indexed batch replay now works end-to-end, but current indexed coverage is still thin because only the latest capture has a sidecar
+- legacy backfill removed that immediate coverage bottleneck for the current DOGEUSDT captures, expanding indexed coverage from one dataset to three
+- minimal filtering now lets batch replay focus on quote-aware datasets instead of mixing in trade-only legacy captures
+- sequential capture-batch now expands quote-aware indexed coverage without manual per-file capture invocation
 
 ## Resume Checklist
 

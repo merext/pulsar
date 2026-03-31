@@ -3,12 +3,12 @@ use futures_util::StreamExt;
 use trade::market::MarketEvent;
 
 #[test]
-fn live_quote_and_depth_messages_require_exchange_event_time() {
+fn live_quote_and_depth_messages_fallback_to_update_identifiers() {
     let book_payload = r#"{"stream":"dogeusdt@bookTicker","data":{"u":24126432035,"b":"0.09117","B":"508947.0","a":"0.09118","A":"26021.0"}}"#;
     let depth_payload = r#"{"stream":"dogeusdt@depth5@100ms","data":{"lastUpdateId":24126432029,"bids":[["0.09117","510725.0"]],"asks":[["0.09118","26021.0"]]}}"#;
 
-    assert!(BinanceClient::parse_market_event_message_for_test(book_payload).is_none());
-    assert!(BinanceClient::parse_market_event_message_for_test(depth_payload).is_none());
+    assert!(BinanceClient::parse_market_event_message_for_test(book_payload).is_some());
+    assert!(BinanceClient::parse_market_event_message_for_test(depth_payload).is_some());
 }
 
 #[tokio::test]
@@ -88,5 +88,11 @@ async fn summarizes_captured_jsonl_fixture() {
     assert_eq!(parsed.summary.depth_events, 11);
     assert_eq!(parsed.summary.parse_errors, 0);
     assert_eq!(parsed.summary.event_time_regressions, 2);
+    assert_eq!(parsed.summary.first_capture_sequence, None);
+    assert_eq!(parsed.summary.last_capture_sequence, None);
+    assert_eq!(parsed.summary.capture_sequence_regressions, 0);
+    assert_eq!(parsed.summary.first_captured_at_ms, None);
+    assert_eq!(parsed.summary.last_captured_at_ms, None);
+    assert_eq!(parsed.summary.captured_at_regressions, 0);
     assert_eq!(parsed.summary.symbols, vec!["DOGEUSDT"]);
 }

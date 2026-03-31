@@ -45,6 +45,15 @@
 - [ ] More detailed sweep decomposition metrics before any second sweep refinement pass
 - [ ] More detailed momentum decomposition metrics before any second momentum refinement pass
 - [ ] Capture file rotation/compression after replay format stabilizes
+- [ ] Metadata sidecar checksum/file-size verification
+- [x] Batch dataset index builder over captured sessions under `data/binance/capture/`
+- [x] Batch replay launcher over indexed captured datasets
+- [x] Legacy capture backfill into sidecar/index format only if needed
+- [x] Indexed dataset filters by capture time window and minimum event counts
+- [x] Minimal sequential capture-batch orchestration for quote-aware dataset collection
+- [ ] Sidecar inference quality hints for backfilled datasets with missing capture timestamps
+- [ ] Indexed dataset filters for quote/depth presence quality classes
+- [ ] Capture-batch pause/gap controls between sequential segments
 
 ## Phase 4 - Quote/Depth Infrastructure
 
@@ -52,8 +61,9 @@
 - [x] Add depth ingestion and capture
 - [x] Store raw quote/depth datasets under `data/` via JSONL capture pipeline
 - [x] Build quote-aware replay support
-- [ ] Add normalized captured dataset layout and metadata sidecar
-- [ ] Add replay-time event integrity checks and dataset summaries
+- [x] Add normalized capture ordering and local capture timestamps for mixed-event datasets
+- [x] Add normalized captured dataset layout and metadata sidecar
+- [x] Add replay-time event integrity checks and dataset summaries
 
 ## Phase 5 - Maker Research
 

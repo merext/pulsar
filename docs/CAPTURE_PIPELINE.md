@@ -26,13 +26,65 @@ cargo run -p binance-bot -- capture --output data/binance/capture/DOGEUSDT/live.
 
 The capture writes JSONL records, one event per line.
 
+Alongside the JSONL file, the pipeline now writes a metadata sidecar:
+
+- `<capture>.metadata.json`
+
 Event types:
 
 - `trade`
 - `book_ticker`
 - `depth`
 
-This is intentionally raw and append-friendly. It is not yet a replay-optimized normalized archive format.
+Each record now also carries replay-safe capture metadata:
+
+- `capture_sequence` - monotonic local sequence number within the file
+- `captured_at_ms` - local wall-clock capture timestamp in milliseconds
+- exchange-native timing/update fields when available
+
+The sidecar stores dataset-level metadata such as:
+
+- schema version
+- symbol
+- requested duration and depth levels
+- total event counts by class
+- first/last capture sequence
+- first/last local capture timestamps
+- replay ordering semantics
+
+The CLI can now build a batch index from sidecars:
+
+```bash
+cargo run -p binance-bot -- capture-index --root data/binance/capture
+```
+
+The CLI can also launch compare runs over indexed captured datasets:
+
+```bash
+cargo run -p binance-bot -- capture-compare --root data/binance/capture --symbol DOGEUSDT --limit 1 --strategies trade-flow-momentum,liquidity-sweep-reversal
+```
+
+Index and batch replay now support minimal filters such as:
+
+- `--min-total-events`
+- `--min-book-ticker-events`
+- `--min-depth-events`
+- `--require-captured-at`
+- `--since-captured-at-ms`
+
+Legacy captured JSONL files can be backfilled with sidecars:
+
+```bash
+cargo run -p binance-bot -- capture-backfill --input data/binance/capture/DOGEUSDT/session_20260331_v3.jsonl --duration-secs 10 --depth-levels 5
+```
+
+Sequential capture batches can now be collected with one command:
+
+```bash
+cargo run -p binance-bot -- capture-batch --batch-id smoke_batch --parts 2 --duration-secs 3 --depth-levels 5
+```
+
+This keeps the file append-friendly while making mixed-event replay deterministic.
 
 ## Current Guarantees
 
@@ -41,13 +93,20 @@ This is intentionally raw and append-friendly. It is not yet a replay-optimized 
 - output directory is created automatically
 - short capture runs already verified locally
 - captured JSONL replay reader now exists for `backtest` and `compare`
+- capture ordering and local capture timestamps are stored for replay-safe sequencing
+- metadata sidecar is written automatically next to the JSONL capture
+- batch dataset index can be generated from available sidecars without scanning every JSONL file
+- batch compare runs can now be launched from indexed captured datasets
+- legacy captured JSONL files can be promoted into the indexed dataset set via sidecar backfill
+- indexed dataset selection can now exclude weak or incomplete captures before replay
+- sequential capture batches can now generate multiple sidecar-compatible quote-aware sessions in one run
 
 ## Current Limitations
 
 - no file rotation yet
 - no compression yet
-- no metadata sidecar yet
 - depth is current shallow snapshot/update payload from Binance, not a reconstructed local book history format yet
+- raw exchange timing across mixed event types is informative but not authoritative for replay ordering
 
 ## Next Planned Steps
 

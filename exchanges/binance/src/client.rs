@@ -2,11 +2,11 @@ use anyhow::Result;
 use bytes::Bytes;
 use csv::ReaderBuilder;
 use futures_util::{SinkExt, StreamExt, stream::{self, Stream}};
-use serde::Deserialize;
-use std::collections::BTreeSet;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::io::Cursor;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -28,6 +28,12 @@ pub struct CapturedMarketDataSummary {
     pub first_event_time: Option<u64>,
     pub last_event_time: Option<u64>,
     pub event_time_regressions: usize,
+    pub first_capture_sequence: Option<u64>,
+    pub last_capture_sequence: Option<u64>,
+    pub capture_sequence_regressions: usize,
+    pub first_captured_at_ms: Option<u64>,
+    pub last_captured_at_ms: Option<u64>,
+    pub captured_at_regressions: usize,
     pub symbols: Vec<String>,
 }
 
@@ -59,10 +65,10 @@ struct BinanceTradeMessage {
 
 #[derive(Debug, Deserialize)]
 struct BinanceBookTickerMessage {
-    #[serde(rename = "E")]
-    event_time: Option<u64>,
     #[serde(rename = "u")]
     update_id: Option<u64>,
+    #[serde(rename = "E")]
+    event_time: Option<u64>,
     #[serde(rename = "b")]
     bid_price: String,
     #[serde(rename = "B")]
@@ -75,27 +81,32 @@ struct BinanceBookTickerMessage {
 
 #[derive(Debug, Deserialize)]
 struct BinanceDepthMessage {
-    #[serde(rename = "E")]
-    event_time: Option<u64>,
     #[serde(rename = "lastUpdateId")]
     last_update_id: u64,
+    #[serde(rename = "E")]
+    event_time: Option<u64>,
     #[serde(rename = "bids")]
     bids: Vec<[String; 2]>,
     #[serde(rename = "asks")]
     asks: Vec<[String; 2]>,
 }
 
-#[derive(Debug, Deserialize)]
-struct CapturedDepthLevel {
-    price: f64,
-    quantity: f64,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapturedDepthLevel {
+    pub price: f64,
+    pub quantity: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event_type", rename_all = "snake_case")]
-enum CapturedMarketEventRecord {
+pub enum CapturedMarketEventRecord {
     Trade {
-        event_time: u64,
+        #[serde(default)]
+        capture_sequence: Option<u64>,
+        #[serde(default)]
+        captured_at_ms: Option<u64>,
+        #[serde(rename = "exchange_event_time", alias = "event_time", default)]
+        exchange_event_time: Option<u64>,
         symbol: String,
         trade_id: u64,
         price: f64,
@@ -104,14 +115,28 @@ enum CapturedMarketEventRecord {
         is_buyer_market_maker: bool,
     },
     BookTicker {
-        event_time: u64,
+        #[serde(default)]
+        capture_sequence: Option<u64>,
+        #[serde(default)]
+        captured_at_ms: Option<u64>,
+        #[serde(rename = "exchange_event_time", alias = "event_time", default)]
+        exchange_event_time: Option<u64>,
+        #[serde(default)]
+        update_id: Option<u64>,
         bid_price: f64,
         bid_quantity: f64,
         ask_price: f64,
         ask_quantity: f64,
     },
     Depth {
-        event_time: u64,
+        #[serde(default)]
+        capture_sequence: Option<u64>,
+        #[serde(default)]
+        captured_at_ms: Option<u64>,
+        #[serde(rename = "exchange_event_time", alias = "event_time", default)]
+        exchange_event_time: Option<u64>,
+        #[serde(default)]
+        last_update_id: Option<u64>,
         bids: Vec<CapturedDepthLevel>,
         asks: Vec<CapturedDepthLevel>,
     },
@@ -142,8 +167,7 @@ impl BinanceTradeMessage {
 }
 
 impl BinanceBookTickerMessage {
-    fn into_book_ticker(self) -> Option<BookTicker> {
-        let event_time = self.event_time?;
+    fn into_book_ticker(self, fallback_event_time: u64) -> Option<BookTicker> {
         Some(BookTicker {
             bid: BookLevel {
                 price: self.bid_price.parse().ok()?,
@@ -153,14 +177,13 @@ impl BinanceBookTickerMessage {
                 price: self.ask_price.parse().ok()?,
                 quantity: self.ask_quantity.parse().ok()?,
             },
-            event_time,
+            event_time: self.event_time.or(self.update_id).unwrap_or(fallback_event_time),
         })
     }
 }
 
 impl BinanceDepthMessage {
-    fn into_depth_snapshot(self) -> Option<DepthSnapshot> {
-        let event_time = self.event_time?;
+    fn into_depth_snapshot(self, fallback_event_time: u64) -> Option<DepthSnapshot> {
         let bids = self
             .bids
             .into_iter()
@@ -185,7 +208,7 @@ impl BinanceDepthMessage {
         Some(DepthSnapshot {
             bids,
             asks,
-            event_time,
+            event_time: self.event_time.unwrap_or(self.last_update_id.max(fallback_event_time)),
         })
     }
 }
@@ -201,9 +224,43 @@ impl CapturedMarketEventRecord {
 
     fn event_time(&self) -> u64 {
         match self {
-            Self::Trade { event_time, .. }
-            | Self::BookTicker { event_time, .. }
-            | Self::Depth { event_time, .. } => *event_time,
+            Self::Trade {
+                exchange_event_time,
+                captured_at_ms,
+                trade_time,
+                ..
+            } => exchange_event_time.or(*captured_at_ms).unwrap_or(*trade_time),
+            Self::BookTicker {
+                exchange_event_time,
+                captured_at_ms,
+                capture_sequence,
+                ..
+            }
+            | Self::Depth {
+                exchange_event_time,
+                captured_at_ms,
+                capture_sequence,
+                ..
+            } => exchange_event_time
+                .or(*captured_at_ms)
+                .or(*capture_sequence)
+                .unwrap_or(0),
+        }
+    }
+
+    fn capture_sequence(&self) -> Option<u64> {
+        match self {
+            Self::Trade { capture_sequence, .. }
+            | Self::BookTicker { capture_sequence, .. }
+            | Self::Depth { capture_sequence, .. } => *capture_sequence,
+        }
+    }
+
+    fn captured_at_ms(&self) -> Option<u64> {
+        match self {
+            Self::Trade { captured_at_ms, .. }
+            | Self::BookTicker { captured_at_ms, .. }
+            | Self::Depth { captured_at_ms, .. } => *captured_at_ms,
         }
     }
 
@@ -217,16 +274,18 @@ impl CapturedMarketEventRecord {
     fn into_market_event(self) -> MarketEvent {
         match self {
             Self::Trade {
-                event_time,
+                exchange_event_time,
+                captured_at_ms,
                 symbol,
                 trade_id,
                 price,
                 quantity,
                 trade_time,
                 is_buyer_market_maker,
+                ..
             } => MarketEvent::Trade(PulsarTrade {
                 event_type: "trade".to_string(),
-                event_time,
+                event_time: exchange_event_time.or(captured_at_ms).unwrap_or(trade_time),
                 symbol,
                 trade_id,
                 price,
@@ -237,11 +296,14 @@ impl CapturedMarketEventRecord {
                 is_buyer_market_maker,
             }),
             Self::BookTicker {
-                event_time,
+                exchange_event_time,
+                captured_at_ms,
+                capture_sequence,
                 bid_price,
                 bid_quantity,
                 ask_price,
                 ask_quantity,
+                ..
             } => MarketEvent::BookTicker(BookTicker {
                 bid: BookLevel {
                     price: bid_price,
@@ -251,12 +313,18 @@ impl CapturedMarketEventRecord {
                     price: ask_price,
                     quantity: ask_quantity,
                 },
-                event_time,
+                event_time: exchange_event_time
+                    .or(captured_at_ms)
+                    .or(capture_sequence)
+                    .unwrap_or(0),
             }),
             Self::Depth {
-                event_time,
+                exchange_event_time,
+                captured_at_ms,
+                capture_sequence,
                 bids,
                 asks,
+                ..
             } => MarketEvent::Depth(DepthSnapshot {
                 bids: bids
                     .into_iter()
@@ -272,7 +340,10 @@ impl CapturedMarketEventRecord {
                         quantity: level.quantity,
                     })
                     .collect(),
-                event_time,
+                event_time: exchange_event_time
+                    .or(captured_at_ms)
+                    .or(capture_sequence)
+                    .unwrap_or(0),
             }),
         }
     }
@@ -640,6 +711,8 @@ impl BinanceClient {
         let mut symbols = BTreeSet::new();
         let mut summary = CapturedMarketDataSummary::default();
         let mut previous_event_time = None;
+        let mut previous_capture_sequence = None;
+        let mut previous_captured_at_ms = None;
 
         for (line_index, raw_line) in text.lines().enumerate() {
             let line = raw_line.trim();
@@ -663,8 +736,36 @@ impl BinanceClient {
                     }
 
                     let event_time = record.event_time();
+                    let capture_sequence = record.capture_sequence();
+                    let captured_at_ms = record.captured_at_ms();
                     summary.first_event_time = Some(summary.first_event_time.map_or(event_time, |current| current.min(event_time)));
                     summary.last_event_time = Some(summary.last_event_time.map_or(event_time, |current| current.max(event_time)));
+
+                    if let Some(capture_sequence) = capture_sequence {
+                        summary.first_capture_sequence = Some(
+                            summary
+                                .first_capture_sequence
+                                .map_or(capture_sequence, |current| current.min(capture_sequence)),
+                        );
+                        summary.last_capture_sequence = Some(
+                            summary
+                                .last_capture_sequence
+                                .map_or(capture_sequence, |current| current.max(capture_sequence)),
+                        );
+                    }
+
+                    if let Some(captured_at_ms) = captured_at_ms {
+                        summary.first_captured_at_ms = Some(
+                            summary
+                                .first_captured_at_ms
+                                .map_or(captured_at_ms, |current| current.min(captured_at_ms)),
+                        );
+                        summary.last_captured_at_ms = Some(
+                            summary
+                                .last_captured_at_ms
+                                .map_or(captured_at_ms, |current| current.max(captured_at_ms)),
+                        );
+                    }
 
                     if let Some(previous_event_time) = previous_event_time
                         && event_time < previous_event_time
@@ -672,6 +773,22 @@ impl BinanceClient {
                         summary.event_time_regressions += 1;
                     }
                     previous_event_time = Some(event_time);
+
+                    if let (Some(previous_capture_sequence), Some(capture_sequence)) =
+                        (previous_capture_sequence, capture_sequence)
+                        && capture_sequence < previous_capture_sequence
+                    {
+                        summary.capture_sequence_regressions += 1;
+                    }
+                    previous_capture_sequence = capture_sequence.or(previous_capture_sequence);
+
+                    if let (Some(previous_captured_at_ms), Some(captured_at_ms)) =
+                        (previous_captured_at_ms, captured_at_ms)
+                        && captured_at_ms < previous_captured_at_ms
+                    {
+                        summary.captured_at_regressions += 1;
+                    }
+                    previous_captured_at_ms = captured_at_ms.or(previous_captured_at_ms);
 
                     events.push(record.into_market_event());
                 }
@@ -823,7 +940,7 @@ impl BinanceClient {
         Ok(stream::iter(trades))
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
     pub fn parse_market_event_message_for_test(payload: &str) -> Option<MarketEvent> {
         parse_market_event_message(payload)
     }
@@ -837,6 +954,10 @@ struct BinanceCombinedStreamEnvelope {
 
 fn parse_market_event_message(payload: &str) -> Option<MarketEvent> {
     let envelope = serde_json::from_str::<BinanceCombinedStreamEnvelope>(payload).ok()?;
+    let captured_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
 
     if envelope.stream.ends_with("@trade") {
         let trade = serde_json::from_value::<BinanceTradeMessage>(envelope.data)
@@ -848,14 +969,14 @@ fn parse_market_event_message(payload: &str) -> Option<MarketEvent> {
     if envelope.stream.ends_with("@bookTicker") {
         let book_ticker = serde_json::from_value::<BinanceBookTickerMessage>(envelope.data)
             .ok()?
-            .into_book_ticker()?;
+            .into_book_ticker(captured_at_ms)?;
         return Some(MarketEvent::BookTicker(book_ticker));
     }
 
     if envelope.stream.contains("@depth") {
         let depth = serde_json::from_value::<BinanceDepthMessage>(envelope.data)
             .ok()?
-            .into_depth_snapshot()?;
+            .into_depth_snapshot(captured_at_ms)?;
         return Some(MarketEvent::Depth(depth));
     }
 
