@@ -90,8 +90,12 @@ fn trade_manager_applies_fees_to_realized_pnl() {
 
     let pnl = manager.close_position("DOGEUSDT", 0.11, 2.0);
 
-    assert!((pnl - 0.979).abs() < 1e-9);
-    assert!((manager.realized_pnl() - 0.979).abs() < 1e-9);
+    // gross_pnl = (0.11 - 0.10) * 100 = 1.0
+    // exit_fee = 0.11 * 100 * 0.001 = 0.011
+    // net_pnl = 1.0 - 0.011 = 0.989
+    // (entry fee of 0.01 was already deducted from cash at open time)
+    assert!((pnl - 0.989).abs() < 1e-9);
+    assert!((manager.realized_pnl() - 0.989).abs() < 1e-9);
 }
 
 #[test]

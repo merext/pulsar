@@ -130,9 +130,13 @@ impl BacktestEngine {
         requested_quantity: f64,
         expected_edge_bps: f64,
     ) -> ExecutionReport {
+        // Passive (maker) orders rest on the near side of the book:
+        // - A passive Buy rests at the bid → fills at bid price
+        // - A passive Sell rests at the ask → fills at ask price
+        // This is the opposite of taker orders which cross the spread.
         let reference_price = market_price.execution_reference_price(match side {
-            Side::Buy => Signal::Buy,
-            Side::Sell => Signal::Sell,
+            Side::Buy => Signal::Sell, // bid price (passive buy rests at bid)
+            Side::Sell => Signal::Buy, // ask price (passive sell rests at ask)
         });
         let queue = self.estimate_passive_fill(side, market_price, requested_quantity);
         let executed_quantity =

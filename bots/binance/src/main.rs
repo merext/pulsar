@@ -497,8 +497,14 @@ fn build_strategy(
             )
             .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
         )),
+        "spread-regime-capture" => Ok(Box::new(
+            strategies::spread_regime_capture::SpreadRegimeCaptureStrategy::from_file(
+                resolve_workspace_path("config/strategies/spread_regime_capture.toml"),
+            )
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        )),
         _ => Err(format!(
-            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker",
+            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture",
             strategy_name
         )
         .into()),
@@ -548,6 +554,7 @@ fn strategy_config_path(strategy_name: &str) -> Result<&'static str, Box<dyn Err
         "trade-flow-reclaim" => Ok("config/strategies/trade_flow_reclaim.toml"),
         "liquidity-sweep-reversal" => Ok("config/strategies/liquidity_sweep_reversal.toml"),
         "microprice-imbalance-maker" => Ok("config/strategies/microprice_imbalance_maker.toml"),
+        "spread-regime-capture" => Ok("config/strategies/spread_regime_capture.toml"),
         _ => Err(format!("Unknown strategy '{}'.", strategy_name).into()),
     }
 }
@@ -631,6 +638,12 @@ fn build_strategy_from_search_spec(
         ) as Box<dyn Strategy>,
             "microprice-imbalance-maker" => Box::new(
                 strategies::microprice_imbalance_maker::MicropriceImbalanceMakerStrategy::from_file(
+                    &temp_path,
+                )
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+            ) as Box<dyn Strategy>,
+            "spread-regime-capture" => Box::new(
+                strategies::spread_regime_capture::SpreadRegimeCaptureStrategy::from_file(
                     &temp_path,
                 )
                 .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,

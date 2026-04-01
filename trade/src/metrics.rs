@@ -186,13 +186,12 @@ impl TradeManager {
             // Calculate gross PnL
             let gross_pnl = (price - position.entry_price) * position.quantity;
 
-            // Calculate trading fees (entry + exit fees)
-            let entry_fee = position.entry_price * position.quantity * self.trading_fee;
+            // Calculate exit fee only — entry fee was already deducted from cash
+            // at position open time in record_buy(notional, fee)
             let exit_fee = price * position.quantity * self.trading_fee;
-            let total_fees = entry_fee + exit_fee;
 
-            // Net PnL after fees
-            let net_pnl = gross_pnl - total_fees;
+            // Net PnL after exit fee (entry fee already reflected in cash balance)
+            let net_pnl = gross_pnl - exit_fee;
             let notional_value = price * position.quantity;
             self.account.record_sell(notional_value, exit_fee, net_pnl);
             self.metrics.set_fees_paid(self.account.fees_paid);
@@ -248,8 +247,8 @@ impl TradeManager {
                 latency_impact_bps: attribution.latency_impact_bps,
                 market_impact_bps: attribution.market_impact_bps,
                 hold_time_millis: Some(
-                    (timestamp * 1000.0).max(0.0) as u64
-                        - (position.entry_time * 1000.0).max(0.0) as u64,
+                    ((timestamp * 1000.0).max(0.0) as u64)
+                        .saturating_sub((position.entry_time * 1000.0).max(0.0) as u64),
                 ),
                 exit_reason: attribution.rationale,
                 entry_price: Some(position.entry_price),
@@ -276,13 +275,11 @@ impl TradeManager {
                 // Reducing position (partial close)
                 let gross_pnl = (new_price - position.entry_price) * quantity_change.abs();
 
-                // Calculate trading fees for the partial close
-                let entry_fee = position.entry_price * quantity_change.abs() * self.trading_fee;
+                // Exit fee only — entry fee was already deducted from cash at open time
                 let exit_fee = new_price * quantity_change.abs() * self.trading_fee;
-                let total_fees = entry_fee + exit_fee;
 
-                // Net PnL after fees
-                let net_pnl = gross_pnl - total_fees;
+                // Net PnL after exit fee
+                let net_pnl = gross_pnl - exit_fee;
 
                 let trade_id = self.metrics.next_trade_id();
                 self.metrics.record_trade(TradeRecord {
@@ -327,13 +324,11 @@ impl TradeManager {
             // Calculate gross unrealized PnL
             let gross_pnl = (current_price - position.entry_price) * position.quantity;
 
-            // Calculate trading fees (entry fee + estimated exit fee)
-            let entry_fee = position.entry_price * position.quantity * self.trading_fee;
+            // Only subtract estimated exit fee — entry fee already reflected in cash
             let estimated_exit_fee = current_price * position.quantity * self.trading_fee;
-            let total_fees = entry_fee + estimated_exit_fee;
 
-            // Net unrealized PnL after fees
-            gross_pnl - total_fees
+            // Net unrealized PnL after estimated exit fee
+            gross_pnl - estimated_exit_fee
         } else {
             0.0
         }
@@ -347,13 +342,11 @@ impl TradeManager {
                     // Calculate gross unrealized PnL
                     let gross_pnl = (price - position.entry_price) * position.quantity;
 
-                    // Calculate trading fees (entry fee + estimated exit fee)
-                    let entry_fee = position.entry_price * position.quantity * self.trading_fee;
+                    // Only subtract estimated exit fee — entry fee already in cash
                     let estimated_exit_fee = price * position.quantity * self.trading_fee;
-                    let total_fees = entry_fee + estimated_exit_fee;
 
-                    // Net unrealized PnL after fees
-                    gross_pnl - total_fees
+                    // Net unrealized PnL after estimated exit fee
+                    gross_pnl - estimated_exit_fee
                 } else {
                     0.0
                 }

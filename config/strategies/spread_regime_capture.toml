@@ -1,0 +1,71 @@
+# Spread-Regime Capture Strategy Configuration
+# Long-only maker mean-reversion strategy exploiting transient price dislocations
+#
+# Entry: Maker (limit buy at bid) when price dislocates below fair value
+# Exit:  Maker (limit sell at ask) for take-profit / dislocation reversal
+#        Taker (IOC sell) for stop-loss / max-hold / panic-vol
+#
+# Cost model:
+#   Maker entry + maker exit: ~2 bps round-trip (0.1% maker fee x 2)
+#   Maker entry + taker exit: ~12 bps (maker fee + taker fee + spread)
+#   Fill rate ~35%, so 65% of signals don't fill (zero cost)
+
+# Rolling trade window for VWAP computation
+trade_window_millis = 2000
+
+# --- Fair-value weights (must sum to ~1.0) ---
+fair_value_w_microprice = 0.5
+fair_value_w_ema_mid = 0.3
+fair_value_w_vwap = 0.2
+
+# --- Adaptive entry threshold ---
+# entry_threshold = base + vol_scale * realized_vol + spread_scale * ema_spread
+# Low base threshold since we're using maker entry (cheap to enter).
+# On DOGEUSDT, typical dislocations are 0.1-0.5 bps, rarely >1 bps.
+# With maker execution cost of ~2 bps round-trip, we need dislocation > ~3.3 bps
+# to have positive expected edge (dislocation * 0.6 - 2.0 > 0.5 → dislocation > 4.2 bps).
+# But that threshold would get 0 trades. Instead, we set a low threshold and
+# rely on fill rate filtering (35%) and the exit logic to be profitable.
+base_threshold_bps = 0.3
+vol_scale = 0.02
+spread_scale = 0.05
+
+# --- Edge & cost ---
+# Expected fraction of dislocation captured on mean reversion
+mean_reversion_factor = 0.6
+# Cost of one maker leg in bps (~1 bps for Binance 0.1% maker fee)
+# For maker-maker round-trip, total cost = 2 * half_round_trip_cost_bps
+half_round_trip_cost_bps = 1.0
+# Minimum edge after cost to enter. Set to 0 because with maker execution
+# the spread itself contributes edge (buy at bid, sell at ask = earn spread).
+# The dislocation signal just improves entry timing.
+min_edge_after_cost_bps = 0.0
+
+# --- Entry filters ---
+min_vol_bps = 0.5
+max_vol_bps = 500.0
+max_entry_spread_bps = 20.0
+max_adverse_depth = 0.6
+min_trades_in_window = 3
+# Flow imbalance filter (0.0 = disabled)
+# Blocks entry if buyer flow is too strong (dislocation isn't from selling)
+min_flow_imbalance = 0.0
+
+# --- Exit parameters ---
+# Stop loss: taker exit (expensive but protective)
+stop_loss_bps = 8.0
+# Take profit: maker exit (cheap, capture profit at ask)
+take_profit_bps = 4.0
+# Max hold: taker exit after this many ms
+max_hold_millis = 15000
+# Panic vol: taker exit when market too chaotic
+panic_vol_bps = 500.0
+# Dislocation reversal: maker exit when price reverts above FV
+exit_dislocation_reversal_bps = 2.0
+
+# --- Cooldown ---
+entry_cooldown_millis = 300
+
+# --- Cost gate (full round-trip taker cost for reference) ---
+assumed_round_trip_taker_cost_bps = 22.7
+min_expected_edge_after_cost_bps = 0.0
