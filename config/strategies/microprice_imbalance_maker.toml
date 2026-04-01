@@ -1,0 +1,8 @@
+min_order_book_imbalance = 0.08
+min_microprice_edge_bps = 1.5
+max_spread_bps = 8.0
+max_quote_size_notional = 20.0
+hold_time_millis = 3000
+stop_loss_bps = 10.0
+take_profit_bps = 12.0
+entry_cooldown_millis = 2000

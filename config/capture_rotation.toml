@@ -1,0 +1,2 @@
+max_events_per_file = 0
+gzip = false

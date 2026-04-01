@@ -1,5 +1,6 @@
 use binance_exchange::BinanceClient;
 use futures_util::StreamExt;
+use std::io::Write;
 use trade::market::MarketEvent;
 
 #[test]
@@ -95,4 +96,23 @@ async fn summarizes_captured_jsonl_fixture() {
     assert_eq!(parsed.summary.last_captured_at_ms, None);
     assert_eq!(parsed.summary.captured_at_regressions, 0);
     assert_eq!(parsed.summary.symbols, vec!["DOGEUSDT"]);
+}
+
+#[tokio::test]
+async fn loads_gzipped_captured_jsonl_fixture() {
+    let temp_path = std::env::temp_dir().join("pulsar_capture_test.jsonl.gz");
+    let payload = std::fs::read("/tmp/pulsar_capture.jsonl").expect("fixture exists");
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&payload).expect("write gzip payload");
+    let compressed = encoder.finish().expect("finish gzip payload");
+    std::fs::write(&temp_path, compressed).expect("write temp gz fixture");
+
+    let parsed = BinanceClient::load_captured_market_event_data_from_uri(
+        temp_path.to_str().expect("temp path to str"),
+    )
+    .await
+    .expect("gz fixture loads");
+
+    assert!(!parsed.events.is_empty());
+    let _ = std::fs::remove_file(temp_path);
 }

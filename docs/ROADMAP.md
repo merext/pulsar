@@ -33,27 +33,31 @@
 - [x] Trade-flow momentum taker first major refinement pass
 - [x] Liquidity sweep / exhaustion taker baseline
 - [x] Liquidity sweep / exhaustion taker first major refinement pass
+- [x] Trade-flow reclaim taker baseline
 - [x] Multi-day comparison harness as shared orchestration workflow
 - [x] Parameter search scaffolding
 
 ## Backlog - Secondary Improvements
 
-- [ ] Shared position-sizing adapter inside strategies to avoid duplicate ad hoc target notional logic
-- [ ] Richer per-trade attribution export for replay analysis
-- [ ] Regime tags on replay runs
-- [ ] Derived aggregate compare metrics in CLI output (per-strategy totals, means, ranking)
-- [ ] More detailed sweep decomposition metrics before any second sweep refinement pass
-- [ ] More detailed momentum decomposition metrics before any second momentum refinement pass
-- [ ] Capture file rotation/compression after replay format stabilizes
-- [ ] Metadata sidecar checksum/file-size verification
+- [x] Shared position-sizing adapter inside strategies to avoid duplicate ad hoc target notional logic
+- [x] Richer per-trade attribution export for replay analysis
+- [x] Regime tags on replay runs
+- [x] Derived aggregate compare metrics in CLI output (per-strategy totals, means, ranking)
+- [x] More detailed sweep decomposition metrics before any second sweep refinement pass
+- [x] More detailed momentum decomposition metrics before any second momentum refinement pass
+- [x] Capture file rotation/compression after replay format stabilizes
+- [x] Metadata sidecar checksum/file-size verification
 - [x] Batch dataset index builder over captured sessions under `data/binance/capture/`
 - [x] Batch replay launcher over indexed captured datasets
 - [x] Legacy capture backfill into sidecar/index format only if needed
 - [x] Indexed dataset filters by capture time window and minimum event counts
 - [x] Minimal sequential capture-batch orchestration for quote-aware dataset collection
-- [ ] Sidecar inference quality hints for backfilled datasets with missing capture timestamps
-- [ ] Indexed dataset filters for quote/depth presence quality classes
-- [ ] Capture-batch pause/gap controls between sequential segments
+- [x] Sidecar inference quality hints for backfilled datasets with missing capture timestamps
+- [x] Indexed dataset filters for quote/depth presence quality classes
+- [x] Capture-batch pause/gap controls between sequential segments
+- [x] Strategy diagnostics export for per-model counters and gauges
+- [x] Expose quote/depth quality and sidecar-verification filters in capture CLI
+- [x] Validate rotation/compression end-to-end on a real capture batch
 
 ## Phase 4 - Quote/Depth Infrastructure
 
@@ -67,14 +71,15 @@
 
 ## Phase 5 - Maker Research
 
-- [ ] Microprice imbalance maker
-- [ ] Queue model v1
-- [ ] Passive fill realism tests
-- [ ] Live 1m / 5m / 10m validation
+- [x] Microprice imbalance maker
+- [x] Queue model v1
+- [x] Passive fill realism tests
+- [x] Live 1m / 5m / 10m validation
 
 ## Phase 6 - Optimization and Research Loop
 
-- [ ] Per-model parameter optimization
-- [ ] Regime segmentation
-- [ ] Walk-forward validation
-- [ ] ML-ready feature pipeline if justified by results
+- [x] Per-model parameter optimization
+- [x] Regime segmentation
+- [x] Walk-forward validation
+- [x] ML-ready feature pipeline if justified by results
+- [x] Honest taker cost gate aligned with attribution evidence

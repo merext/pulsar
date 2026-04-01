@@ -5,17 +5,63 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct TradeRecord {
+    pub trade_id: usize,
+    pub symbol: String,
     pub timestamp: f64,
     pub price: f64,
     pub quantity: f64,
     pub signal: Signal,
     pub pnl: Option<f64>,
+    pub gross_pnl: Option<f64>,
+    pub fee_paid: f64,
+    pub expected_edge_bps: f64,
+    pub rationale: Option<&'static str>,
+    pub decision_confidence: f64,
+    pub requested_quantity: f64,
+    pub executed_quantity: f64,
+    pub synthetic_half_spread_bps: f64,
+    pub slippage_bps: f64,
+    pub latency_impact_bps: f64,
+    pub market_impact_bps: f64,
+    pub hold_time_millis: Option<u64>,
+    pub exit_reason: Option<&'static str>,
+    pub entry_price: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PendingEntryAttribution {
+    rationale: Option<&'static str>,
+    decision_confidence: f64,
+    expected_edge_bps: f64,
+    requested_quantity: f64,
+    executed_quantity: f64,
+    fee_paid: f64,
+    synthetic_half_spread_bps: f64,
+    slippage_bps: f64,
+    latency_impact_bps: f64,
+    market_impact_bps: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PendingExitAttribution {
+    rationale: Option<&'static str>,
+    decision_confidence: f64,
+    expected_edge_bps: f64,
+    requested_quantity: f64,
+    executed_quantity: f64,
+    fee_paid: f64,
+    synthetic_half_spread_bps: f64,
+    slippage_bps: f64,
+    latency_impact_bps: f64,
+    market_impact_bps: f64,
 }
 
 #[derive(Debug, Clone)]
 pub struct TradeManager {
     positions: HashMap<String, Position>,
     metrics: PerformanceMetrics,
+    pending_entry_attribution: HashMap<String, PendingEntryAttribution>,
+    pending_exit_attribution: HashMap<String, PendingExitAttribution>,
     total_ticks: usize, // Total number of market data ticks received
     trading_fee: f64,   // Trading fee as decimal (e.g., 0.001 for 0.1%)
     account: SimulationAccount,
@@ -26,6 +72,8 @@ impl TradeManager {
         let mut manager = Self {
             positions: HashMap::new(),
             metrics: PerformanceMetrics::new(),
+            pending_entry_attribution: HashMap::new(),
+            pending_exit_attribution: HashMap::new(),
             total_ticks: 0,
             trading_fee,
             account: SimulationAccount::new(initial_cash),
@@ -46,6 +94,7 @@ impl TradeManager {
         price: f64,
         quantity: f64,
         timestamp: f64,
+        report: Option<&ExecutionReport>,
     ) -> Result<(), &'static str> {
         let notional_value = price * quantity;
         let fee_paid = notional_value * self.trading_fee;
@@ -75,18 +124,64 @@ impl TradeManager {
         );
 
         // Record the buy trade
+        let attribution = report.map_or_else(
+            || {
+                self.pending_entry_attribution
+                    .remove(symbol)
+                    .unwrap_or_default()
+            },
+            |report| PendingEntryAttribution {
+                rationale: report.rationale,
+                decision_confidence: report.decision_confidence,
+                expected_edge_bps: report.expected_edge_bps,
+                requested_quantity: report.requested_quantity,
+                executed_quantity: report.executed_quantity,
+                fee_paid: report.fee_paid,
+                synthetic_half_spread_bps: report.synthetic_half_spread_bps,
+                slippage_bps: report.slippage_bps,
+                latency_impact_bps: report.latency_impact_bps,
+                market_impact_bps: report.market_impact_bps,
+            },
+        );
+        let trade_id = self.metrics.next_trade_id();
         self.metrics.record_trade(TradeRecord {
+            trade_id,
+            symbol: symbol.to_string(),
             timestamp,
             price,
             quantity,
             signal: Signal::Buy,
             pnl: None, // No PnL for opening position
+            gross_pnl: None,
+            fee_paid: attribution.fee_paid.max(fee_paid),
+            expected_edge_bps: attribution.expected_edge_bps,
+            rationale: attribution.rationale,
+            decision_confidence: attribution.decision_confidence,
+            requested_quantity: attribution.requested_quantity.max(quantity),
+            executed_quantity: attribution.executed_quantity.max(quantity),
+            synthetic_half_spread_bps: attribution.synthetic_half_spread_bps,
+            slippage_bps: attribution.slippage_bps,
+            latency_impact_bps: attribution.latency_impact_bps,
+            market_impact_bps: attribution.market_impact_bps,
+            hold_time_millis: None,
+            exit_reason: None,
+            entry_price: Some(price),
         });
 
         Ok(())
     }
 
     pub fn close_position(&mut self, symbol: &str, price: f64, timestamp: f64) -> f64 {
+        self.close_position_with_report(symbol, price, timestamp, None)
+    }
+
+    pub fn close_position_with_report(
+        &mut self,
+        symbol: &str,
+        price: f64,
+        timestamp: f64,
+        report: Option<&ExecutionReport>,
+    ) -> f64 {
         if let Some(position) = self.positions.remove(symbol) {
             // Calculate gross PnL
             let gross_pnl = (price - position.entry_price) * position.quantity;
@@ -109,12 +204,55 @@ impl TradeManager {
                 self.account.max_drawdown,
             );
 
+            let attribution = report.map_or_else(
+                || {
+                    self.pending_exit_attribution
+                        .remove(symbol)
+                        .unwrap_or_default()
+                },
+                |report| PendingExitAttribution {
+                    rationale: report.rationale,
+                    decision_confidence: report.decision_confidence,
+                    expected_edge_bps: report.expected_edge_bps,
+                    requested_quantity: report.requested_quantity,
+                    executed_quantity: report.executed_quantity,
+                    fee_paid: report.fee_paid,
+                    synthetic_half_spread_bps: report.synthetic_half_spread_bps,
+                    slippage_bps: report.slippage_bps,
+                    latency_impact_bps: report.latency_impact_bps,
+                    market_impact_bps: report.market_impact_bps,
+                },
+            );
+            let trade_id = self.metrics.next_trade_id();
             self.metrics.record_trade(TradeRecord {
+                trade_id,
+                symbol: symbol.to_string(),
                 timestamp,
                 price,
                 quantity: position.quantity,
                 signal: Signal::Sell, // Assuming closing is selling
                 pnl: Some(net_pnl),
+                gross_pnl: Some(gross_pnl),
+                fee_paid: attribution.fee_paid.max(exit_fee),
+                expected_edge_bps: attribution.expected_edge_bps,
+                rationale: attribution.rationale,
+                decision_confidence: if attribution.decision_confidence > 0.0 {
+                    attribution.decision_confidence
+                } else {
+                    1.0
+                },
+                requested_quantity: attribution.requested_quantity.max(position.quantity),
+                executed_quantity: attribution.executed_quantity.max(position.quantity),
+                synthetic_half_spread_bps: attribution.synthetic_half_spread_bps,
+                slippage_bps: attribution.slippage_bps,
+                latency_impact_bps: attribution.latency_impact_bps,
+                market_impact_bps: attribution.market_impact_bps,
+                hold_time_millis: Some(
+                    (timestamp * 1000.0).max(0.0) as u64
+                        - (position.entry_time * 1000.0).max(0.0) as u64,
+                ),
+                exit_reason: attribution.rationale,
+                entry_price: Some(position.entry_price),
             });
             net_pnl
         } else {
@@ -146,12 +284,29 @@ impl TradeManager {
                 // Net PnL after fees
                 let net_pnl = gross_pnl - total_fees;
 
+                let trade_id = self.metrics.next_trade_id();
                 self.metrics.record_trade(TradeRecord {
+                    trade_id,
+                    symbol: symbol.to_string(),
                     timestamp,
                     price: new_price,
                     quantity: quantity_change.abs(),
                     signal: Signal::Sell,
                     pnl: Some(net_pnl),
+                    gross_pnl: Some(gross_pnl),
+                    fee_paid: exit_fee,
+                    expected_edge_bps: 0.0,
+                    rationale: None,
+                    decision_confidence: 1.0,
+                    requested_quantity: quantity_change.abs(),
+                    executed_quantity: quantity_change.abs(),
+                    synthetic_half_spread_bps: 0.0,
+                    slippage_bps: 0.0,
+                    latency_impact_bps: 0.0,
+                    market_impact_bps: 0.0,
+                    hold_time_millis: None,
+                    exit_reason: None,
+                    entry_price: Some(position.entry_price),
                 });
             }
 
@@ -215,6 +370,59 @@ impl TradeManager {
     }
 
     pub fn record_execution_report(&mut self, report: &ExecutionReport) {
+        if matches!(report.side, Some(crate::execution::Side::Buy))
+            && matches!(
+                report.status,
+                ExecutionStatus::Filled | ExecutionStatus::PartiallyFilled
+            )
+            && report.executed_quantity > 0.0
+        {
+            let Some(symbol) = report.symbol.as_ref() else {
+                self.metrics.record_execution_report(report);
+                return;
+            };
+            self.pending_entry_attribution.insert(
+                symbol.clone(),
+                PendingEntryAttribution {
+                    rationale: report.rationale,
+                    decision_confidence: report.decision_confidence,
+                    expected_edge_bps: report.expected_edge_bps,
+                    requested_quantity: report.requested_quantity,
+                    executed_quantity: report.executed_quantity,
+                    fee_paid: report.fee_paid,
+                    synthetic_half_spread_bps: report.synthetic_half_spread_bps,
+                    slippage_bps: report.slippage_bps,
+                    latency_impact_bps: report.latency_impact_bps,
+                    market_impact_bps: report.market_impact_bps,
+                },
+            );
+        } else if matches!(report.side, Some(crate::execution::Side::Sell))
+            && matches!(
+                report.status,
+                ExecutionStatus::Filled | ExecutionStatus::PartiallyFilled
+            )
+            && report.executed_quantity > 0.0
+        {
+            let Some(symbol) = report.symbol.as_ref() else {
+                self.metrics.record_execution_report(report);
+                return;
+            };
+            self.pending_exit_attribution.insert(
+                symbol.clone(),
+                PendingExitAttribution {
+                    rationale: report.rationale,
+                    decision_confidence: report.decision_confidence,
+                    expected_edge_bps: report.expected_edge_bps,
+                    requested_quantity: report.requested_quantity,
+                    executed_quantity: report.executed_quantity,
+                    fee_paid: report.fee_paid,
+                    synthetic_half_spread_bps: report.synthetic_half_spread_bps,
+                    slippage_bps: report.slippage_bps,
+                    latency_impact_bps: report.latency_impact_bps,
+                    market_impact_bps: report.market_impact_bps,
+                },
+            );
+        }
         self.metrics.record_execution_report(report);
     }
 
@@ -277,12 +485,14 @@ impl TradeManager {
 #[derive(Debug, Clone)]
 pub struct PerformanceMetrics {
     trades: Vec<TradeRecord>,
+    next_trade_id: usize,
     total_pnl: f64,
     win_count: usize,
     loss_count: usize,
     total_trades: usize,
     entry_trades: usize,
     closed_trades: usize,
+    pending_orders: usize,
     filled_orders: usize,
     partially_filled_orders: usize,
     rejected_orders: usize,
@@ -307,12 +517,14 @@ impl PerformanceMetrics {
     pub fn new() -> Self {
         Self {
             trades: Vec::new(),
+            next_trade_id: 1,
             total_pnl: 0.0,
             win_count: 0,
             loss_count: 0,
             total_trades: 0,
             entry_trades: 0,
             closed_trades: 0,
+            pending_orders: 0,
             filled_orders: 0,
             partially_filled_orders: 0,
             rejected_orders: 0,
@@ -353,8 +565,15 @@ impl PerformanceMetrics {
         self.trades.push(trade);
     }
 
+    pub fn next_trade_id(&mut self) -> usize {
+        let trade_id = self.next_trade_id;
+        self.next_trade_id += 1;
+        trade_id
+    }
+
     pub fn record_execution_report(&mut self, report: &ExecutionReport) {
         match report.status {
+            ExecutionStatus::Pending => self.pending_orders += 1,
             ExecutionStatus::Filled => self.filled_orders += 1,
             ExecutionStatus::PartiallyFilled => self.partially_filled_orders += 1,
             ExecutionStatus::Rejected => self.rejected_orders += 1,
@@ -479,6 +698,10 @@ impl PerformanceMetrics {
         self.filled_orders
     }
 
+    pub fn pending_orders(&self) -> usize {
+        self.pending_orders
+    }
+
     pub fn partially_filled_orders(&self) -> usize {
         self.partially_filled_orders
     }
@@ -505,6 +728,7 @@ impl PerformanceMetrics {
 
     pub fn rejection_rate(&self) -> f64 {
         let total_reports = self.filled_orders
+            + self.pending_orders
             + self.partially_filled_orders
             + self.rejected_orders
             + self.cancelled_orders

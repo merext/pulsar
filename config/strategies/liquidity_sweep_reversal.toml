@@ -13,3 +13,5 @@ stop_loss_bps = 16.0
 take_profit_bps = 20.0
 hold_time_millis = 5000
 entry_cooldown_millis = 3000
+assumed_round_trip_taker_cost_bps = 22.7
+min_expected_edge_after_cost_bps = 0.0

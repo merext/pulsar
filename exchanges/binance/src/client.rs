@@ -3,6 +3,7 @@ use bytes::Bytes;
 use csv::ReaderBuilder;
 use futures_util::{SinkExt, StreamExt, stream::{self, Stream}};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -41,6 +42,12 @@ pub struct CapturedMarketDataSummary {
 pub struct ParsedMarketEventData {
     pub events: Vec<MarketEvent>,
     pub summary: CapturedMarketDataSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileIntegritySummary {
+    pub size_bytes: u64,
+    pub sha256_hex: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -680,10 +687,25 @@ impl BinanceClient {
         let payload = if uri.starts_with("http://") || uri.starts_with("https://") {
             reqwest::get(uri).await?.bytes().await?
         } else {
-            Bytes::from(tokio::fs::read(uri).await?)
+            let file_content = tokio::fs::read(uri).await?;
+            if uri.ends_with(".gz") {
+                let mut decoder = flate2::read::GzDecoder::new(Cursor::new(file_content));
+                let mut decompressed = Vec::new();
+                std::io::Read::read_to_end(&mut decoder, &mut decompressed)?;
+                Bytes::from(decompressed)
+            } else {
+                Bytes::from(file_content)
+            }
         };
 
         Self::parse_market_event_data(payload)
+    }
+
+    pub async fn file_integrity_summary_from_path(
+        path: &str,
+    ) -> Result<FileIntegritySummary, Box<dyn std::error::Error + Send + Sync>> {
+        let file_content = tokio::fs::read(path).await?;
+        Ok(Self::file_integrity_summary(&file_content))
     }
 
     fn parse_trade_data(
@@ -806,6 +828,15 @@ impl BinanceClient {
         summary.symbols = symbols.into_iter().collect();
 
         Ok(ParsedMarketEventData { events, summary })
+    }
+
+    pub fn file_integrity_summary(data: &[u8]) -> FileIntegritySummary {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        FileIntegritySummary {
+            size_bytes: data.len() as u64,
+            sha256_hex: format!("{:x}", hasher.finalize()),
+        }
     }
 
     fn parse_csv_from_reader<R: std::io::Read>(

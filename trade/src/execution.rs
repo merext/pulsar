@@ -1,5 +1,11 @@
 use crate::trader::OrderType;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionMetric {
+    pub name: &'static str,
+    pub value: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Buy,
@@ -32,6 +38,7 @@ pub enum OrderIntent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionStatus {
+    Pending,
     Filled,
     PartiallyFilled,
     Rejected,
@@ -42,8 +49,12 @@ pub enum ExecutionStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecutionReport {
     pub status: ExecutionStatus,
+    pub symbol: Option<String>,
     pub side: Option<Side>,
     pub order_type: Option<OrderType>,
+    pub rationale: Option<&'static str>,
+    pub decision_confidence: f64,
+    pub decision_metrics: Vec<DecisionMetric>,
     pub requested_quantity: f64,
     pub executed_quantity: f64,
     pub execution_price: Option<f64>,
@@ -61,8 +72,12 @@ impl ExecutionReport {
     pub fn ignored() -> Self {
         Self {
             status: ExecutionStatus::Ignored,
+            symbol: None,
             side: None,
             order_type: None,
+            rationale: None,
+            decision_confidence: 0.0,
+            decision_metrics: Vec::new(),
             requested_quantity: 0.0,
             executed_quantity: 0.0,
             execution_price: None,

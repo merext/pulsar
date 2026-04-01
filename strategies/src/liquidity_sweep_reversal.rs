@@ -1,9 +1,41 @@
+use crate::cost_gate::{
+    clears_taker_cost_gate, expected_edge_after_cost_bps, DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS,
+    DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::Path;
-use trade::execution::{OrderIntent, Side, TimeInForce};
+use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
 use trade::market::{MarketEvent, MarketState};
-use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyLogger};
+use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics, StrategyLogger};
 use trade::trader::OrderType;
+
+#[derive(Default)]
+struct SweepDiagnostics {
+    total_decisions: usize,
+    blocked_min_trades: usize,
+    blocked_spread: usize,
+    blocked_sweep_drop: usize,
+    blocked_reclaim_band: usize,
+    blocked_flow: usize,
+    blocked_recent_flow: usize,
+    blocked_vwap_stretch: usize,
+    blocked_order_book: usize,
+    blocked_large_trade_ratio: usize,
+    blocked_cost_gate: usize,
+    entries: usize,
+    exits_stop_loss: usize,
+    exits_take_profit: usize,
+    exits_reversal_failed: usize,
+    exits_max_hold: usize,
+    last_sweep_drop_bps: f64,
+    last_reclaim_bps: f64,
+    last_recent_buyer_imbalance: f64,
+    last_large_trade_ratio: f64,
+    last_reclaim_above_vwap_bps: f64,
+    last_expected_edge_bps: f64,
+    last_edge_after_cost_bps: f64,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LiquiditySweepReversalConfig {
@@ -22,6 +54,18 @@ pub struct LiquiditySweepReversalConfig {
     pub take_profit_bps: f64,
     pub hold_time_millis: u64,
     pub entry_cooldown_millis: u64,
+    #[serde(default = "default_assumed_round_trip_taker_cost_bps")]
+    pub assumed_round_trip_taker_cost_bps: f64,
+    #[serde(default = "default_min_expected_edge_after_cost_bps")]
+    pub min_expected_edge_after_cost_bps: f64,
+}
+
+fn default_assumed_round_trip_taker_cost_bps() -> f64 {
+    DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS
+}
+
+fn default_min_expected_edge_after_cost_bps() -> f64 {
+    DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS
 }
 
 impl Default for LiquiditySweepReversalConfig {
@@ -42,6 +86,8 @@ impl Default for LiquiditySweepReversalConfig {
             take_profit_bps: 20.0,
             hold_time_millis: 5_000,
             entry_cooldown_millis: 3_000,
+            assumed_round_trip_taker_cost_bps: DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS,
+            min_expected_edge_after_cost_bps: DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
         }
     }
 }
@@ -50,6 +96,7 @@ pub struct LiquiditySweepReversalStrategy {
     config: LiquiditySweepReversalConfig,
     logger: NoOpStrategyLogger,
     last_entry_time_millis: Option<u64>,
+    diagnostics: SweepDiagnostics,
 }
 
 impl LiquiditySweepReversalStrategy {
@@ -127,9 +174,15 @@ impl LiquiditySweepReversalStrategy {
         large_count as f64 / stats.trade_count as f64
     }
 
-    fn should_enter_long(&self, market_state: &MarketState) -> bool {
+    fn expected_edge_bps(&self, market_state: &MarketState) -> f64 {
+        self.low_to_now_reclaim_bps(market_state)
+    }
+
+    fn should_enter_long(&mut self, market_state: &MarketState) -> bool {
         let stats = market_state.trade_window_stats();
+        self.diagnostics.total_decisions += 1;
         if stats.trade_count < self.config.min_trades_in_window {
+            self.diagnostics.blocked_min_trades += 1;
             return false;
         }
 
@@ -137,27 +190,40 @@ impl LiquiditySweepReversalStrategy {
             .spread_bps()
             .is_some_and(|spread| spread > self.config.max_spread_bps)
         {
+            self.diagnostics.blocked_spread += 1;
             return false;
         }
 
-        if self.high_to_low_drop_bps(market_state) < self.config.min_sweep_drop_bps {
+        let sweep_drop_bps = self.high_to_low_drop_bps(market_state);
+        self.diagnostics.last_sweep_drop_bps = sweep_drop_bps;
+        if sweep_drop_bps < self.config.min_sweep_drop_bps {
+            self.diagnostics.blocked_sweep_drop += 1;
             return false;
         }
 
         let reclaim_bps = self.low_to_now_reclaim_bps(market_state);
+        self.diagnostics.last_reclaim_bps = reclaim_bps;
         if reclaim_bps < self.config.min_reclaim_bps || reclaim_bps > self.config.max_reclaim_bps {
+            self.diagnostics.blocked_reclaim_band += 1;
             return false;
         }
 
         if market_state.trade_flow_imbalance() < self.config.min_buyer_reclaim_imbalance {
+            self.diagnostics.blocked_flow += 1;
             return false;
         }
 
-        if self.recent_buyer_imbalance(market_state) < self.config.min_recent_buyer_imbalance {
+        let recent_buyer_imbalance = self.recent_buyer_imbalance(market_state);
+        self.diagnostics.last_recent_buyer_imbalance = recent_buyer_imbalance;
+        if recent_buyer_imbalance < self.config.min_recent_buyer_imbalance {
+            self.diagnostics.blocked_recent_flow += 1;
             return false;
         }
 
-        if self.reclaim_above_vwap_bps(market_state) > self.config.max_reclaim_above_vwap_bps {
+        let reclaim_above_vwap_bps = self.reclaim_above_vwap_bps(market_state);
+        self.diagnostics.last_reclaim_above_vwap_bps = reclaim_above_vwap_bps;
+        if reclaim_above_vwap_bps > self.config.max_reclaim_above_vwap_bps {
+            self.diagnostics.blocked_vwap_stretch += 1;
             return false;
         }
 
@@ -165,13 +231,37 @@ impl LiquiditySweepReversalStrategy {
             .order_book_imbalance()
             .is_some_and(|imbalance| imbalance < self.config.min_order_book_imbalance)
         {
+            self.diagnostics.blocked_order_book += 1;
             return false;
         }
 
-        self.large_trade_ratio(market_state) >= self.config.min_large_trade_ratio
+        let large_trade_ratio = self.large_trade_ratio(market_state);
+        self.diagnostics.last_large_trade_ratio = large_trade_ratio;
+        if large_trade_ratio < self.config.min_large_trade_ratio {
+            self.diagnostics.blocked_large_trade_ratio += 1;
+            return false;
+        }
+
+        let expected_edge_bps = self.expected_edge_bps(market_state);
+        let edge_after_cost_bps = expected_edge_after_cost_bps(
+            expected_edge_bps,
+            self.config.assumed_round_trip_taker_cost_bps,
+        );
+        self.diagnostics.last_expected_edge_bps = expected_edge_bps;
+        self.diagnostics.last_edge_after_cost_bps = edge_after_cost_bps;
+        if !clears_taker_cost_gate(
+            expected_edge_bps,
+            self.config.assumed_round_trip_taker_cost_bps,
+            self.config.min_expected_edge_after_cost_bps,
+        ) {
+            self.diagnostics.blocked_cost_gate += 1;
+            return false;
+        }
+
+        true
     }
 
-    fn should_exit_long(&self, market_state: &MarketState, context: &StrategyContext) -> Option<&'static str> {
+    fn should_exit_long(&mut self, market_state: &MarketState, context: &StrategyContext) -> Option<&'static str> {
         if context.current_position.quantity <= 0.0 {
             return None;
         }
@@ -184,12 +274,15 @@ impl LiquiditySweepReversalStrategy {
         let pnl_bps = (reference_price - entry_price) / entry_price * 10_000.0;
 
         if pnl_bps <= -self.config.stop_loss_bps {
+            self.diagnostics.exits_stop_loss += 1;
             return Some("stop_loss");
         }
         if pnl_bps >= self.config.take_profit_bps {
+            self.diagnostics.exits_take_profit += 1;
             return Some("take_profit");
         }
         if self.recent_buyer_imbalance(market_state) < -0.08 {
+            self.diagnostics.exits_reversal_failed += 1;
             return Some("reversal_failed");
         }
 
@@ -197,6 +290,7 @@ impl LiquiditySweepReversalStrategy {
         if context.current_position.entry_time > 0.0 {
             let held_millis = now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
             if held_millis >= self.config.hold_time_millis {
+                self.diagnostics.exits_max_hold += 1;
                 return Some("max_hold_time");
             }
         }
@@ -231,11 +325,43 @@ impl Strategy for LiquiditySweepReversalStrategy {
             config,
             logger: NoOpStrategyLogger,
             last_entry_time_millis: None,
+            diagnostics: SweepDiagnostics::default(),
         })
     }
 
     fn get_info(&self) -> String {
         "LiquiditySweepReversalStrategy - taker rebound after local sweep".to_string()
+    }
+
+    fn diagnostics(&self) -> StrategyDiagnostics {
+        let mut counters = BTreeMap::new();
+        counters.insert("sweep.total_decisions".to_string(), self.diagnostics.total_decisions);
+        counters.insert("sweep.blocked_min_trades".to_string(), self.diagnostics.blocked_min_trades);
+        counters.insert("sweep.blocked_spread".to_string(), self.diagnostics.blocked_spread);
+        counters.insert("sweep.blocked_sweep_drop".to_string(), self.diagnostics.blocked_sweep_drop);
+        counters.insert("sweep.blocked_reclaim_band".to_string(), self.diagnostics.blocked_reclaim_band);
+        counters.insert("sweep.blocked_flow".to_string(), self.diagnostics.blocked_flow);
+        counters.insert("sweep.blocked_recent_flow".to_string(), self.diagnostics.blocked_recent_flow);
+        counters.insert("sweep.blocked_vwap_stretch".to_string(), self.diagnostics.blocked_vwap_stretch);
+        counters.insert("sweep.blocked_order_book".to_string(), self.diagnostics.blocked_order_book);
+        counters.insert("sweep.blocked_large_trade_ratio".to_string(), self.diagnostics.blocked_large_trade_ratio);
+        counters.insert("sweep.blocked_cost_gate".to_string(), self.diagnostics.blocked_cost_gate);
+        counters.insert("sweep.entries".to_string(), self.diagnostics.entries);
+        counters.insert("sweep.exits_stop_loss".to_string(), self.diagnostics.exits_stop_loss);
+        counters.insert("sweep.exits_take_profit".to_string(), self.diagnostics.exits_take_profit);
+        counters.insert("sweep.exits_reversal_failed".to_string(), self.diagnostics.exits_reversal_failed);
+        counters.insert("sweep.exits_max_hold".to_string(), self.diagnostics.exits_max_hold);
+
+        let mut gauges = BTreeMap::new();
+        gauges.insert("sweep.last_sweep_drop_bps".to_string(), self.diagnostics.last_sweep_drop_bps);
+        gauges.insert("sweep.last_reclaim_bps".to_string(), self.diagnostics.last_reclaim_bps);
+        gauges.insert("sweep.last_recent_buyer_imbalance".to_string(), self.diagnostics.last_recent_buyer_imbalance);
+        gauges.insert("sweep.last_large_trade_ratio".to_string(), self.diagnostics.last_large_trade_ratio);
+        gauges.insert("sweep.last_reclaim_above_vwap_bps".to_string(), self.diagnostics.last_reclaim_above_vwap_bps);
+        gauges.insert("sweep.last_expected_edge_bps".to_string(), self.diagnostics.last_expected_edge_bps);
+        gauges.insert("sweep.last_edge_after_cost_bps".to_string(), self.diagnostics.last_edge_after_cost_bps);
+
+        StrategyDiagnostics { counters, gauges }
     }
 
     fn market_state_window_millis(&self) -> u64 {
@@ -259,6 +385,7 @@ impl Strategy for LiquiditySweepReversalStrategy {
                     rationale,
                     expected_edge_bps: 0.0,
                 },
+                metrics: vec![DecisionMetric { name: "position_quantity", value: context.current_position.quantity }],
             };
         }
 
@@ -270,6 +397,7 @@ impl Strategy for LiquiditySweepReversalStrategy {
             return StrategyDecision::no_action();
         }
 
+        let expected_edge_bps = self.expected_edge_bps(market_state);
         let reference_price = market_state
             .mid_price()
             .or_else(|| market_state.last_price())
@@ -278,17 +406,12 @@ impl Strategy for LiquiditySweepReversalStrategy {
             return StrategyDecision::no_action();
         }
 
-        let target_notional = context.max_position_notional.min(context.available_cash * 0.9);
-        if target_notional <= 0.0 {
+        let Some(quantity) = context.capped_entry_quantity(reference_price, 0.9, None) else {
             return StrategyDecision::no_action();
-        }
-
-        let quantity = target_notional / reference_price;
-        if quantity <= 0.0 {
-            return StrategyDecision::no_action();
-        }
+        };
 
         self.last_entry_time_millis = market_state.last_event_time_millis();
+        self.diagnostics.entries += 1;
 
         StrategyDecision {
             confidence: 0.8,
@@ -299,8 +422,22 @@ impl Strategy for LiquiditySweepReversalStrategy {
                 quantity,
                 time_in_force: TimeInForce::Ioc,
                 rationale: "liquidity_sweep_reversal_entry",
-                expected_edge_bps: self.low_to_now_reclaim_bps(market_state),
+                expected_edge_bps,
             },
+            metrics: vec![
+                DecisionMetric { name: "sweep_drop_bps", value: self.high_to_low_drop_bps(market_state) },
+                DecisionMetric { name: "reclaim_bps", value: expected_edge_bps },
+                DecisionMetric { name: "recent_buyer_imbalance", value: self.recent_buyer_imbalance(market_state) },
+                DecisionMetric { name: "large_trade_ratio", value: self.large_trade_ratio(market_state) },
+                DecisionMetric { name: "reclaim_above_vwap_bps", value: self.reclaim_above_vwap_bps(market_state) },
+                DecisionMetric {
+                    name: "edge_after_cost_bps",
+                    value: expected_edge_after_cost_bps(
+                        expected_edge_bps,
+                        self.config.assumed_round_trip_taker_cost_bps,
+                    ),
+                },
+            ],
         }
     }
 }

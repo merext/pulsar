@@ -56,12 +56,14 @@ Phase 1 strategy set:
 
 - trade-flow momentum taker
 - liquidity sweep / exhaustion taker
+- trade-flow reclaim taker
 - microprice imbalance maker
 
 Important constraint:
 
 - The first two can be validated on existing trade archives.
 - The maker model requires live and historical quote/depth capture for honest validation.
+- Phase 5 validation is complete only as an honesty checkpoint; zero-entry maker results still mean the current maker model is research scaffolding, not evidence of edge.
 
 ## Required Documents
 
@@ -71,6 +73,7 @@ Always keep these documents current when major changes happen:
 - `docs/ROADMAP.md`
 - `docs/SESSION_STATE.md`
 - `docs/AGENT_PLAYBOOK.md`
+- `docs/CAPTURE_PIPELINE.md`
 - `docs/strategies/` - one document per strategy with hypothesis, inputs, decision rules, parameters, risks, and validation notes
 
 ## Recovery Procedure After Crash / Restart
@@ -83,8 +86,8 @@ Always keep these documents current when major changes happen:
 
 ## Immediate Priorities
 
-1. Build event-driven market/execution abstractions.
-2. Refactor strategy interface around market state and order intents.
-3. Implement realistic emulator v2 for taker first, maker later.
-4. Implement and compare the first two taker models across multiple days.
-5. Add live capture for quote/depth data to unlock maker research.
+1. Keep `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/SESSION_STATE.md`, and `docs/strategies/` synchronized with each horizontal roadmap milestone.
+2. Use `trade-attribution`, `strategy-diagnostics`, `optimize`, `walk-forward`, and `features` as the default taker-model research loop.
+3. Optimize and walk-forward `trade-flow-reclaim` before attempting another major local refinement pass on momentum or sweep.
+4. Continue collecting longer quote/depth captures and evaluate maker logic honestly on identical quote-aware batches only.
+5. Prefer parameter optimization plus walk-forward over interpreting low-trade strategies as winners without sufficient activity.

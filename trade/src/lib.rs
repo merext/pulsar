@@ -10,14 +10,14 @@ pub mod simulation;
 pub mod strategy;
 pub mod trader;
 
-pub use backtest::{BacktestEngine, MarketPrice, SimulatedExecution};
+pub use backtest::{BacktestEngine, MarketPrice, QueueEstimate, SimulatedExecution};
 pub use config::TradeConfig;
-pub use execution::{ExecutionReport, ExecutionStatus, OrderIntent, Side, TimeInForce};
+pub use execution::{DecisionMetric, ExecutionReport, ExecutionStatus, OrderIntent, Side, TimeInForce};
 pub use logger::{StrategyLoggerAdapter, TradeLogger};
 pub use market::{BookLevel, BookTicker, DepthLevel, DepthSnapshot, EventMixDiagnostics, MarketEvent, MarketState, TradeWindowStats};
 pub use metrics::{PerformanceMetrics, TradeManager, TradeRecord};
 pub use models::{Position, SimulationAccount, Trade};
 pub use signal::Signal;
 pub use simulation::{PositionSizer, VolatilityFactors};
-pub use strategy::{NoOpStrategyLogger, Strategy, StrategyLogger};
+pub use strategy::{NoOpStrategyLogger, Strategy, StrategyDecision, StrategyDiagnostics, StrategyLogger};
 pub use trader::{OrderType, TradeMode, Trader};

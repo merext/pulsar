@@ -33,6 +33,7 @@ impl Strategy for NullStrategy {
         StrategyDecision {
             confidence: 0.0,
             intent: OrderIntent::NoAction,
+            metrics: Vec::new(),
         }
     }
 }

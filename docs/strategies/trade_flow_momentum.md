@@ -64,6 +64,8 @@ Exit with a taker sell when any of the following hold:
 - max hold: `4000 ms`
 - stop loss: `18 bps`
 - take profit: `24 bps`
+- assumed round-trip taker cost gate: `22.7 bps`
+- minimum expected edge after cost: `0 bps`
 
 ## Known Risks
 
@@ -127,5 +129,27 @@ One major refinement pass was added without splitting the model into sub-variant
 ### Next Revision Targets
 
 - add one more major pass only if compare evidence justifies it
-- revisit sizing so strategy intent can use shared position sizing instead of ad hoc notional sizing
+- keep using shared `StrategyContext::capped_entry_quantity(...)` sizing instead of local ad hoc notional logic
 - continue compare against liquidity sweep on identical batches
+
+## Latest Optimization Snapshot
+
+- aggregated three-day optimization currently ranks `min_price_drift_bps = 12.0` best among the tested values with total realized PnL `-0.0542378713`
+- `min_price_drift_bps = 9.0` ranked second with total realized PnL `-0.2019241588`
+- `min_price_drift_bps = 6.0` ranked worst with total realized PnL `-0.9666310465`
+- `min_trade_flow_imbalance = 0.18`, `0.22`, and `0.26` tied on the tested three-day batch
+- current evidence suggests drift selectivity matters more than the first tested imbalance threshold adjustments
+
+## Attribution And Diagnostics
+
+- `trade-attribution` now exports one CSV row per closed trade with rationale, confidence, expected edge, requested/executed size, cost components, hold time, and exit reason
+- `strategy-diagnostics` now exports counters and gauges from this model, including `momentum.blocked_min_trades`, `momentum.blocked_flow`, `momentum.blocked_drift_band`, `momentum.entries`, and exit-reason counts
+- diagnostics now also expose `momentum.blocked_cost_gate`, `momentum.last_expected_edge_bps`, and `momentum.last_edge_after_cost_bps` so we can measure how often raw signal strength is still below modeled taker drag
+- on the latest single-day diagnostics run over `DOGEUSDT-trades-2025-06-28.zip`, the dominant blockers were `blocked_min_trades`, then `blocked_flow`, then `blocked_drift_band`
+- these exports should be used before any second major refinement pass so the next change targets the real gating bottlenecks instead of guesswork
+
+## Cost-Aware Gate Result
+
+- after adding a hard taker-cost gate based on the current modeled round-trip drag, this strategy produced `0` entries and `0` closed trades on the three-day DOGEUSDT batch
+- updated diagnostics showed `momentum.blocked_cost_gate` on every day, but only in the low hundreds versus `blocked_min_trades` in the hundreds of thousands to more than one million
+- this means the scientific conclusion stays the same: the model is already mostly throttled by sparse qualifying windows, and the few surviving windows still usually do not clear taker costs honestly

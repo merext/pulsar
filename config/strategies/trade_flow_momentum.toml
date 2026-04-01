@@ -14,3 +14,5 @@ hold_time_millis = 4000
 exit_on_flow_reversal = -0.05
 stop_loss_bps = 18.0
 take_profit_bps = 24.0
+assumed_round_trip_taker_cost_bps = 22.7
+min_expected_edge_after_cost_bps = 0.0

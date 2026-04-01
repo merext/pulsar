@@ -1,6 +1,7 @@
-use crate::execution::{ExecutionReport, OrderIntent};
+use crate::execution::{DecisionMetric, ExecutionReport, OrderIntent};
 use crate::market::{MarketEvent, MarketState};
 use crate::models::Position;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub trait StrategyLogger: Send + Sync {
@@ -23,10 +24,36 @@ pub struct StrategyContext {
     pub max_position_notional: f64,
 }
 
+impl StrategyContext {
+    pub fn capped_entry_quantity(
+        &self,
+        reference_price: f64,
+        cash_fraction: f64,
+        notional_cap: Option<f64>,
+    ) -> Option<f64> {
+        if reference_price <= f64::EPSILON {
+            return None;
+        }
+
+        let mut target_notional = self.max_position_notional.min(self.available_cash * cash_fraction);
+        if let Some(notional_cap) = notional_cap {
+            target_notional = target_notional.min(notional_cap);
+        }
+
+        if target_notional <= 0.0 {
+            return None;
+        }
+
+        let quantity = target_notional / reference_price;
+        (quantity > 0.0).then_some(quantity)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StrategyDecision {
     pub confidence: f64,
     pub intent: OrderIntent,
+    pub metrics: Vec<DecisionMetric>,
 }
 
 impl StrategyDecision {
@@ -34,8 +61,15 @@ impl StrategyDecision {
         Self {
             confidence: 0.0,
             intent: OrderIntent::NoAction,
+            metrics: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StrategyDiagnostics {
+    pub counters: BTreeMap<String, usize>,
+    pub gauges: BTreeMap<String, f64>,
 }
 
 #[allow(async_fn_in_trait)]
@@ -47,6 +81,9 @@ pub trait Strategy: Send + Sync {
         Self: Sized;
 
     fn get_info(&self) -> String;
+    fn diagnostics(&self) -> StrategyDiagnostics {
+        StrategyDiagnostics::default()
+    }
     fn market_state_window_millis(&self) -> u64 {
         1_000
     }

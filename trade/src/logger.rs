@@ -56,6 +56,9 @@ impl TradeLogger {
         };
 
         let action = match (report.status, report.side) {
+            (ExecutionStatus::Pending, Some(Side::Buy)) => "buy_pending",
+            (ExecutionStatus::Pending, Some(Side::Sell)) => "sell_pending",
+            (ExecutionStatus::Pending, _) => "order_pending",
             (ExecutionStatus::Filled, Some(Side::Buy)) => "buy_executed",
             (ExecutionStatus::Filled, Some(Side::Sell)) => "sell_executed",
             (ExecutionStatus::PartiallyFilled, Some(Side::Buy)) => "buy_partially_filled",

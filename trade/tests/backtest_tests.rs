@@ -1,4 +1,4 @@
-use trade::{BacktestEngine, MarketPrice, Signal, TradeConfig};
+use trade::{BacktestEngine, MarketPrice, Side, Signal, TradeConfig};
 
 fn load_test_config() -> TradeConfig {
     TradeConfig::from_file("../config/trading_config.toml").expect("config loads")
@@ -133,4 +133,55 @@ fn market_impact_grows_with_order_size() {
 
     assert!(large.market_impact_rate >= small.market_impact_rate);
     assert!(large.execution_price >= small.execution_price);
+}
+
+#[test]
+fn passive_fill_estimate_is_quote_aware_and_size_sensitive() {
+    let config = load_test_config();
+    let engine = BacktestEngine::new(config);
+
+    let small = engine.estimate_passive_fill(
+        Side::Buy,
+        MarketPrice::Quote {
+            bid: 100.0,
+            ask: 100.1,
+        },
+        10.0,
+    );
+    let large = engine.estimate_passive_fill(
+        Side::Buy,
+        MarketPrice::Quote {
+            bid: 100.0,
+            ask: 100.1,
+        },
+        10_000.0,
+    );
+
+    assert!(small.fill_probability >= large.fill_probability);
+    assert!(small.expected_fill_ratio >= large.expected_fill_ratio);
+    assert!(small.queue_ahead_quantity > 0.0);
+}
+
+#[test]
+fn passive_order_reports_pending_or_partial_fill() {
+    let config = load_test_config();
+    let engine = BacktestEngine::new(config);
+
+    let report = engine.simulate_passive_order(
+        Side::Buy,
+        MarketPrice::Quote {
+            bid: 100.0,
+            ask: 100.1,
+        },
+        1_000.0,
+        5.0,
+    );
+
+    assert!(matches!(
+        report.status,
+        trade::ExecutionStatus::Pending
+            | trade::ExecutionStatus::PartiallyFilled
+            | trade::ExecutionStatus::Filled
+    ));
+    assert_eq!(report.order_type, Some(trade::OrderType::Maker));
 }

@@ -182,8 +182,12 @@ impl BinanceTrader {
             } else {
                 ExecutionStatus::Filled
             },
+            symbol: None,
             side: Some(Side::Buy),
             order_type: Some(OrderType::Taker),
+            rationale: None,
+            decision_confidence: 0.0,
+            decision_metrics: Vec::new(),
             requested_quantity,
             executed_quantity: execution.executed_quantity,
             execution_price: Some(execution.execution_price),
@@ -210,8 +214,12 @@ impl BinanceTrader {
             } else {
                 ExecutionStatus::Filled
             },
+            symbol: None,
             side: Some(Side::Sell),
             order_type: Some(OrderType::Taker),
+            rationale: None,
+            decision_confidence: 0.0,
+            decision_metrics: Vec::new(),
             requested_quantity,
             executed_quantity: execution.executed_quantity,
             execution_price: Some(execution.execution_price),
@@ -290,8 +298,12 @@ impl Trader for BinanceTrader {
         let Some(connection) = &self.connection else {
             return ExecutionReport {
                 status: ExecutionStatus::Rejected,
+                symbol: None,
                 side: None,
                 order_type: None,
+                rationale: None,
+                decision_confidence: 0.0,
+                decision_metrics: Vec::new(),
                 requested_quantity: 0.0,
                 executed_quantity: 0.0,
                 execution_price: None,
@@ -310,8 +322,12 @@ impl Trader for BinanceTrader {
             OrderIntent::NoAction => ExecutionReport::ignored(),
             OrderIntent::Cancel { rationale } => ExecutionReport {
                 status: ExecutionStatus::Cancelled,
+                symbol: Some(symbol.to_string()),
                 side: None,
                 order_type: None,
+                rationale: Some(rationale),
+                decision_confidence: 0.0,
+                decision_metrics: Vec::new(),
                 requested_quantity: 0.0,
                 executed_quantity: 0.0,
                 execution_price: None,
@@ -339,8 +355,12 @@ impl Trader for BinanceTrader {
                 if !valid {
                     return ExecutionReport {
                         status: ExecutionStatus::Rejected,
+                        symbol: Some(symbol.to_string()),
                         side: Some(side),
                         order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
                         requested_quantity: quantity,
                         executed_quantity: 0.0,
                         execution_price: None,
@@ -355,13 +375,40 @@ impl Trader for BinanceTrader {
                     };
                 }
 
+                if matches!(order_type, OrderType::Maker) {
+                    return ExecutionReport {
+                        status: ExecutionStatus::Pending,
+                        symbol: Some(symbol.to_string()),
+                        side: Some(side),
+                        order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
+                        requested_quantity: quantity,
+                        executed_quantity: 0.0,
+                        execution_price: Some(reference_price),
+                        fee_paid: 0.0,
+                        latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
+                        reason: Some("live_maker_not_enabled"),
+                        expected_edge_bps,
+                    };
+                }
+
                 let quantity_decimal = match Decimal::from_f64(quantity) {
                     Some(quantity) => quantity,
                     None => {
                         return ExecutionReport {
                             status: ExecutionStatus::Rejected,
+                            symbol: Some(symbol.to_string()),
                             side: Some(side),
                             order_type: Some(order_type),
+                            rationale: None,
+                            decision_confidence: 0.0,
+                            decision_metrics: Vec::new(),
                             requested_quantity: quantity,
                             executed_quantity: 0.0,
                             execution_price: None,
@@ -392,8 +439,12 @@ impl Trader for BinanceTrader {
                 let Ok(response) = connection.order_place(params).await else {
                     return ExecutionReport {
                         status: ExecutionStatus::Rejected,
+                        symbol: Some(symbol.to_string()),
                         side: Some(side),
                         order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
                         requested_quantity: quantity,
                         executed_quantity: 0.0,
                         execution_price: None,
@@ -411,8 +462,12 @@ impl Trader for BinanceTrader {
                 let Ok(data) = response.data() else {
                     return ExecutionReport {
                         status: ExecutionStatus::Rejected,
+                        symbol: Some(symbol.to_string()),
                         side: Some(side),
                         order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
                         requested_quantity: quantity,
                         executed_quantity: 0.0,
                         execution_price: None,
@@ -430,8 +485,12 @@ impl Trader for BinanceTrader {
                 let Some(fills) = data.fills.as_ref() else {
                     return ExecutionReport {
                         status: ExecutionStatus::Rejected,
+                        symbol: Some(symbol.to_string()),
                         side: Some(side),
                         order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
                         requested_quantity: quantity,
                         executed_quantity: 0.0,
                         execution_price: None,
@@ -461,8 +520,12 @@ impl Trader for BinanceTrader {
 
                 ExecutionReport {
                     status: ExecutionStatus::Filled,
+                    symbol: Some(symbol.to_string()),
                     side: Some(side),
                     order_type: Some(order_type),
+                    rationale: None,
+                    decision_confidence: 0.0,
+                    decision_metrics: Vec::new(),
                     requested_quantity: quantity,
                     executed_quantity,
                     execution_price,
@@ -612,10 +675,11 @@ impl Trader for BinanceTrader {
                         if !execution.is_rejected() {
                             let report = self.simulated_report_from_sell(position_quantity, 0.0, execution);
                             self.trade_manager.record_execution_report(&report);
-                            let pnl = self.trade_manager.close_position(
+                            let pnl = self.trade_manager.close_position_with_report(
                                 trading_symbol,
                                 execution.execution_price,
                                 market_state.last_event_time_secs().unwrap_or(0.0),
+                                Some(&report),
                             );
                             let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
                             strategy_logger.log_execution(
@@ -678,20 +742,29 @@ impl Trader for BinanceTrader {
 
             match trading_mode {
                 TradeMode::Real => {
-                    let report = self
+                    let intent = decision.intent.clone();
+                    let mut report = self
                         .on_order_intent(
                             trading_symbol,
                             execution_reference_price,
-                            decision.intent,
+                            intent,
                         )
                         .await;
+                    report.rationale = match &decision.intent {
+                        OrderIntent::Place { rationale, .. } | OrderIntent::Cancel { rationale } => Some(*rationale),
+                        OrderIntent::NoAction => None,
+                    };
+                    report.decision_confidence = decision.confidence;
+                    report.decision_metrics = decision.metrics.clone();
+                    report.symbol = Some(trading_symbol.to_string());
 
                     let pnl = if report.side == Some(Side::Sell) {
                         report.execution_price.map(|price| {
-                            self.trade_manager.close_position(
+                            self.trade_manager.close_position_with_report(
                                 trading_symbol,
                                 price,
                                 market_state.last_event_time_secs().unwrap_or(0.0),
+                                Some(&report),
                             )
                         })
                     } else if report.side == Some(Side::Buy)
@@ -703,6 +776,7 @@ impl Trader for BinanceTrader {
                                 price,
                                 report.executed_quantity,
                                 market_state.last_event_time_secs().unwrap_or(0.0),
+                                Some(&report),
                             );
                         }
                         None
@@ -723,7 +797,7 @@ impl Trader for BinanceTrader {
                     }
                 }
                 TradeMode::Emulated | TradeMode::Backtest => {
-                    let report = match decision.intent {
+                    let mut report = match decision.intent {
                         OrderIntent::NoAction | OrderIntent::Cancel { .. } => ExecutionReport::ignored(),
                         OrderIntent::Place {
                             side,
@@ -743,48 +817,68 @@ impl Trader for BinanceTrader {
                                 Side::Sell => trade::signal::Signal::Sell,
                             };
 
-                            let execution = backtest_engine.execute_with_constraints_at(
-                                signal,
-                                market_price,
-                                requested_quantity,
-                                self.trade_manager.available_cash(),
-                            );
-
-                            if execution.is_rejected() {
-                                ExecutionReport {
-                                    status: ExecutionStatus::Rejected,
-                                    side: Some(side),
-                                    order_type: Some(order_type),
+                            if matches!(order_type, OrderType::Maker) {
+                                backtest_engine.simulate_passive_order(
+                                    side,
+                                    market_price,
                                     requested_quantity,
-                                    executed_quantity: 0.0,
-                                    execution_price: Some(execution.execution_price),
-                                    fee_paid: 0.0,
-                                    latency_seconds: execution.latency_seconds,
-                                    synthetic_half_spread_bps: execution.synthetic_half_spread_rate * 10_000.0,
-                                    slippage_bps: execution.slippage_rate * 10_000.0,
-                                    latency_impact_bps: execution.latency_impact_rate * 10_000.0,
-                                    market_impact_bps: execution.market_impact_rate * 10_000.0,
-                                    reason: execution.rejected_reason,
                                     expected_edge_bps,
-                                }
+                                )
                             } else {
-                                match (side, time_in_force) {
-                                    (Side::Buy, _) => self.simulated_report_from_buy(
+                                let execution = backtest_engine.execute_with_constraints_at(
+                                    signal,
+                                    market_price,
+                                    requested_quantity,
+                                    self.trade_manager.available_cash(),
+                                );
+
+                                if execution.is_rejected() {
+                                    ExecutionReport {
+                                        status: ExecutionStatus::Rejected,
+                                        symbol: Some(trading_symbol.to_string()),
+                                        side: Some(side),
+                                        order_type: Some(order_type),
+                                        rationale: None,
+                                        decision_confidence: 0.0,
+                                        decision_metrics: Vec::new(),
                                         requested_quantity,
+                                        executed_quantity: 0.0,
+                                        execution_price: Some(execution.execution_price),
+                                        fee_paid: 0.0,
+                                        latency_seconds: execution.latency_seconds,
+                                        synthetic_half_spread_bps: execution.synthetic_half_spread_rate * 10_000.0,
+                                        slippage_bps: execution.slippage_rate * 10_000.0,
+                                        latency_impact_bps: execution.latency_impact_rate * 10_000.0,
+                                        market_impact_bps: execution.market_impact_rate * 10_000.0,
+                                        reason: execution.rejected_reason,
                                         expected_edge_bps,
-                                        execution,
-                                    ),
-                                    (Side::Sell, TimeInForce::Gtc | TimeInForce::Ioc | TimeInForce::Fok) => {
-                                        self.simulated_report_from_sell(
+                                    }
+                                } else {
+                                    match (side, time_in_force) {
+                                        (Side::Buy, _) => self.simulated_report_from_buy(
                                             requested_quantity,
                                             expected_edge_bps,
                                             execution,
-                                        )
+                                        ),
+                                        (Side::Sell, TimeInForce::Gtc | TimeInForce::Ioc | TimeInForce::Fok) => {
+                                            self.simulated_report_from_sell(
+                                                requested_quantity,
+                                                expected_edge_bps,
+                                                execution,
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     };
+                    report.rationale = match &decision.intent {
+                        OrderIntent::Place { rationale, .. } | OrderIntent::Cancel { rationale } => Some(*rationale),
+                        OrderIntent::NoAction => None,
+                    };
+                    report.decision_confidence = decision.confidence;
+                    report.decision_metrics = decision.metrics.clone();
+                    report.symbol = Some(trading_symbol.to_string());
 
                     let pnl = match report.side {
                         Some(Side::Buy) if report.executed_quantity > 0.0 => {
@@ -794,6 +888,7 @@ impl Trader for BinanceTrader {
                                     price,
                                     report.executed_quantity,
                                     market_state.last_event_time_secs().unwrap_or(0.0),
+                                    Some(&report),
                                 ) {
                                     self.logger.log_order_error(
                                         trading_symbol,
@@ -806,10 +901,11 @@ impl Trader for BinanceTrader {
                             None
                         }
                         Some(Side::Sell) if report.executed_quantity > 0.0 => report.execution_price.map(|price| {
-                            self.trade_manager.close_position(
+                            self.trade_manager.close_position_with_report(
                                 trading_symbol,
                                 price,
                                 market_state.last_event_time_secs().unwrap_or(0.0),
+                                Some(&report),
                             )
                         }),
                         _ => None,
@@ -848,10 +944,11 @@ impl Trader for BinanceTrader {
                 if !execution.is_rejected() {
                     let report = self.simulated_report_from_sell(position.quantity, 0.0, execution);
                     self.trade_manager.record_execution_report(&report);
-                    let pnl = self.trade_manager.close_position(
+                    let pnl = self.trade_manager.close_position_with_report(
                         trading_symbol,
                         execution.execution_price,
                         market_state.last_event_time_secs().unwrap_or(0.0),
+                        Some(&report),
                     );
                     let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
                     strategy_logger.log_execution(

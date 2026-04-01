@@ -1,0 +1,14 @@
+trade_window_millis = 2000
+min_trades_in_window = 14
+min_pullback_from_high_bps = 4.0
+max_pullback_from_high_bps = 28.0
+min_reclaim_from_low_bps = 3.0
+min_trade_flow_imbalance = 0.10
+min_recent_trade_flow_imbalance = 0.18
+max_spread_bps = 12.0
+stop_loss_bps = 14.0
+take_profit_bps = 18.0
+hold_time_millis = 4000
+entry_cooldown_millis = 2000
+assumed_round_trip_taker_cost_bps = 22.7
+min_expected_edge_after_cost_bps = 0.0

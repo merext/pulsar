@@ -11,8 +11,8 @@ cash_reserve_ratio = 0.10
 max_position_notional = 35.0
 
 [exchange]
-taker_fee = 0.0001
-maker_fee = 0.0001
+taker_fee = 0.001
+maker_fee = 0.001
 maker_rebate = 0.000015
 tick_size = 0.00001
 min_notional = 10.0

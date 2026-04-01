@@ -1,5 +1,7 @@
 use crate::config::TradeConfig;
+use crate::execution::{ExecutionReport, ExecutionStatus, Side};
 use crate::signal::Signal;
+use crate::trader::OrderType;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MarketPrice {
@@ -70,6 +72,13 @@ pub struct BacktestEngine {
     config: TradeConfig,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct QueueEstimate {
+    pub fill_probability: f64,
+    pub expected_fill_ratio: f64,
+    pub queue_ahead_quantity: f64,
+}
+
 impl BacktestEngine {
     pub fn new(config: TradeConfig) -> Self {
         Self { config }
@@ -77,6 +86,111 @@ impl BacktestEngine {
 
     pub fn execute(&self, signal: Signal, market_price: f64, quantity: f64) -> SimulatedExecution {
         self.execute_with_constraints(signal, market_price, quantity, f64::INFINITY)
+    }
+
+    pub fn estimate_passive_fill(
+        &self,
+        side: Side,
+        market_price: MarketPrice,
+        requested_quantity: f64,
+    ) -> QueueEstimate {
+        let quantity = requested_quantity.max(0.0);
+        let queue_ahead_quantity = match market_price {
+            MarketPrice::Quote { bid, ask } => {
+                let reference = ((bid + ask) / 2.0).max(f64::EPSILON);
+                quantity * (1.0 + ((ask - bid).abs() / reference * 10_000.0).min(20.0) / 10.0)
+            }
+            MarketPrice::Trade(_) => quantity * 2.0,
+        };
+
+        let settings = self.config.backtest_settings.as_ref();
+        let base_fill_rate = settings.map_or(0.2, |cfg| cfg.limit_order_fill_rate.clamp(0.0, 1.0));
+        let hft_penalty = settings.map_or(0.0, |cfg| cfg.hft_latency_advantage.max(0.0));
+        let size_factor = (quantity / self.config.exchange.max_order_size).clamp(0.0, 1.0);
+        let side_bias = match side {
+            Side::Buy => 1.0,
+            Side::Sell => 0.98,
+        };
+        let fill_probability =
+            (base_fill_rate * side_bias * (1.0 - hft_penalty) * (1.0 - size_factor))
+                .clamp(0.0, 1.0);
+        let expected_fill_ratio = (fill_probability * (1.0 - size_factor * 0.5)).clamp(0.0, 1.0);
+
+        QueueEstimate {
+            fill_probability,
+            expected_fill_ratio,
+            queue_ahead_quantity,
+        }
+    }
+
+    pub fn simulate_passive_order(
+        &self,
+        side: Side,
+        market_price: MarketPrice,
+        requested_quantity: f64,
+        expected_edge_bps: f64,
+    ) -> ExecutionReport {
+        let reference_price = market_price.execution_reference_price(match side {
+            Side::Buy => Signal::Buy,
+            Side::Sell => Signal::Sell,
+        });
+        let queue = self.estimate_passive_fill(side, market_price, requested_quantity);
+        let executed_quantity =
+            self.round_down_to_step(requested_quantity * queue.expected_fill_ratio);
+
+        if executed_quantity <= 0.0 || queue.fill_probability <= 0.0 {
+            return ExecutionReport {
+                status: ExecutionStatus::Pending,
+                symbol: None,
+                side: Some(side),
+                order_type: Some(OrderType::Maker),
+                rationale: None,
+                decision_confidence: 0.0,
+                decision_metrics: Vec::new(),
+                requested_quantity,
+                executed_quantity: 0.0,
+                execution_price: Some(reference_price),
+                fee_paid: 0.0,
+                latency_seconds: 0.0,
+                synthetic_half_spread_bps: 0.0,
+                slippage_bps: 0.0,
+                latency_impact_bps: 0.0,
+                market_impact_bps: 0.0,
+                reason: Some("queue_not_filled"),
+                expected_edge_bps,
+            };
+        }
+
+        let fee_rate = self.config.exchange.maker_fee - self.config.exchange.maker_rebate;
+        let fee_paid = reference_price * executed_quantity * fee_rate.max(0.0);
+        ExecutionReport {
+            status: if executed_quantity < requested_quantity {
+                ExecutionStatus::PartiallyFilled
+            } else {
+                ExecutionStatus::Filled
+            },
+            symbol: None,
+            side: Some(side),
+            order_type: Some(OrderType::Maker),
+            rationale: None,
+            decision_confidence: 0.0,
+            decision_metrics: Vec::new(),
+            requested_quantity,
+            executed_quantity,
+            execution_price: Some(reference_price),
+            fee_paid,
+            latency_seconds: 0.0,
+            synthetic_half_spread_bps: 0.0,
+            slippage_bps: 0.0,
+            latency_impact_bps: 0.0,
+            market_impact_bps: 0.0,
+            reason: if executed_quantity < requested_quantity {
+                Some("partial_queue_fill")
+            } else {
+                None
+            },
+            expected_edge_bps,
+        }
     }
 
     pub fn execute_with_constraints(

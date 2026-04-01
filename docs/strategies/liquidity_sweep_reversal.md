@@ -63,6 +63,8 @@ Exit with a taker sell when any of the following hold:
 - take profit: `20 bps`
 - max hold: `5000 ms`
 - cooldown: `3000 ms`
+- assumed round-trip taker cost gate: `22.7 bps`
+- minimum expected edge after cost: `0 bps`
 
 ## Known Risks
 
@@ -116,3 +118,26 @@ One major refinement pass was added without branching into sub-variants:
 - this was a structurally correct improvement to entry quality filters
 - on the current three-day batch it did not materially change realized outcomes yet
 - the strategy remains in the pipeline and is not rejected; deeper tuning and live emulation are still required before any discard decision
+
+## Latest Optimization Snapshot
+
+- aggregated three-day optimization currently ranks `min_sweep_drop_bps = 12.0` best among the tested values with total realized PnL `-0.0703276302`
+- `min_sweep_drop_bps = 10.0` ranked second with total realized PnL `-0.2152563187`
+- `min_sweep_drop_bps = 8.0` ranked third with total realized PnL `-0.2211656508`
+- `min_recent_buyer_imbalance = 0.16`, `0.20`, and `0.24` tied on the tested three-day batch
+- the first walk-forward test trained on the first two daily archives, selected `12.0`, and then produced `0` held-out trades / `0` realized PnL on the final day
+- strategy entry sizing now uses shared `StrategyContext::capped_entry_quantity(...)` sizing rather than local ad hoc notional logic
+
+## Attribution And Diagnostics
+
+- `trade-attribution` now exports one CSV row per closed trade with rationale, confidence, expected edge, requested/executed size, cost components, hold time, and exit reason
+- `strategy-diagnostics` now exports counters and gauges from this model, including `sweep.blocked_min_trades`, `sweep.blocked_sweep_drop`, `sweep.blocked_reclaim_band`, `sweep.entries`, and exit-reason counts
+- diagnostics now also expose `sweep.blocked_cost_gate`, `sweep.last_expected_edge_bps`, and `sweep.last_edge_after_cost_bps` so we can separate geometry blockers from pure cost insufficiency
+- on the latest single-day diagnostics run over `DOGEUSDT-trades-2025-06-28.zip`, the dominant blockers were `blocked_min_trades` and `blocked_sweep_drop`
+- these exports are now the preferred way to decide whether the next refinement should tighten sweep detection, reclaim geometry, or flow confirmation
+
+## Cost-Aware Gate Result
+
+- after adding a hard taker-cost gate based on the current modeled round-trip drag, this strategy produced `0` entries and `0` closed trades on the same three-day DOGEUSDT batch
+- `sweep.blocked_cost_gate` appeared on all three days, but remained much smaller than `blocked_min_trades` and `blocked_sweep_drop`
+- this strengthens the current research view: even when sweep geometry appears acceptable, the rebound edge is usually still too small for honest taker round trips
