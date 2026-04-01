@@ -1,70 +1,75 @@
 # Spread-Regime Capture Strategy Configuration
 # Long-only maker mean-reversion strategy exploiting transient price dislocations
 #
-# Entry: Maker (limit buy at bid) when price dislocates below fair value
-# Exit:  Maker (limit sell at ask) for take-profit / dislocation reversal
+# Tuned for TRUUSDT — very wide spread (~217 bps = 1 tick), moderate frequency (~3 tr/min)
+# Autocorrelation = -0.55 (strong mean-reversion on tick level)
+#
+# Entry: Maker (limit buy at bid) when price drops by ≥1 tick
+# Exit:  Maker (limit sell at ask = entry + 1 tick) → ~217 bps gross, ~197 bps net
 #        Taker (IOC sell) for stop-loss / max-hold / panic-vol
 #
 # Cost model:
-#   Maker entry + maker exit: ~2 bps round-trip (0.1% maker fee x 2)
-#   Maker entry + taker exit: ~12 bps (maker fee + taker fee + spread)
+#   Maker entry + maker exit: ~20 bps round-trip (10 bps maker fee x 2)
+#   Maker entry + taker exit: ~30 bps (10 bps maker + 10 bps taker + ~10 bps spread)
+#   Edge per winning trade: 217 bps - 20 bps = 197 bps
 #   Fill rate ~35%, so 65% of signals don't fill (zero cost)
 
 # Rolling trade window for VWAP computation
-trade_window_millis = 2000
+# TRUUSDT: ~3 trades/min → need longer window for meaningful VWAP
+trade_window_millis = 60000
 
 # --- Fair-value weights (must sum to ~1.0) ---
+# Without order book data, microprice gets redistributed to ema_mid + vwap
 fair_value_w_microprice = 0.5
 fair_value_w_ema_mid = 0.3
 fair_value_w_vwap = 0.2
 
 # --- Adaptive entry threshold ---
-# entry_threshold = base + vol_scale * realized_vol + spread_scale * ema_spread
-# Low base threshold since we're using maker entry (cheap to enter).
-# On DOGEUSDT, typical dislocations are 0.1-0.5 bps, rarely >1 bps.
-# With maker execution cost of ~2 bps round-trip, we need dislocation > ~3.3 bps
-# to have positive expected edge (dislocation * 0.6 - 2.0 > 0.5 → dislocation > 4.2 bps).
-# But that threshold would get 0 trades. Instead, we set a low threshold and
-# rely on fill rate filtering (35%) and the exit logic to be profitable.
-base_threshold_bps = 0.3
-vol_scale = 0.02
+# On TRUUSDT, 1 tick = 217 bps. Price mostly sits flat, then jumps ±1 tick.
+# We want to enter on any down-tick (dislocation ≥ ~100 bps from EMA).
+# Lower threshold to catch more opportunities.
+base_threshold_bps = 3.0
+vol_scale = 0.03
 spread_scale = 0.05
 
 # --- Edge & cost ---
 # Expected fraction of dislocation captured on mean reversion
+# With 217 bps tick, even partial reversion is highly profitable
 mean_reversion_factor = 0.6
-# Cost of one maker leg in bps (~1 bps for Binance 0.1% maker fee)
-# For maker-maker round-trip, total cost = 2 * half_round_trip_cost_bps
-half_round_trip_cost_bps = 1.0
-# Minimum edge after cost to enter. Set to 0 because with maker execution
-# the spread itself contributes edge (buy at bid, sell at ask = earn spread).
-# The dislocation signal just improves entry timing.
-min_edge_after_cost_bps = 0.0
+# Cost of one maker leg in bps (10 bps for Binance 0.1% maker fee)
+half_round_trip_cost_bps = 10.0
+# Minimum edge after cost to enter.
+# 1 tick = 217 bps, cost = 20 bps → net edge = 197 bps >> 5 bps minimum
+min_edge_after_cost_bps = 5.0
 
 # --- Entry filters ---
-min_vol_bps = 0.5
-max_vol_bps = 500.0
-max_entry_spread_bps = 20.0
-max_adverse_depth = 0.6
-min_trades_in_window = 3
+min_vol_bps = 1.0
+max_vol_bps = 800.0
+# TRUUSDT has very wide spread (217 bps = 1 tick). Allow wide entry spread.
+max_entry_spread_bps = 300.0
+max_adverse_depth = 0.7
+# TRUUSDT: ~3 trades/min, 60s window → ~3 trades expected. Min 1.
+min_trades_in_window = 1
 # Flow imbalance filter (0.0 = disabled)
-# Blocks entry if buyer flow is too strong (dislocation isn't from selling)
 min_flow_imbalance = 0.0
 
 # --- Exit parameters ---
-# Stop loss: taker exit (expensive but protective)
-stop_loss_bps = 8.0
-# Take profit: maker exit (cheap, capture profit at ask)
-take_profit_bps = 4.0
-# Max hold: taker exit after this many ms
-max_hold_millis = 15000
-# Panic vol: taker exit when market too chaotic
-panic_vol_bps = 500.0
+# Stop loss: wider because noise = 1 tick = 217 bps
+# 2 ticks adverse = 434 bps. Set SL at ~500 bps.
+stop_loss_bps = 500.0
+# Take profit: 1 tick = 217 bps. Set TP at ~200 bps (< 1 tick to ensure maker fill)
+take_profit_bps = 200.0
+# Max hold: 5 minutes. TRUUSDT bounces within ~56s avg for wins.
+max_hold_millis = 300000
+# Panic vol: high threshold for this volatile pair
+panic_vol_bps = 1000.0
 # Dislocation reversal: maker exit when price reverts above FV
-exit_dislocation_reversal_bps = 2.0
+# Set low to trigger on any 1-tick bounce back
+exit_dislocation_reversal_bps = 5.0
 
 # --- Cooldown ---
-entry_cooldown_millis = 300
+# 5 seconds between trades (pair is slow, don't need aggressive re-entry)
+entry_cooldown_millis = 5000
 
 # --- Cost gate (full round-trip taker cost for reference) ---
 assumed_round_trip_taker_cost_bps = 22.7

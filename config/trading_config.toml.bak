@@ -2,24 +2,22 @@
 # This file contains the complete trading configuration used by the trading bot
 
 [position_sizing]
-# TRUUSDT: price ~$0.0045, median trade ~$21, max safe position ~$50
-# step_size=0.1 → 50/0.0045 ≈ 11111 tokens, rounded to step = 11111.1
-trading_size_min = 5000.0
-trading_size_max = 15000.0
-trading_symbol = "TRUUSDT"
-min_trade_notional = 5.0
-max_trade_notional = 60.0
+trading_size_min = 60.0
+trading_size_max = 180.0
+trading_symbol = "DOGEUSDT"
+min_trade_notional = 10.0
+max_trade_notional = 30.0
 cash_reserve_ratio = 0.10
-max_position_notional = 60.0
+max_position_notional = 35.0
 
 [exchange]
 taker_fee = 0.001
 maker_fee = 0.001
 maker_rebate = 0.0
-tick_size = 0.0001
-min_notional = 5.0
+tick_size = 0.00001
+min_notional = 10.0
 max_order_size = 1000000.0
-step_size = 0.1
+step_size = 1.0
 
 [slippage]
 min_slippage = 0.00001

@@ -78,6 +78,8 @@ pub struct MicrostructureState {
     prev_trade_time_millis: Option<u64>,
     /// Whether at least one BookTicker has been received (EMA initialized)
     mid_initialized: bool,
+    /// Whether we have received at least one BookTicker (vs trade-only mode)
+    has_book_ticker: bool,
     /// Whether at least two trades have been received (vol initialized)
     vol_initialized: bool,
     /// EMA alpha for mid price
@@ -102,6 +104,7 @@ impl MicrostructureState {
             prev_trade_price: None,
             prev_trade_time_millis: None,
             mid_initialized: false,
+            has_book_ticker: false,
             vol_initialized: false,
             alpha_mid,
             alpha_spread,
@@ -115,6 +118,7 @@ impl MicrostructureState {
         if mid <= f64::EPSILON {
             return;
         }
+        self.has_book_ticker = true;
         if self.mid_initialized {
             self.ema_mid_price = self.alpha_mid * mid + (1.0 - self.alpha_mid) * self.ema_mid_price;
         } else {
@@ -132,6 +136,34 @@ impl MicrostructureState {
     }
 
     fn on_trade(&mut self, trade: &Trade) {
+        // Fallback: initialize ema_mid_price from trade data when no BookTicker
+        if !self.mid_initialized && trade.price > f64::EPSILON {
+            self.ema_mid_price = trade.price;
+            self.mid_initialized = true;
+        } else if self.mid_initialized && !self.has_book_ticker {
+            // In trade-only mode, update EMA mid from trade prices
+            self.ema_mid_price =
+                self.alpha_mid * trade.price + (1.0 - self.alpha_mid) * self.ema_mid_price;
+        }
+
+        // In trade-only mode, estimate spread from absolute price changes
+        if !self.has_book_ticker {
+            if let Some(prev_price) = self.prev_trade_price {
+                if prev_price > f64::EPSILON {
+                    let abs_change_bps = ((trade.price - prev_price) / prev_price).abs() * 10_000.0;
+                    // Use non-zero price changes as spread proxy (median tick-to-tick change)
+                    if abs_change_bps > 0.0 {
+                        if self.ema_spread_bps == 0.0 {
+                            self.ema_spread_bps = abs_change_bps;
+                        } else {
+                            self.ema_spread_bps = self.alpha_spread * abs_change_bps
+                                + (1.0 - self.alpha_spread) * self.ema_spread_bps;
+                        }
+                    }
+                }
+            }
+        }
+
         // Realized volatility: EMA of squared returns
         if let Some(prev_price) = self.prev_trade_price {
             if prev_price > f64::EPSILON {

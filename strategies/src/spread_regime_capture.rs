@@ -103,8 +103,8 @@ impl Default for SpreadRegimeCaptureConfig {
             vol_scale: 0.1,
             spread_scale: 0.1,
             mean_reversion_factor: 0.6,
-            half_round_trip_cost_bps: 1.0, // maker fee ~1 bps per leg
-            min_edge_after_cost_bps: 0.5,
+            half_round_trip_cost_bps: 10.0, // maker fee = 10 bps per leg (Binance 0.1%)
+            min_edge_after_cost_bps: 2.0,
             min_vol_bps: 1.0,
             max_vol_bps: 200.0,
             max_entry_spread_bps: 15.0,
@@ -212,8 +212,9 @@ impl SpreadRegimeCaptureStrategy {
 
     /// Compute weighted fair value from microprice, EMA mid, and VWAP.
     /// Returns None if we don't have enough data.
+    /// Supports trade-only mode: when no order book is available, microprice
+    /// weight is redistributed to EMA mid and VWAP proportionally.
     fn fair_value(&self, market_state: &MarketState) -> Option<f64> {
-        let microprice = market_state.microprice()?;
         let micro = market_state.micro();
 
         if !micro.mid_initialized() {
@@ -223,9 +224,21 @@ impl SpreadRegimeCaptureStrategy {
         let ema_mid = micro.ema_mid_price;
         let vwap = market_state.trade_window_vwap().unwrap_or(ema_mid);
 
-        let fv = self.config.fair_value_w_microprice * microprice
-            + self.config.fair_value_w_ema_mid * ema_mid
-            + self.config.fair_value_w_vwap * vwap;
+        let fv = if let Some(microprice) = market_state.microprice() {
+            // Full mode: microprice + EMA mid + VWAP
+            self.config.fair_value_w_microprice * microprice
+                + self.config.fair_value_w_ema_mid * ema_mid
+                + self.config.fair_value_w_vwap * vwap
+        } else {
+            // Trade-only mode: redistribute microprice weight proportionally
+            let w_ema = self.config.fair_value_w_ema_mid;
+            let w_vwap = self.config.fair_value_w_vwap;
+            let total = w_ema + w_vwap;
+            if total <= f64::EPSILON {
+                return None;
+            }
+            (w_ema / total) * ema_mid + (w_vwap / total) * vwap
+        };
 
         if fv > f64::EPSILON {
             Some(fv)
@@ -279,8 +292,8 @@ impl SpreadRegimeCaptureStrategy {
     fn check_entry(&mut self, market_state: &MarketState) -> Option<f64> {
         self.diagnostics.total_decisions += 1;
 
-        // Need quote data for microprice, spread, and maker order pricing
-        if market_state.top_of_book().is_none() {
+        // Need a reference price (either from quote or last trade)
+        if market_state.top_of_book().is_none() && market_state.last_price().is_none() {
             self.diagnostics.blocked_no_quote += 1;
             return None;
         }
