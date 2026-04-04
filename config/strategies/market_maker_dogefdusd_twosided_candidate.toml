@@ -1,0 +1,34 @@
+# Candidate baseline after two-sided MM fixes.
+# Keeps the current DOGEFDUSD setup, but starts from the least-bad values
+# found in the first multi-day sweep.
+
+two_sided = true
+
+# Wider passive quotes reduced adverse selection in trade-only replay.
+half_spread_bps = 4.0
+inventory_skew_bps = 0.95
+max_inventory_fraction = 0.10
+requote_threshold_bps = 0.5
+
+# Smaller clip size reduced max-hold inventory losses.
+cash_fraction = 0.02
+
+max_hold_millis = 1200000
+stop_loss_bps = 200.0
+
+max_vol_bps = 1000.0
+panic_vol_bps = 2000.0
+
+min_spread_bps = 0.1
+round_trip_cost_bps = 1.5
+min_edge_bps = 0.0
+entry_cooldown_millis = 2000
+trade_window_millis = 30000
+min_trades_in_window = 1
+imbalance_skew = 0.0
+max_imbalance = 1.0
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+price_position_window = 20
+max_price_position = 1.0
+min_exit_edge_bps = 4.0

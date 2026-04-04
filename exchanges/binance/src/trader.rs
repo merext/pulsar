@@ -182,6 +182,29 @@ impl BinanceTrader {
         format!("pulsar_{}_{}", ts, *counter)
     }
 
+    async fn cancel_two_sided_orders(&mut self) {
+        for active_side in [self.active_bid_order.take(), self.active_ask_order.take()]
+            .into_iter()
+            .flatten()
+        {
+            let cancel_params = OrderCancelParams::builder(active_side.symbol.clone())
+                .orig_client_order_id(active_side.client_order_id.clone())
+                .build()
+                .expect("Failed to build cancel params");
+            let _ = self
+                .connection
+                .as_ref()
+                .unwrap()
+                .order_cancel(cancel_params)
+                .await;
+            info!(
+                symbol = %active_side.symbol,
+                side = ?active_side.side,
+                "Cancelled two-sided order"
+            );
+        }
+    }
+
     /// Poll the exchange for the status of the active limit order.
     /// If the order has been filled asynchronously, record the fill in trade_manager
     /// and clear active_limit_order so the strategy can act on the new position.
@@ -639,7 +662,15 @@ impl BinanceTrader {
         let min_notional = self.config.exchange.min_notional;
 
         // Round price to tick
-        let rounded_price = (price / tick_size).round() * tick_size;
+        let rounded_price = if tick_size > 0.0 {
+            let ticks = price / tick_size;
+            match side {
+                Side::Buy => ticks.floor() * tick_size,
+                Side::Sell => ticks.ceil() * tick_size,
+            }
+        } else {
+            price
+        };
         // Round quantity to step
         let mut rounded_qty = (quantity / step_size).floor() * step_size;
 
@@ -1297,28 +1328,48 @@ impl BinanceTrader {
         Ok((quote_free, base_free))
     }
 
-    /// Sell all base asset holdings at market to recover USDT.
-    pub async fn cleanup_base_asset(
+    pub async fn rebalance_half_and_half(
         &mut self,
         symbol: &str,
         base_asset: &str,
-    ) -> Result<f64, anyhow::Error> {
-        let (_, base_free) = self.account_balances(base_asset).await?;
-
-        let step_size = self.config.exchange.step_size;
-        let rounded_qty = if step_size > 0.0 {
-            (base_free / step_size).floor() * step_size
+    ) -> Result<bool, anyhow::Error> {
+        let (quote_free, base_free) = self.account_balances(base_asset).await?;
+        let market_price = if let Some(order) = self.active_bid_order.as_ref() {
+            order.price
+        } else if let Some(order) = self.active_ask_order.as_ref() {
+            order.price
+        } else if let Some(order) = self.active_limit_order.as_ref() {
+            order.price
         } else {
-            base_free
+            return Ok(false);
         };
 
+        if market_price <= f64::EPSILON {
+            return Ok(false);
+        }
+
+        let base_value = base_free * market_price;
+        let total_value = quote_free + base_value;
+        if total_value <= self.config.exchange.min_notional * 2.0 {
+            return Ok(false);
+        }
+
+        let target_side_value = total_value / 2.0;
+        let value_delta = target_side_value - base_value;
+        if value_delta.abs() < self.config.exchange.min_notional {
+            return Ok(true);
+        }
+
+        let side = if value_delta > 0.0 {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
+        let desired_qty = (value_delta.abs() / market_price).max(0.0);
+        let step_size = self.config.exchange.step_size.max(f64::EPSILON);
+        let rounded_qty = (desired_qty / step_size).floor() * step_size;
         if rounded_qty < step_size {
-            info!(
-                base_asset = base_asset,
-                base_free = %fmt_price(base_free),
-                "No base asset to sell at startup"
-            );
-            return Ok(0.0);
+            return Ok(false);
         }
 
         let qty_precision = if step_size > 0.0 && step_size < 1.0 {
@@ -1331,24 +1382,36 @@ impl BinanceTrader {
 
         info!(
             symbol = symbol,
+            side = ?side,
             base_asset = base_asset,
             quantity = %qty_str,
-            "Selling base asset at market to recover USDT"
+            reference_price = %fmt_price(market_price),
+            quote_free = %fmt_usd(quote_free),
+            base_free = %fmt_price(base_free),
+            "Rebalancing balances toward 50/50 split"
         );
 
-        let connection = self.connection.as_ref().unwrap();
         let params = OrderPlaceParams::builder(
             symbol.to_string(),
-            OrderPlaceSideEnum::Sell,
+            match side {
+                Side::Buy => OrderPlaceSideEnum::Buy,
+                Side::Sell => OrderPlaceSideEnum::Sell,
+            },
             OrderPlaceTypeEnum::Market,
         )
         .quantity(quantity_decimal)
         .build()?;
 
-        let response = connection.order_place(params).await
-            .map_err(|e| anyhow::anyhow!("Market sell failed: {}", e))?;
-        let data = response.data()
-            .map_err(|e| anyhow::anyhow!("Market sell response error: {}", e))?;
+        let response = self
+            .connection
+            .as_ref()
+            .unwrap()
+            .order_place(params)
+            .await
+            .map_err(|e| anyhow::anyhow!("Market rebalance failed: {}", e))?;
+        let data = response
+            .data()
+            .map_err(|e| anyhow::anyhow!("Market rebalance response error: {}", e))?;
 
         let executed_qty: f64 = data
             .executed_qty
@@ -1356,23 +1419,19 @@ impl BinanceTrader {
             .and_then(|q| q.parse().ok())
             .unwrap_or(0.0);
         let status = data.status.as_deref().unwrap_or("UNKNOWN");
-
         info!(
             symbol = symbol,
+            side = ?side,
             executed_qty = %fmt_price(executed_qty),
             status = status,
-            "Base asset cleanup complete"
+            "Rebalance order complete"
         );
 
-        Ok(executed_qty)
+        Ok(executed_qty > 0.0)
     }
 
-    /// Smart rebalance: called when exchange rejects with "insufficient balance".
-    /// 1. Cancel all open orders for this symbol (free locked USDT)
-    /// 2. Sell any stuck base asset at market (recover USDT)
-    /// 3. Query real USDT balance
-    /// 4. Sync virtual SimulationAccount cash with reality
-    /// Returns true if rebalance recovered enough balance to retry trading.
+    /// Smart rebalance: pause quoting, cancel open orders, rebalance spot balances
+    /// toward 50/50 between quote and base, then sync the virtual account.
     async fn smart_rebalance(&mut self, symbol: &str) -> bool {
         let quote_asset = &self.config.exchange.quote_asset;
         let base_asset = symbol.strip_suffix(quote_asset.as_str()).unwrap_or(symbol);
@@ -1416,46 +1475,30 @@ impl BinanceTrader {
         self.active_bid_order = None;
         self.active_ask_order = None;
 
-        // Step 2: Sell any stuck base asset at market — but only if
-        // we do NOT hold a virtual position. If there is an active position,
-        // the base asset is intentional inventory, not a leftover.
-        let has_position = self
-            .trade_manager
-            .get_position(symbol)
-            .is_some_and(|p| p.quantity > 0.0);
-        if has_position {
-            info!(
-                symbol = symbol,
-                "Smart rebalance: skipping base asset cleanup — active position held"
-            );
-        } else {
-            match self.cleanup_base_asset(symbol, base_asset).await {
-                Ok(sold_qty) => {
-                    if sold_qty > 0.0 {
-                        info!(
-                            symbol = symbol,
-                            base_asset = base_asset,
-                            sold_qty = %fmt_price(sold_qty),
-                            "Smart rebalance: sold stuck base asset"
-                        );
-                    }
-                }
-                Err(e) => {
-                    debug!(
-                        symbol = symbol,
-                        error = %e,
-                        "Smart rebalance: base asset cleanup skipped"
-                    );
-                }
+        // Step 2: market rebalance balances toward a 50/50 quote/base split.
+        match self.rebalance_half_and_half(symbol, base_asset).await {
+            Ok(rebalanced) => {
+                info!(
+                    symbol = symbol,
+                    rebalanced = rebalanced,
+                    "Smart rebalance step complete"
+                );
+            }
+            Err(e) => {
+                debug!(
+                    symbol = symbol,
+                    error = %e,
+                    "Smart rebalance: rebalance order skipped"
+                );
             }
         }
 
-        // Small delay to let Binance process cancels and sells
+        // Small delay to let Binance process cancels and rebalance trades.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Step 3: Query real USDT balance
-        let usdt_free = match self.account_balances(base_asset).await {
-            Ok((usdt, _)) => usdt,
+        // Step 3: query live balances and sync virtual state to reality.
+        let (quote_free, base_free) = match self.account_balances(base_asset).await {
+            Ok((quote, base)) => (quote, base),
             Err(e) => {
                 error!(
                     symbol = symbol,
@@ -1466,22 +1509,40 @@ impl BinanceTrader {
             }
         };
 
-        // Step 4: Sync virtual cash with reality
-        let old_cash = self.trade_manager.available_cash();
-        self.trade_manager.sync_cash(usdt_free);
-        let new_cash = self.trade_manager.available_cash();
+        let reference_price = if let Some(order) = self.active_bid_order.as_ref() {
+            order.price
+        } else if let Some(order) = self.active_ask_order.as_ref() {
+            order.price
+        } else if let Some(order) = self.active_limit_order.as_ref() {
+            order.price
+        } else if let Some(position) = self.trade_manager.get_position(symbol) {
+            position.entry_price
+        } else {
+            0.0
+        };
+        let sync_price = if reference_price > f64::EPSILON {
+            reference_price
+        } else {
+            quote_free / base_free.max(f64::EPSILON)
+        };
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+
+        self.trade_manager
+            .sync_live_balances(symbol, quote_free, base_free, sync_price, timestamp);
 
         info!(
             symbol = symbol,
-            usdt_free = %fmt_usd(usdt_free),
-            old_virtual_cash = format!("{:.4}", old_cash),
-            new_virtual_cash = format!("{:.4}", new_cash),
-            "Smart rebalance: cash synced with exchange"
+            quote_free = %fmt_usd(quote_free),
+            base_free = %fmt_price(base_free),
+            reference_price = %fmt_price(sync_price),
+            "Smart rebalance: balances synced with exchange"
         );
 
-        // Check if we have enough to trade
-        let min_notional = self.config.exchange.min_notional;
-        new_cash >= min_notional
+        let base_notional = base_free * sync_price.max(0.0);
+        quote_free >= self.config.exchange.min_notional && base_notional >= self.config.exchange.min_notional
     }
 }
 
@@ -1535,26 +1596,29 @@ impl Trader for BinanceTrader {
 
         match intent {
             OrderIntent::NoAction => ExecutionReport::ignored(),
-            OrderIntent::Cancel { rationale } => ExecutionReport {
-                status: ExecutionStatus::Cancelled,
-                symbol: Some(symbol.to_string()),
-                side: None,
-                order_type: None,
-                rationale: Some(rationale),
-                decision_confidence: 0.0,
-                decision_metrics: Vec::new(),
-                requested_quantity: 0.0,
-                executed_quantity: 0.0,
-                execution_price: None,
-                fee_paid: 0.0,
-                latency_seconds: 0.0,
-                synthetic_half_spread_bps: 0.0,
-                slippage_bps: 0.0,
-                latency_impact_bps: 0.0,
-                market_impact_bps: 0.0,
-                reason: Some(rationale),
-                expected_edge_bps: 0.0,
-            },
+            OrderIntent::Cancel { rationale } => {
+                self.cancel_two_sided_orders().await;
+                ExecutionReport {
+                    status: ExecutionStatus::Cancelled,
+                    symbol: Some(symbol.to_string()),
+                    side: None,
+                    order_type: None,
+                    rationale: Some(rationale),
+                    decision_confidence: 0.0,
+                    decision_metrics: Vec::new(),
+                    requested_quantity: 0.0,
+                    executed_quantity: 0.0,
+                    execution_price: None,
+                    fee_paid: 0.0,
+                    latency_seconds: 0.0,
+                    synthetic_half_spread_bps: 0.0,
+                    slippage_bps: 0.0,
+                    latency_impact_bps: 0.0,
+                    market_impact_bps: 0.0,
+                    reason: Some(rationale),
+                    expected_edge_bps: 0.0,
+                }
+            }
             OrderIntent::Place {
                 side,
                 order_type,
@@ -1620,7 +1684,7 @@ impl Trader for BinanceTrader {
                 if matches!(order_type, OrderType::Maker) {
                     // === REJECTION COOLDOWN + SMART REBALANCE ===
                     // After an exchange rejection (e.g. insufficient balance):
-                    // 1. First rejection: trigger smart_rebalance (cancel orders, sell base, sync cash)
+                    // 1. First rejection: trigger smart_rebalance (cancel orders, rebalance 50/50, sync balances)
                     // 2. If rebalance recovers enough balance: reset and retry immediately
                     // 3. If not: enter 30s cooldown to avoid spamming Binance
                     if self.consecutive_rejections > 0 {
@@ -1721,7 +1785,11 @@ impl Trader for BinanceTrader {
                     let tick_size = self.config.exchange.tick_size;
 
                     let rounded_price = if tick_size > 0.0 {
-                        (limit_price / tick_size).round() * tick_size
+                        let ticks = limit_price / tick_size;
+                        match side {
+                            Side::Buy => ticks.floor() * tick_size,
+                            Side::Sell => ticks.ceil() * tick_size,
+                        }
                     } else {
                         limit_price
                     };
@@ -2234,27 +2302,7 @@ impl Trader for BinanceTrader {
                 }
                 self.active_limit_order = None;
                 // Also cancel any two-sided orders before taker exit
-                for active_side in [self.active_bid_order.take(), self.active_ask_order.take()]
-                    .into_iter()
-                    .flatten()
-                {
-                    let cancel_params =
-                        OrderCancelParams::builder(active_side.symbol.clone())
-                            .orig_client_order_id(active_side.client_order_id.clone())
-                            .build()
-                            .expect("Failed to build cancel params");
-                    let _ = self
-                        .connection
-                        .as_ref()
-                        .unwrap()
-                        .order_cancel(cancel_params)
-                        .await;
-                    info!(
-                        symbol = %active_side.symbol,
-                        side = ?active_side.side,
-                        "Cancelled two-sided order before taker exit"
-                    );
-                }
+                self.cancel_two_sided_orders().await;
 
                 let qty_str = format!("{:.prec$}", rounded_qty, prec = qty_precision);
 
@@ -2692,6 +2740,9 @@ impl Trader for BinanceTrader {
         trading_mode: TradeMode,
         market_data_source: MarketDataSourceKind,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let strategy_info = trading_strategy.get_info();
+        let preserve_startup_inventory = strategy_info.contains("continuous bid/ask");
+
         if trading_mode == TradeMode::Real && self.connection.is_none() {
             let (api_key, api_secret) = self.credentials()?;
             let config = ConfigurationWebsocketApi::builder()
@@ -2756,22 +2807,41 @@ impl Trader for BinanceTrader {
             }
         }
 
-        // ── Live startup: sell leftover base asset + log balance ──
+        // ── Live startup: sync real balances into virtual state ──
         if trading_mode == TradeMode::Real {
-            let quote_asset = &self.config.exchange.quote_asset;
+            let quote_asset = self.config.exchange.quote_asset.clone();
+            let step_size = self.config.exchange.step_size.max(f64::EPSILON);
             let base_asset = trading_symbol.strip_suffix(quote_asset.as_str()).unwrap_or(trading_symbol);
 
-            // Sell any leftover base asset from previous session
             match self.account_balances(base_asset).await {
-                Ok((_usdt_free_before, base_free)) => {
-                    if base_free * self.config.exchange.step_size.recip().ceil() >= 1.0 {
-                        info!(
-                            base_asset = base_asset,
-                            base_free = %fmt_price(base_free),
-                            "Leftover base asset detected, selling at market"
-                        );
-                        let _ = self.cleanup_base_asset(trading_symbol, base_asset).await;
-                    }
+                Ok((quote_free_before, base_free_before)) => {
+                    let startup_reference_price = if base_free_before >= step_size {
+                        quote_free_before / base_free_before.max(f64::EPSILON)
+                    } else {
+                        0.0
+                    };
+                    let event_time_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64();
+                    self.trade_manager.sync_live_balances(
+                        trading_symbol,
+                        quote_free_before,
+                        base_free_before,
+                        startup_reference_price,
+                        event_time_secs,
+                    );
+
+                    info!(
+                        symbol = trading_symbol,
+                        quote_asset = %quote_asset,
+                        base_asset = base_asset,
+                        quote_free = %fmt_usd(quote_free_before),
+                        base_free = %fmt_price(base_free_before),
+                        reference_price = %fmt_price(startup_reference_price),
+                        preserve_inventory = preserve_startup_inventory,
+                        "Startup balance baseline synced"
+                    );
                 }
                 Err(e) => {
                     error!(
@@ -3147,16 +3217,44 @@ impl Trader for BinanceTrader {
                                 let trade_price = last_trade.price;
                                 let trade_qty = last_trade.quantity;
                                 let step = self.config.exchange.step_size;
+                                let tick_size = self.config.exchange.tick_size;
+                                let min_notional = self.config.exchange.min_notional;
                                 let maker_fee = self.config.exchange.maker_fee;
+
+                                let rounded_buy_price = if tick_size > 0.0 {
+                                    let ticks = buy_price / tick_size;
+                                    ticks.floor() * tick_size
+                                } else {
+                                    buy_price
+                                };
+                                let rounded_sell_price = if tick_size > 0.0 {
+                                    let ticks = sell_price / tick_size;
+                                    ticks.ceil() * tick_size
+                                } else {
+                                    sell_price
+                                };
+                                let rounded_buy_qty = if step > 0.0 {
+                                    (buy_quantity / step).floor() * step
+                                } else {
+                                    buy_quantity
+                                };
+                                let rounded_sell_qty = if sell_quantity <= step && sell_quantity > 0.0 {
+                                    sell_quantity
+                                } else {
+                                    backtest_engine.round_down_to_step(sell_quantity)
+                                };
+                                let buy_order_is_live = rounded_buy_qty >= step
+                                    && rounded_buy_price > 0.0
+                                    && rounded_buy_qty * rounded_buy_price >= min_notional;
 
                                 // --- BUY side: trade-through check ---
                                 // Passive buy rests at buy_price. Fills when a seller-
                                 // initiated trade occurs at or below our price.
                                 // is_buyer_market_maker == true means seller crossed the
                                 // spread (seller-initiated → price is at bid side).
-                                if buy_quantity > 0.0
+                                if buy_order_is_live
                                     && last_trade.is_buyer_market_maker
-                                    && trade_price <= buy_price
+                                    && trade_price <= rounded_buy_price
                                 {
                                     // Fill quantity: min of our order, trade size, and
                                     // a fraction to model queue position (we're not first).
@@ -3165,14 +3263,14 @@ impl Trader for BinanceTrader {
                                     let queue_fill_fraction = 0.3;
                                     let available_fill = (trade_qty * queue_fill_fraction).max(step);
                                     let fill_qty = backtest_engine.round_down_to_step(
-                                        buy_quantity.min(available_fill),
+                                        rounded_buy_qty.min(available_fill),
                                     );
 
                                     if fill_qty > 0.0 {
-                                        let fill_price = buy_price; // maker fills at own price
+                                        let fill_price = rounded_buy_price; // maker fills at own price
                                         let fee_paid = fill_price * fill_qty * maker_fee;
                                         let buy_report = ExecutionReport {
-                                            status: if fill_qty < buy_quantity {
+                                            status: if fill_qty < rounded_buy_qty {
                                                 ExecutionStatus::PartiallyFilled
                                             } else {
                                                 ExecutionStatus::Filled
@@ -3183,7 +3281,7 @@ impl Trader for BinanceTrader {
                                             rationale: Some("two_sided_buy_fill"),
                                             decision_confidence: 1.0,
                                             decision_metrics: Vec::new(),
-                                            requested_quantity: buy_quantity,
+                                            requested_quantity: rounded_buy_qty,
                                             executed_quantity: fill_qty,
                                             execution_price: Some(fill_price),
                                             fee_paid,
@@ -3192,7 +3290,7 @@ impl Trader for BinanceTrader {
                                             slippage_bps: 0.0,
                                             latency_impact_bps: 0.0,
                                             market_impact_bps: 0.0,
-                                            reason: if fill_qty < buy_quantity {
+                                            reason: if fill_qty < rounded_buy_qty {
                                                 Some("partial_queue_fill")
                                             } else {
                                                 None
@@ -3225,12 +3323,12 @@ impl Trader for BinanceTrader {
                                 // is_buyer_market_maker == false means buyer crossed the
                                 // spread (buyer-initiated → price is at ask side).
                                 let pos = self.current_position(trading_symbol);
-                                if sell_quantity > 0.0
+                                if rounded_sell_qty > 0.0
                                     && pos.quantity > 0.0
                                     && !last_trade.is_buyer_market_maker
-                                    && trade_price >= sell_price
+                                    && trade_price >= rounded_sell_price
                                 {
-                                    let sell_qty = sell_quantity.min(pos.quantity);
+                                    let sell_qty = rounded_sell_qty.min(pos.quantity);
                                     let queue_fill_fraction = 0.3;
                                     let available_fill = (trade_qty * queue_fill_fraction).max(step);
                                     let fill_qty = if sell_qty <= step && available_fill >= step {
@@ -3243,7 +3341,7 @@ impl Trader for BinanceTrader {
                                     };
 
                                     if fill_qty > 0.0 {
-                                        let fill_price = sell_price; // maker fills at own price
+                                        let fill_price = rounded_sell_price; // maker fills at own price
                                         let fee_paid = fill_price * fill_qty * maker_fee;
                                         let sell_report = ExecutionReport {
                                             status: if fill_qty < sell_qty {

@@ -381,6 +381,32 @@ impl MarketMakerStrategy {
         }
     }
 
+    fn passive_exit_floor_bps(&self, market_state: &MarketState, context: &StrategyContext) -> f64 {
+        let base_floor_bps = self.config.min_exit_edge_bps;
+        let Some(now) = market_state.last_event_time_millis() else {
+            return base_floor_bps;
+        };
+        if context.current_position.entry_time <= 0.0 || self.config.max_hold_millis == 0 {
+            return base_floor_bps;
+        }
+
+        let held_millis = now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
+        let max_hold = self.config.max_hold_millis;
+
+        if held_millis >= max_hold {
+            return base_floor_bps.min(-3.0);
+        }
+
+        let held_ratio = held_millis as f64 / max_hold as f64;
+        if held_ratio < 0.5 {
+            return base_floor_bps;
+        }
+
+        let unwind_ratio = ((held_ratio - 0.5) / 0.5).clamp(0.0, 1.0);
+        let target_floor_bps = base_floor_bps.min(-3.0);
+        base_floor_bps + (target_floor_bps - base_floor_bps) * unwind_ratio
+    }
+
     /// Check exit conditions for a long position.
     /// Returns Some((rationale, use_maker)) if should exit, None otherwise.
     fn check_exit(
@@ -504,6 +530,24 @@ impl MarketMakerStrategy {
 
         let effective_cf = base_cf * spread_factor * vol_factor * budget_factor;
         effective_cf.clamp(self.config.min_cash_fraction, self.config.max_cash_fraction)
+    }
+
+    fn max_inventory_notional(&self, context: &StrategyContext) -> f64 {
+        let fraction_cap = if context.initial_capital > f64::EPSILON {
+            context.initial_capital * self.config.max_inventory_fraction
+        } else {
+            0.0
+        };
+
+        match (
+            fraction_cap > f64::EPSILON,
+            context.max_position_notional > f64::EPSILON,
+        ) {
+            (true, true) => fraction_cap.min(context.max_position_notional),
+            (true, false) => fraction_cap,
+            (false, true) => context.max_position_notional,
+            (false, false) => 0.0,
+        }
     }
 
     /// Check entry conditions. Returns the expected edge in bps if entry is valid,
@@ -707,9 +751,14 @@ impl MarketMakerStrategy {
             return StrategyDecision::no_action();
         }
 
+        // Reuse the single-sided entry gate for the buy side only. This keeps
+        // unwinding inventory via passive sells, but stops adding exposure when
+        // spread/flow/volatility no longer justify a fresh maker entry.
+        let buy_entry_edge_bps = self.check_entry(market_state).ok();
+
         // --- Compute inventory ratio ---
         // inventory_ratio: 0 = no position, 1 = max inventory
-        let max_inventory_value = context.initial_capital * self.config.max_inventory_fraction;
+        let max_inventory_value = self.max_inventory_notional(context);
         let inventory_value = context.current_position.quantity * mid;
         let inventory_ratio = if max_inventory_value > f64::EPSILON {
             (inventory_value / max_inventory_value).clamp(0.0, 1.0)
@@ -756,7 +805,8 @@ impl MarketMakerStrategy {
         // even though the maker fee is zero.
         let entry_price = context.current_position.entry_price;
         if entry_price > 0.0 && context.current_position.quantity > f64::EPSILON {
-            let min_sell = entry_price * (1.0 + self.config.min_exit_edge_bps / 10_000.0);
+            let exit_floor_bps = self.passive_exit_floor_bps(market_state, context);
+            let min_sell = entry_price * (1.0 + exit_floor_bps / 10_000.0);
             sell_price = sell_price.max(min_sell);
         }
 
@@ -776,14 +826,29 @@ impl MarketMakerStrategy {
         self.last_sell_quote = sell_price;
 
         // --- Compute quantities ---
-        let buy_quantity = if inventory_ratio >= 1.0 {
+        let effective_cf = if self.config.dynamic_sizing {
+            self.compute_dynamic_cf(market_state, context)
+        } else {
+            self.config.cash_fraction
+        };
+        self.diagnostics.last_effective_cf = effective_cf;
+
+        let remaining_inventory_notional = (max_inventory_value - inventory_value).max(0.0);
+        let buy_quantity = if inventory_ratio >= 1.0
+            || buy_entry_edge_bps.is_none()
+            || remaining_inventory_notional <= f64::EPSILON
+        {
             // Max inventory reached — don't buy more
             0.0
         } else {
-            // Scale buy size inversely with inventory
+            // Scale buy size inversely with inventory and respect the global
+            // position cap so the two-sided path cannot silently exceed the
+            // same risk budget as single-sided trading.
             let scale = 1.0 - inventory_ratio;
-            let base_qty = context.available_cash * self.config.cash_fraction / buy_price;
-            base_qty * scale
+            let scaled_cf = (effective_cf * scale).max(0.0);
+            context
+                .capped_entry_quantity(buy_price, scaled_cf, Some(remaining_inventory_notional))
+                .unwrap_or(0.0)
         };
 
         let sell_quantity = context.current_position.quantity;
@@ -982,8 +1047,9 @@ impl Strategy for MarketMakerStrategy {
                     // below entry_price * (1 + min_exit_edge_bps / 10_000).
                     // This ensures we don't sell at a loss before fees.
                     // Does NOT affect taker exits (stop_loss, panic_vol, max_hold).
+                    let exit_floor_bps = self.passive_exit_floor_bps(market_state, context);
                     let min_sell_price =
-                        entry_price * (1.0 + self.config.min_exit_edge_bps / 10_000.0);
+                        entry_price * (1.0 + exit_floor_bps / 10_000.0);
                     raw_ask.max(min_sell_price)
                 } else {
                     // Taker sell at bid (conservative, fallback to last_price)
@@ -1106,6 +1172,49 @@ impl Strategy for MarketMakerStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trade::market::{BookLevel, BookTicker, MarketEvent, MarketState};
+    use trade::models::{Position, Trade};
+
+    fn make_trade(price: f64, quantity: f64, trade_time: u64, is_buyer_market_maker: bool) -> MarketEvent {
+        MarketEvent::Trade(Trade {
+            event_type: "trade".to_string(),
+            event_time: trade_time,
+            symbol: "DOGEFDUSD".to_string(),
+            trade_id: trade_time,
+            price,
+            quantity,
+            buyer_order_id: None,
+            seller_order_id: None,
+            trade_time,
+            is_buyer_market_maker,
+        })
+    }
+
+    fn make_book(bid: f64, ask: f64, event_time: u64) -> MarketEvent {
+        MarketEvent::BookTicker(BookTicker {
+            bid: BookLevel {
+                price: bid,
+                quantity: 100.0,
+            },
+            ask: BookLevel {
+                price: ask,
+                quantity: 100.0,
+            },
+            event_time,
+        })
+    }
+
+    fn two_sided_strategy(config: MarketMakerConfig) -> MarketMakerStrategy {
+        MarketMakerStrategy {
+            config,
+            logger: NoOpStrategyLogger,
+            last_exit_time_millis: None,
+            was_in_position: false,
+            last_buy_quote: 0.0,
+            last_sell_quote: 0.0,
+            diagnostics: MakerDiagnostics::default(),
+        }
+    }
 
     #[test]
     fn test_default_config() {
@@ -1139,5 +1248,98 @@ mod tests {
         assert_eq!(config.max_hold_millis, 120_000);
         // defaults for unspecified fields
         assert_eq!(config.stop_loss_bps, 500.0);
+    }
+
+    #[test]
+    fn two_sided_blocks_new_bids_when_entry_filters_fail() {
+        let mut strategy = two_sided_strategy(MarketMakerConfig {
+            two_sided: true,
+            min_spread_bps: 20.0,
+            min_edge_bps: 0.0,
+            round_trip_cost_bps: 0.0,
+            min_trades_in_window: 1,
+            require_seller_initiated: false,
+            max_price_position: 1.0,
+            ..MarketMakerConfig::default()
+        });
+        let mut market_state = MarketState::new("DOGEFDUSD", 60_000);
+        market_state.apply(&make_book(0.1000, 0.1001, 2_000));
+        market_state.apply(&make_trade(0.1000, 50.0, 2_000, true));
+
+        let decision = strategy.decide(
+            &market_state,
+            &StrategyContext {
+                symbol: "DOGEFDUSD".to_string(),
+                current_position: Position {
+                    symbol: "DOGEFDUSD".to_string(),
+                    quantity: 10.0,
+                    entry_price: 0.1000,
+                    entry_time: 1.0,
+                },
+                available_cash: 100.0,
+                max_position_notional: 100.0,
+                initial_capital: 100.0,
+                tick_size: 0.0001,
+            },
+        );
+
+        match decision.intent {
+            OrderIntent::QuoteBothSides {
+                buy_quantity,
+                sell_quantity,
+                ..
+            } => {
+                assert_eq!(buy_quantity, 0.0);
+                assert_eq!(sell_quantity, 10.0);
+            }
+            other => panic!("unexpected intent: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_sided_respects_global_position_cap() {
+        let mut strategy = two_sided_strategy(MarketMakerConfig {
+            two_sided: true,
+            min_spread_bps: 1.0,
+            min_edge_bps: 0.0,
+            round_trip_cost_bps: 0.0,
+            min_trades_in_window: 1,
+            require_seller_initiated: false,
+            max_price_position: 1.0,
+            max_inventory_fraction: 0.9,
+            ..MarketMakerConfig::default()
+        });
+        let mut market_state = MarketState::new("DOGEFDUSD", 60_000);
+        market_state.apply(&make_book(99.95, 100.05, 2_000));
+        market_state.apply(&make_trade(100.0, 50.0, 2_000, true));
+
+        let decision = strategy.decide(
+            &market_state,
+            &StrategyContext {
+                symbol: "DOGEFDUSD".to_string(),
+                current_position: Position {
+                    symbol: "DOGEFDUSD".to_string(),
+                    quantity: 0.1,
+                    entry_price: 100.0,
+                    entry_time: 1.0,
+                },
+                available_cash: 1_000.0,
+                max_position_notional: 10.0,
+                initial_capital: 1_000.0,
+                tick_size: 0.01,
+            },
+        );
+
+        match decision.intent {
+            OrderIntent::QuoteBothSides {
+                buy_quantity,
+                sell_quantity,
+                ..
+            } => {
+                assert_eq!(buy_quantity, 0.0);
+                assert_eq!(sell_quantity, 0.1);
+            }
+            other => panic!("unexpected intent: {other:?}"),
+        }
     }
 }

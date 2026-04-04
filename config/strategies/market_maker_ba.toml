@@ -1,0 +1,7 @@
+base_half_spread_bps = 1.0
+min_half_spread_bps = 0.4
+max_half_spread_bps = 8.0
+volatility_reference_bps = 30.0
+volatility_multiplier_min = 0.8
+volatility_multiplier_max = 3.0
+cash_fraction = 0.04

@@ -496,6 +496,47 @@ impl TradeManager {
         self.account.cash = capped;
     }
 
+    pub fn sync_live_balances(
+        &mut self,
+        symbol: &str,
+        quote_free: f64,
+        base_free: f64,
+        reference_price: f64,
+        timestamp: f64,
+    ) {
+        self.account.cash = quote_free.max(0.0);
+        self.pending_entry_attribution.remove(symbol);
+        self.pending_exit_attribution.remove(symbol);
+
+        if base_free > f64::EPSILON && reference_price > f64::EPSILON {
+            self.positions.insert(
+                symbol.to_string(),
+                Position {
+                    symbol: symbol.to_string(),
+                    quantity: base_free,
+                    entry_price: reference_price,
+                    entry_time: timestamp,
+                },
+            );
+        } else {
+            self.positions.remove(symbol);
+        }
+
+        let equity = if reference_price > f64::EPSILON {
+            self.account
+                .update_drawdown(reference_price, self.positions.get(symbol))
+        } else {
+            self.account.cash
+        };
+
+        self.metrics.update_account_snapshot(
+            self.account.cash,
+            equity,
+            self.account.equity_peak,
+            self.account.max_drawdown,
+        );
+    }
+
     pub fn initial_capital(&self) -> f64 {
         self.account.initial_cash
     }

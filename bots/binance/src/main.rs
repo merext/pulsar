@@ -481,10 +481,12 @@ fn build_strategy(
     strategy_name: &str,
     strategy_config_override: Option<&str>,
 ) -> Result<Box<dyn Strategy>, Box<dyn Error + Send + Sync>> {
-    // If a strategy config override is provided for market-maker, use it
     let market_maker_config = strategy_config_override
         .map(|p| resolve_workspace_path(p))
         .unwrap_or_else(|| resolve_workspace_path("config/strategies/market_maker.toml"));
+    let market_maker_ba_config = strategy_config_override
+        .map(|p| resolve_workspace_path(p))
+        .unwrap_or_else(|| resolve_workspace_path("config/strategies/market_maker_ba.toml"));
 
     match strategy_name {
         "trade-flow-momentum" => Ok(Box::new(
@@ -523,8 +525,14 @@ fn build_strategy(
             )
             .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
         )),
+        "market-maker-ba" => Ok(Box::new(
+            strategies::market_maker_ba::MarketMakerBaStrategy::from_file(
+                market_maker_ba_config,
+            )
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        )),
         _ => Err(format!(
-            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture, market-maker",
+            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture, market-maker, market-maker-ba",
             strategy_name
         )
         .into()),
@@ -576,6 +584,7 @@ fn strategy_config_path(strategy_name: &str) -> Result<&'static str, Box<dyn Err
         "microprice-imbalance-maker" => Ok("config/strategies/microprice_imbalance_maker.toml"),
         "spread-regime-capture" => Ok("config/strategies/spread_regime_capture.toml"),
         "market-maker" => Ok("config/strategies/market_maker.toml"),
+        "market-maker-ba" => Ok("config/strategies/market_maker_ba.toml"),
         _ => Err(format!("Unknown strategy '{}'.", strategy_name).into()),
     }
 }
@@ -675,6 +684,12 @@ fn build_strategy_from_search_spec(
             ) as Box<dyn Strategy>,
             "market-maker" => Box::new(
                 strategies::market_maker::MarketMakerStrategy::from_file(
+                    &temp_path,
+                )
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+            ) as Box<dyn Strategy>,
+            "market-maker-ba" => Box::new(
+                strategies::market_maker_ba::MarketMakerBaStrategy::from_file(
                     &temp_path,
                 )
                 .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
@@ -3160,21 +3175,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let (quote_before, base_before) = trader.account_balances(base_asset).await?;
             println!("Before: {:.8} {}, {:.4} {}", base_before, base_asset, quote_before, quote_asset);
 
-            if base_before > 0.0 {
-                match trader.cleanup_base_asset(&trading_symbol, base_asset).await {
-                    Ok(sold_qty) => {
-                        if sold_qty > 0.0 {
-                            let (quote_after, base_after) = trader.account_balances(base_asset).await?;
-                            println!("Sold {:.8} {} at market", sold_qty, base_asset);
-                            println!("After:  {:.8} {}, {:.4} {}", base_after, base_asset, quote_after, quote_asset);
-                        } else {
-                            println!("Nothing to sell (qty below step_size)");
-                        }
-                    }
-                    Err(e) => println!("Sell failed: {}", e),
+            match trader.rebalance_half_and_half(&trading_symbol, base_asset).await {
+                Ok(rebalanced) => {
+                    let (quote_after, base_after) = trader.account_balances(base_asset).await?;
+                    println!("Rebalanced: {}", rebalanced);
+                    println!("After:  {:.8} {}, {:.4} {}", base_after, base_asset, quote_after, quote_asset);
                 }
-            } else {
-                println!("No {} to sell", base_asset);
+                Err(e) => println!("Rebalance failed: {}", e),
             }
         }
         Commands::Trade => {
