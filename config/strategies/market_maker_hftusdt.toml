@@ -1,0 +1,58 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — HFTUSDT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# HFTUSDT characteristics:
+#   Price: ~$0.0126
+#   Tick size: 0.0001
+#   1 tick = ~79 bps spread
+#   Step size: 0.1
+#
+# Strategy: Buy passive at bid, sell passive at ask.
+# Net edge per round-trip: ~59 bps (79 spread - 20 maker fees)
+# MARGINAL — smallest tick_bps of the three, least edge per trade.
+
+# --- Spread & pricing ---
+
+# Minimum spread to accept entry (bps). HFTUSDT has ~79 bps natural spread.
+# Set to 40 — filters heavily compressed ticks.
+min_spread_bps = 40.0
+
+# Round-trip maker cost.
+round_trip_cost_bps = 20.0
+
+# Minimum edge after costs. At ~79 bps tick and 20 bps cost,
+# typical edge = 59 bps. Require 15 bps buffer.
+min_edge_bps = 15.0
+
+# --- Position management ---
+max_hold_millis = 120000
+
+# Stop loss in bps. ~79 bps per tick → 180 bps ≈ ~2.3 adverse ticks.
+stop_loss_bps = 180.0
+
+# Cooldown after exit.
+entry_cooldown_millis = 15000
+
+# --- Volatility filters ---
+max_vol_bps = 1000.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+trade_window_millis = 60000
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = true
+min_sell_flow_fraction = 0.0
+
+# Price position filtering
+price_position_window = 20
+max_price_position = 0.3
+
+# --- Sizing ---
+cash_fraction = 0.08

@@ -32,6 +32,25 @@ pub struct ExchangeConfig {
     pub min_notional: f64,
     pub max_order_size: f64,
     pub step_size: f64,
+    /// Quote asset for this trading pair (e.g. "USDT", "FDUSD", "USDC").
+    /// Used to extract base_asset from symbol and to identify quote balance.
+    /// Defaults to "USDT" for backward compatibility with existing configs.
+    #[serde(default = "default_quote_asset")]
+    pub quote_asset: String,
+    /// Fee rate charged when BNB fee discount is active, even on zero-maker-fee pairs.
+    /// Binance deducts this from BNB balance (or from base asset if BNB balance is insufficient).
+    /// Used as conservative floor in async poll path where commission_asset is unknown.
+    /// Set to 0.0 to disable. Default: 0.00075 (7.5 bps — standard BNB discount tier).
+    #[serde(default = "default_bnb_discount_fee")]
+    pub bnb_discount_fee: f64,
+}
+
+fn default_quote_asset() -> String {
+    "USDT".to_string()
+}
+
+fn default_bnb_discount_fee() -> f64 {
+    0.00075
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +68,23 @@ pub struct OrderExecutionConfig {
     pub order_timeout: f64,
     pub max_retries: u32,
     pub retry_delay: f64,
+    /// Minimum time (ms) a resting maker order must stay before cancel-replace is allowed.
+    /// Prevents rapid cancel-replace churn that kills fill probability.
+    #[serde(default = "default_min_order_rest_millis")]
+    pub min_order_rest_millis: u64,
+    /// Maximum time (ms) a resting maker order can stay at the same price.
+    /// After this, even same-price dedup is bypassed — order is cancelled and
+    /// the strategy gets a fresh chance to re-evaluate.
+    #[serde(default = "default_max_order_rest_millis")]
+    pub max_order_rest_millis: u64,
+}
+
+fn default_min_order_rest_millis() -> u64 {
+    10_000
+}
+
+fn default_max_order_rest_millis() -> u64 {
+    90_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

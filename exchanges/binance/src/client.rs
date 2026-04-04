@@ -839,6 +839,32 @@ impl BinanceClient {
         }
     }
 
+    /// Normalize a timestamp to milliseconds.
+    ///
+    /// Binance WebSocket API sends timestamps in milliseconds (13 digits),
+    /// but historical CSV trade data uses microseconds (16 digits).
+    /// This function detects the format and normalizes to milliseconds.
+    ///
+    /// Heuristic:
+    ///   - 16+ digits (>= 10^15): microseconds → divide by 1000
+    ///   - 13 digits (>= 10^12): milliseconds → use as-is
+    ///   - Fewer digits: assume seconds → multiply by 1000
+    fn normalize_timestamp_to_millis(raw_timestamp: u64) -> u64 {
+        if raw_timestamp >= 1_000_000_000_000_000 {
+            // Microseconds (16 digits) → convert to milliseconds
+            raw_timestamp / 1000
+        } else if raw_timestamp >= 1_000_000_000_000 {
+            // Already milliseconds (13 digits)
+            raw_timestamp
+        } else if raw_timestamp >= 1_000_000_000 {
+            // Seconds (10 digits) → convert to milliseconds
+            raw_timestamp * 1000
+        } else {
+            // Unknown format, return as-is
+            raw_timestamp
+        }
+    }
+
     fn parse_csv_from_reader<R: std::io::Read>(
         reader: R,
     ) -> Result<Vec<PulsarTrade>, Box<dyn std::error::Error + Send + Sync>> {
@@ -863,8 +889,8 @@ impl BinanceClient {
             }
 
             if record.len() == 3 {
-                let trade_time: u64 = match record[0].parse() {
-                    Ok(time) => time,
+                let trade_time: u64 = match record[0].parse::<u64>() {
+                    Ok(time) => Self::normalize_timestamp_to_millis(time),
                     Err(e) => {
                         error!(error = ?e, record = ?record, "Failed to parse simple CSV timestamp.");
                         continue;
@@ -926,8 +952,8 @@ impl BinanceClient {
                 }
             };
 
-            let trade_time: u64 = match record[4].parse() {
-                Ok(time) => time,
+            let trade_time: u64 = match record[4].parse::<u64>() {
+                Ok(time) => Self::normalize_timestamp_to_millis(time),
                 Err(e) => {
                     error!(error = ?e, record = ?record, "Failed to parse trade_time.");
                     continue;

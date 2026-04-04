@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — BNBFDUSD
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# BNBFDUSD characteristics:
+#   Price: ~$588
+#   Tick size: 0.01
+#   1 tick = ~1.7 bps spread
+#   ~250 trades/minute (less liquid than BNBUSDT but decent)
+#   Step size: 0.001
+#
+# ZERO MAKER FEE (Binance FDUSD promotion)
+#   Passive buy (maker) = 0%
+#   Passive sell (maker) = 0%
+#   Round-trip maker+maker = 0%
+#   Taker exit (emergency) = 10 bps (one side)
+#
+# Strategy: aggressive market-making. Any positive spread = profit.
+
+# --- Spread & pricing ---
+
+# Accept very tight spreads — even 1 tick = profit with zero fees.
+min_spread_bps = 0.1
+
+# Zero round-trip cost for passive maker+maker trades.
+round_trip_cost_bps = 0.0
+
+# Any positive edge is good — 0% fee means edge = spread.
+min_edge_bps = 0.0
+
+# --- Position management ---
+
+# 3 minute hold — give passive sell ample time to fill.
+# With zero maker fee, there's no urgency to exit quickly.
+# Taker exit is 10 bps penalty, so patience is rewarded.
+max_hold_millis = 180000
+
+# Stop loss: 10 bps. Taker exit costs 10 bps fee + this loss.
+# Total taker exit cost: ~20 bps. Keep tight to protect profits.
+stop_loss_bps = 10.0
+
+# 10 second cooldown — more aggressive since we profit from every fill.
+entry_cooldown_millis = 10000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+# 5 seconds — ~20 trades per window at 250/min.
+trade_window_millis = 5000
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+# No directional filter.
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering — disabled.
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Exit pricing ---
+
+# Sell floor: never place passive sell below entry + 1 tick (~1.7 bps).
+# With 0% maker fee, this 1.7 bps spread IS the profit.
+min_exit_edge_bps = 1.7
+
+# --- Sizing ---
+# $95 * 0.06 = $5.70 → above min_notional $5.0. ~0.010 BNB.
+cash_fraction = 0.06

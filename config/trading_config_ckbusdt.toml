@@ -1,0 +1,140 @@
+# Trading Configuration — CKBUSDT
+# Price: ~$0.0032, Tick: 1e-05 (~31 bps), Step: 1.0
+
+[position_sizing]
+trading_size_min = 1563.0
+trading_size_max = 1876.0
+trading_symbol = "CKBUSDT"
+min_trade_notional = 5.0
+max_trade_notional = 6.0
+cash_reserve_ratio = 0.10
+max_position_notional = 6.0
+
+[exchange]
+taker_fee = 0.00075
+maker_fee = 0.00075
+maker_rebate = 0.0
+tick_size = 1e-05
+min_notional = 5.0
+max_order_size = 1000000.0
+step_size = 1.0
+
+[slippage]
+min_slippage = 0.00001
+max_slippage = 0.0008
+volatility_multiplier = 0.3
+size_multiplier = 1.5
+market_order_volatility = 0.0008
+taker_order_volatility = 0.0004
+
+[risk_management]
+max_position_size = 35.0
+max_daily_loss = 12.0
+max_drawdown = 0.55
+max_leverage = 1.0
+min_signal_strength = 0.7
+max_consecutive_losses = 2
+cooldown_period = 10
+max_trades_per_hour = 30
+initial_margin = 0.1
+maintenance_margin = 0.05
+
+[order_execution]
+order_timeout = 5.0
+max_retries = 3
+retry_delay = 0.1
+min_order_rest_millis = 10_000
+max_order_rest_millis = 90_000
+
+[market_data]
+min_trade_size = 1.0
+max_price_change = 0.1
+outlier_threshold = 3.0
+trading_hours_start = 0
+trading_hours_end = 24
+
+[performance_tracking]
+track_fill_rate = false
+track_slippage = true
+track_fees = true
+track_rebates = true
+track_order_rejections = false
+calculate_sharpe_ratio = false
+calculate_sortino_ratio = false
+calculate_max_drawdown = true
+calculate_calmar_ratio = false
+calculate_profit_factor = false
+
+[backtest_settings]
+initial_capital = 100.0
+commission_model = "binance"
+slippage_model = "realistic"
+fill_model = "immediate"
+handle_data_gaps = true
+interpolate_missing_data = false
+filter_outliers = true
+prevent_lookahead_bias = true
+use_point_in_time_data = true
+simulate_market_microstructure = true
+account_for_latency_in_signals = true
+simulate_order_queue_position = false
+simulate_partial_fills = true
+simulate_order_cancellations = false
+simulate_market_impact = true
+market_impact_model = "linear"
+impact_decay_rate = 0.15
+simulate_order_delays = true
+simulate_exchange_errors = false
+simulate_network_timeouts = false
+limit_order_fill_rate = 0.35
+partial_fill_probability = 0.1
+partial_fill_ratio = 0.65
+invalid_order_probability = 0.001
+rejection_reasons = [
+    "insufficient_balance",
+    "invalid_price",
+    "invalid_quantity",
+]
+handle_market_halts = false
+halt_probability = 0.0001
+halt_duration_min = 60
+halt_duration_max = 300
+base_spread = 0.0002
+spread_volatility = 0.00008
+spread_widening_factor = 1.6
+order_book_depth = 10
+market_impact_factor = 0.0004
+track_queue_position = false
+track_latency = true
+track_market_impact = true
+total_latency_model = "realistic"
+propagation_delay = 0.01
+transmission_delay = 0.002
+queuing_delay = 0.005
+processing_delay = 0.003
+latency_spike_probability = 0.01
+latency_spike_multiplier = 5.0
+congestion_latency_factor = 1.2
+exchange_processing_time = 0.001
+order_matching_latency = 0.0005
+market_data_latency = 0.001
+signal_generation_time = 0.0001
+order_construction_time = 0.0001
+risk_check_time = 0.0001
+order_book_simulation = true
+bid_ask_spread_model = "basic"
+spread_volatility_factor = 1.0
+spread_widening_events = true
+order_book_levels = 5
+level_size_distribution = "uniform"
+min_level_size = 50.0
+max_level_size = 500.0
+market_maker_presence = true
+mm_spread_tightening = 0.15
+mm_inventory_management = false
+mm_risk_aversion = 0.0
+hft_competition = true
+hft_latency_advantage = 0.001
+hft_order_cancellation_rate = 0.15
+hft_market_impact = 0.0002
+disable_drawdown_limit = false

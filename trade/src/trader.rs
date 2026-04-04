@@ -61,7 +61,8 @@ pub trait Trader {
     fn get_trade_manager(&self) -> &TradeManager;
 
     // Account and trading operations
-    async fn account_status(&self) -> Result<(), anyhow::Error>;
+    // Returns the USDT free balance if available (live mode), None otherwise.
+    async fn account_status(&self) -> Result<Option<f64>, anyhow::Error>;
     async fn on_order_intent(
         &mut self,
         symbol: &str,

@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — TRUMPFDUSD
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# TRUMPFDUSD characteristics:
+#   Price: ~$2.85
+#   Tick size: 0.001
+#   1 tick = ~3.5 bps spread
+#   Actual observed spread: ~5-6 ticks = ~17.5 bps
+#   Step size: 0.001
+#
+# ZERO MAKER FEE (Binance FDUSD promotion)
+# Wide spread = ~17.5 bps pure profit per round-trip.
+
+# --- Spread & pricing ---
+min_spread_bps = 0.1
+round_trip_cost_bps = 0.0
+min_edge_bps = 0.0
+
+# --- Position management ---
+# 90 second hold — medium liquidity.
+max_hold_millis = 90000
+
+# Stop loss: 20 bps — just above 1-tick spread.
+stop_loss_bps = 20.0
+
+# 12 second cooldown.
+entry_cooldown_millis = 12000
+
+# --- Volatility filters ---
+max_vol_bps = 600.0
+panic_vol_bps = 2500.0
+
+# --- Trade window ---
+trade_window_millis = 15000
+min_trades_in_window = 1
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering — disabled.
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Exit pricing ---
+# Target at least ~3.5 bps (1 tick) profit per trade.
+min_exit_edge_bps = 3.5
+
+# --- Sizing ---
+cash_fraction = 0.25

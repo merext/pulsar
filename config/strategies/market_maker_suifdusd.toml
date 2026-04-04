@@ -1,0 +1,56 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — SUIFDUSD
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# SUIFDUSD characteristics:
+#   Price: ~$0.873
+#   Tick size: 0.0001
+#   1 tick = ~1.1 bps spread
+#   Observed spread: ~2 ticks = ~2.3 bps
+#   ~2500 trades/day (medium liquidity)
+#   Step size: 0.1
+#
+# ZERO MAKER FEE (Binance FDUSD promotion)
+# Tighter spread but still positive edge with 0% fee.
+
+# --- Spread & pricing ---
+min_spread_bps = 0.1
+round_trip_cost_bps = 0.0
+min_edge_bps = 0.0
+
+# --- Position management ---
+# 60 second hold.
+max_hold_millis = 60000
+
+# Stop loss: 10 bps.
+stop_loss_bps = 10.0
+
+# 10 second cooldown.
+entry_cooldown_millis = 10000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+trade_window_millis = 10000
+min_trades_in_window = 1
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering — disabled.
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Exit pricing ---
+# 1 tick = ~1.1 bps. At least 2 ticks profit.
+min_exit_edge_bps = 2.0
+
+# --- Sizing ---
+cash_fraction = 0.25

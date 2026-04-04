@@ -22,6 +22,11 @@ pub struct StrategyContext {
     pub current_position: Position,
     pub available_cash: f64,
     pub max_position_notional: f64,
+    /// Initial capital at the start of the session. Used by dynamic sizing
+    /// to guard against budget exhaustion.
+    pub initial_capital: f64,
+    /// Minimum price increment for the exchange pair.
+    pub tick_size: f64,
 }
 
 impl StrategyContext {

@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — LINKFDUSD
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# LINKFDUSD characteristics:
+#   Price: ~$8.70
+#   Tick size: 0.01
+#   1 tick = ~11.5 bps spread
+#   ~2800 trades/day (low-medium liquidity)
+#   Step size: 0.01
+#
+# ZERO MAKER FEE (Binance FDUSD promotion)
+# Wide spread = ~11.5 bps pure profit per round-trip.
+
+# --- Spread & pricing ---
+min_spread_bps = 0.1
+round_trip_cost_bps = 0.0
+min_edge_bps = 0.0
+
+# --- Position management ---
+# 90 second hold.
+max_hold_millis = 90000
+
+# Stop loss: 15 bps — slightly above 1-tick spread.
+stop_loss_bps = 15.0
+
+# 12 second cooldown.
+entry_cooldown_millis = 12000
+
+# --- Volatility filters ---
+max_vol_bps = 600.0
+panic_vol_bps = 2500.0
+
+# --- Trade window ---
+trade_window_millis = 15000
+min_trades_in_window = 1
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering — disabled.
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Exit pricing ---
+# 1 tick = ~11.5 bps. With 0% maker fee, this is pure profit.
+min_exit_edge_bps = 10.0
+
+# --- Sizing ---
+cash_fraction = 0.25

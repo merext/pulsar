@@ -1,0 +1,83 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — PARTIFDUSD
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# PARTIFDUSD characteristics (from 2026-04-02 full-day analysis):
+#   Price: ~$0.086
+#   Tick size: 0.0001
+#   1 tick = ~11.7 bps spread
+#   ~1965 trades/day (~82/hour, evenly distributed 24h)
+#   Step size: 0.1
+#   Median bid-ask spread: 23.3 bps (2 ticks)
+#
+# ZERO MAKER FEE (Binance FDUSD promotion)
+#   Passive buy (maker) = 0%
+#   Passive sell (maker) = 0%
+#   Round-trip maker+maker = 0% (BNB fee ~1.5 bps only)
+#   Taker exit (emergency) = 10 bps (one side)
+#
+# KEY METRIC: 86% passive sell fill rate at max_hold=300s
+# Estimated: ~332 roundtrips/day, ~$7/day on $60 balance
+#
+# Strategy: patient market-making. Enter on dips, exit passively.
+# With 11.7 bps per tick, even 1 tick spread = 10.2 bps net profit.
+
+# --- Spread & pricing ---
+
+# Accept tight spreads — 1 tick = 11.7 bps = profit with zero maker fee.
+min_spread_bps = 0.1
+
+# Near-zero round-trip cost (only BNB discount ~1.5 bps).
+round_trip_cost_bps = 1.5
+
+# Minimum edge to enter. 1 tick = 11.7 bps > 1.5 bps BNB cost.
+min_edge_bps = 0.0
+
+# --- Position management ---
+
+# 5 minute hold — CRITICAL for PARTIFDUSD.
+# Data shows 86% passive fill at 300s vs 78% at 180s.
+# Extra 2 minutes dramatically improves passive exit rate.
+# Taker exit costs 10 bps, so patience is key.
+max_hold_millis = 300000
+
+# Stop loss: 15 bps (~1.3 ticks). Keep modest — most positions
+# recover within 5 minutes. Only cut on clear adverse moves.
+stop_loss_bps = 15.0
+
+# 3 second cooldown — PARTIFDUSD trades only ~1.4/min,
+# so we need to be ready for every opportunity.
+entry_cooldown_millis = 3000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+# 10 seconds — ~0.23 trades/sec, need wider window to see activity.
+trade_window_millis = 10000
+min_trades_in_window = 1
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+# Prefer sell-initiated trades (price dips) for entry.
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering — prefer buying near recent lows.
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Exit pricing ---
+
+# Sell floor: entry + 1 tick = entry + 11.7 bps.
+# This is the minimum profitable exit with 0% maker fee.
+# Net after BNB: 11.7 - 1.5 = 10.2 bps profit per roundtrip.
+min_exit_edge_bps = 11.7
+
+# --- Sizing ---
+# $60 * 0.15 = $9.0 → ~105 PARTI → above min_notional $5.0.
+cash_fraction = 0.15

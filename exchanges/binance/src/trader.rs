@@ -2,18 +2,22 @@ use async_trait::async_trait;
 use binance_sdk::config::ConfigurationWebsocketApi;
 use binance_sdk::spot::SpotWsApi;
 use binance_sdk::spot::websocket_api::{
-    AccountStatusParams, OrderPlaceParams, OrderPlaceSideEnum, OrderPlaceTypeEnum, WebsocketApi,
+    AccountStatusParams, OpenOrdersCancelAllParams, OrderCancelParams,
+    OrderCancelReplaceCancelReplaceModeEnum, OrderCancelReplaceParams,
+    OrderCancelReplaceSideEnum, OrderCancelReplaceTimeInForceEnum,
+    OrderCancelReplaceTypeEnum, OrderPlaceParams, OrderPlaceSideEnum,
+    OrderPlaceTimeInForceEnum, OrderPlaceTypeEnum, OrderStatusParams, WebsocketApi,
 };
 use futures_util::{Stream, StreamExt};
-use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use tracing::info;
+use std::str::FromStr;
+use tracing::{debug, error, info, warn};
 
 use crate::config::BinanceTraderConfig;
-use trade::backtest::{BacktestEngine, MarketPrice};
+use trade::backtest::{BacktestEngine, CumulativePassiveTracker, MarketPrice};
 use trade::config::TradeConfig;
 use trade::execution::{ExecutionReport, ExecutionStatus, OrderIntent, Side, TimeInForce};
-use trade::logger::{StrategyLoggerAdapter, TradeLogger};
+use trade::logger::{StrategyLoggerAdapter, TradeLogger, fmt_price, fmt_usd};
 use trade::market::{MarketEvent, MarketState};
 use trade::metrics::TradeManager;
 use trade::models::Position;
@@ -31,14 +35,79 @@ pub struct BinanceTrader {
     logger: TradeLogger,
     exchange_info: trade::trader::ExchangeInfo,
     position_sizer: PositionSizer,
+    /// Active limit order tracking for live maker orders.
+    /// Contains (order_id, symbol, side, price, quantity) if a limit order is open.
+    active_limit_order: Option<ActiveLimitOrder>,
+    /// Active bid (buy) limit order for two-sided market-making.
+    active_bid_order: Option<ActiveLimitOrder>,
+    /// Active ask (sell) limit order for two-sided market-making.
+    active_ask_order: Option<ActiveLimitOrder>,
+    /// Monotonic counter for generating unique client_order_id per instance.
+    order_counter: u64,
+    /// Last time we polled order_status (UNIX millis). For throttling.
+    last_order_poll_millis: u64,
+    /// Last time an exchange rejection occurred (UNIX millis).
+    /// Used to apply a cooldown after errors like "insufficient balance"
+    /// to prevent spamming Binance with doomed orders on every tick.
+    last_rejection_millis: u64,
+    /// Count of consecutive exchange rejections (resets on successful placement).
+    consecutive_rejections: u32,
+    /// Count of consecutive taker order failures (resets on successful taker fill).
+    /// After `MAX_TAKER_RETRIES` failures, the virtual position is force-closed
+    /// because the on-exchange balance is likely zero / desynchronized.
+    consecutive_taker_failures: u32,
+    /// Last time a taker order failed (UNIX millis). Used for taker retry cooldown.
+    last_taker_failure_millis: u64,
+    /// Last time a two-sided order placement failed (UNIX millis).
+    /// Prevents spamming Binance with doomed orders every tick.
+    last_two_sided_failure_millis: u64,
+    /// Count of consecutive two-sided placement failures (resets on success).
+    consecutive_two_sided_failures: u32,
 }
+
+/// Tracks a pending limit order placed on the exchange.
+#[derive(Debug, Clone)]
+struct ActiveLimitOrder {
+    order_id: i64,
+    client_order_id: String,
+    symbol: String,
+    side: Side,
+    price: f64,
+    quantity: f64,
+    /// UNIX millis when this order was placed — used for min-rest enforcement.
+    placed_at_millis: u64,
+}
+
+/// Result of `place_or_replace_side()`: the order may be resting on the book,
+/// may have filled instantly (LIMIT crossing the spread), or may have failed.
+enum PlaceResult {
+    /// Order is resting on the book — track it for future cancel-replace/polling.
+    Resting(ActiveLimitOrder),
+    /// Order filled immediately at placement (LIMIT that crossed the spread).
+    /// The caller must register this fill via `open_position`/`close_position`.
+    InstantFill {
+        avg_price: f64,
+        executed_qty: f64,
+        fee: f64,
+    },
+    /// Placement failed (exchange error, insufficient balance, rejected, etc.).
+    Failed,
+}
+
+
 
 impl BinanceTrader {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::new_with_config_path("config/trading_config.toml").await
+    }
+
+    pub async fn new_with_config_path<P: AsRef<std::path::Path>>(
+        config_path: P,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let api_key = std::env::var("BINANCE_API_KEY").ok();
         let api_secret = std::env::var("BINANCE_API_SECRET").ok();
 
-        let trading_config = TradeConfig::load()?;
+        let trading_config = TradeConfig::from_file(config_path)?;
         let trader_config = BinanceTraderConfig::from_file("config/binance_exchange.toml")?;
         let effective_fee = trading_config.exchange.taker_fee;
         let initial_capital = trading_config
@@ -59,6 +128,17 @@ impl BinanceTrader {
                 trading_fee: effective_fee,
             },
             position_sizer: PositionSizer::new(trading_config),
+            active_limit_order: None,
+            active_bid_order: None,
+            active_ask_order: None,
+            order_counter: 0,
+            last_order_poll_millis: 0,
+            last_rejection_millis: 0,
+            consecutive_rejections: 0,
+            consecutive_taker_failures: 0,
+            last_taker_failure_millis: 0,
+            last_two_sided_failure_millis: 0,
+            consecutive_two_sided_failures: 0,
         })
     }
 
@@ -89,6 +169,859 @@ impl BinanceTrader {
                 entry_price: 0.0,
                 entry_time: 0.0,
             })
+    }
+
+    /// Generate a unique client_order_id for this trader instance.
+    /// Format: "pulsar_{timestamp_ms}_{counter}" to ensure uniqueness.
+    fn next_client_order_id(counter: &mut u64) -> String {
+        *counter += 1;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        format!("pulsar_{}_{}", ts, *counter)
+    }
+
+    /// Poll the exchange for the status of the active limit order.
+    /// If the order has been filled asynchronously, record the fill in trade_manager
+    /// and clear active_limit_order so the strategy can act on the new position.
+    /// Returns true if a fill was detected and processed.
+    async fn poll_active_order_status(&mut self, trading_symbol: &str, event_time_secs: f64) -> bool {
+        let active = match &self.active_limit_order {
+            Some(a) => a.clone(),
+            None => return false,
+        };
+        let Some(connection) = &self.connection else {
+            return false;
+        };
+
+        // Throttle: poll at most once per 2 seconds to avoid API spam.
+        let now_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        if now_millis.saturating_sub(self.last_order_poll_millis) < 2000 {
+            return false;
+        }
+        self.last_order_poll_millis = now_millis;
+
+        let params = match OrderStatusParams::builder(active.symbol.clone())
+            .orig_client_order_id(active.client_order_id.clone())
+            .build()
+        {
+            Ok(p) => p,
+            Err(e) => {
+                error!(
+                    symbol = %active.symbol,
+                    order_id = active.order_id,
+                    error = %e,
+                    "Failed to build OrderStatusParams"
+                );
+                return false;
+            }
+        };
+
+        let response = match connection.order_status(params).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Non-fatal: log and continue, will retry next tick
+                info!(
+                    symbol = %active.symbol,
+                    order_id = active.order_id,
+                    error = %e,
+                    "order_status query failed, will retry"
+                );
+                return false;
+            }
+        };
+
+        let Ok(data) = response.data() else {
+            return false;
+        };
+
+        let status = data.status.as_deref().unwrap_or("UNKNOWN");
+        let executed_qty = data
+            .executed_qty
+            .as_ref()
+            .and_then(|q| q.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let cumm_quote_qty = data
+            .cummulative_quote_qty
+            .as_ref()
+            .and_then(|q| q.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        match status {
+            "FILLED" => {
+                let avg_price = if executed_qty > 0.0 {
+                    cumm_quote_qty / executed_qty
+                } else {
+                    active.price
+                };
+                // Use the higher of maker_fee and bnb_discount_fee as conservative
+                // estimate. When maker_fee=0 but BNB discount is active, Binance
+                // still charges ~7.5 bps in BNB which reduces effective quantity.
+                let effective_fee_rate = self.config.exchange.maker_fee
+                    .max(self.config.exchange.bnb_discount_fee);
+                let fee = executed_qty * avg_price * effective_fee_rate;
+
+                // Async poll has no fills data, so we can't check commission_asset.
+                // By default Binance charges fee in the received asset:
+                //   Buy → fee in base asset → reduce effective quantity
+                //   Sell → fee in quote asset (USDT) → no qty adjustment needed
+                let effective_qty = if matches!(active.side, Side::Buy) {
+                    let adj = executed_qty * (1.0 - effective_fee_rate);
+                    info!(
+                        symbol = %active.symbol,
+                        order_id = active.order_id,
+                        side = ?active.side,
+                        price = %fmt_price(avg_price),
+                        raw_qty = %fmt_price(executed_qty),
+                        estimated_fee_qty = %fmt_price(executed_qty - adj),
+                        effective_qty = %fmt_price(adj),
+                        fee_usdt = %fmt_price(fee),
+                        "Async fill: adjusted qty for estimated base-asset commission"
+                    );
+                    adj
+                } else {
+                    info!(
+                        symbol = %active.symbol,
+                        order_id = active.order_id,
+                        side = ?active.side,
+                        price = %fmt_price(avg_price),
+                        quantity = %fmt_price(executed_qty),
+                        fee = %fmt_price(fee),
+                        "Async fill detected via order_status poll"
+                    );
+                    executed_qty
+                };
+
+                // Record fill in trade_manager
+                match active.side {
+                    Side::Buy => {
+                        let report = ExecutionReport {
+                            status: ExecutionStatus::Filled,
+                            symbol: Some(trading_symbol.to_string()),
+                            side: Some(Side::Buy),
+                            order_type: Some(OrderType::Maker),
+                            rationale: Some("passive_buy_at_bid"),
+                            decision_confidence: 1.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: active.quantity,
+                            executed_quantity: effective_qty,
+                            execution_price: Some(avg_price),
+                            fee_paid: fee,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: None,
+                            expected_edge_bps: 0.0,
+                        };
+                        self.trade_manager.record_execution_report(&report);
+                        let _ = self.trade_manager.open_position(
+                            trading_symbol,
+                            avg_price,
+                            effective_qty,
+                            event_time_secs,
+                            Some(&report),
+                        );
+                    }
+                    Side::Sell => {
+                        let report = ExecutionReport {
+                            status: ExecutionStatus::Filled,
+                            symbol: Some(trading_symbol.to_string()),
+                            side: Some(Side::Sell),
+                            order_type: Some(OrderType::Maker),
+                            rationale: Some("passive_sell_at_ask"),
+                            decision_confidence: 1.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: active.quantity,
+                            executed_quantity: executed_qty,
+                            execution_price: Some(avg_price),
+                            fee_paid: fee,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: None,
+                            expected_edge_bps: 0.0,
+                        };
+                        self.trade_manager.record_execution_report(&report);
+                        let _pnl = self.trade_manager.close_position_with_report(
+                            trading_symbol,
+                            avg_price,
+                            event_time_secs,
+                            Some(&report),
+                        );
+                    }
+                }
+
+                self.active_limit_order = None;
+                true
+            }
+            "CANCELED" | "EXPIRED" | "REJECTED" | "EXPIRED_IN_MATCH" => {
+                info!(
+                    symbol = %active.symbol,
+                    order_id = active.order_id,
+                    status = status,
+                    "Active order no longer valid, clearing tracker"
+                );
+                self.active_limit_order = None;
+                false
+            }
+            "PARTIALLY_FILLED" => {
+                // For now, treat partial fill as still resting — will be fully handled later
+                info!(
+                    symbol = %active.symbol,
+                    order_id = active.order_id,
+                    executed_qty = %fmt_price(executed_qty),
+                    total_qty = %fmt_price(active.quantity),
+                    "Partial fill detected, order still resting"
+                );
+                false
+            }
+            _ => {
+                // "NEW" or unknown — order is still resting, nothing to do
+                false
+            }
+        }
+    }
+
+    /// Poll the exchange for status of a specific two-sided order (bid or ask).
+    /// If filled, returns (true, avg_price, executed_qty, fee).
+    /// If cancelled/expired, returns (false, 0, 0, 0) — meaning "terminal, clear it".
+    /// If still resting, returns None — meaning "keep waiting".
+    async fn poll_one_sided_order(
+        &self,
+        active: &ActiveLimitOrder,
+    ) -> Option<(bool, f64, f64, f64)> {
+        let Some(connection) = &self.connection else {
+            return None;
+        };
+
+        let params = match OrderStatusParams::builder(active.symbol.clone())
+            .orig_client_order_id(active.client_order_id.clone())
+            .build()
+        {
+            Ok(p) => p,
+            Err(_) => return None,
+        };
+
+        let response = match connection.order_status(params).await {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+
+        let Ok(data) = response.data() else {
+            return None;
+        };
+
+        let status = data.status.as_deref().unwrap_or("UNKNOWN");
+        let executed_qty = data
+            .executed_qty
+            .as_ref()
+            .and_then(|q| q.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let cumm_quote_qty = data
+            .cummulative_quote_qty
+            .as_ref()
+            .and_then(|q| q.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        match status {
+            "FILLED" => {
+                let avg_price = if executed_qty > 0.0 {
+                    cumm_quote_qty / executed_qty
+                } else {
+                    active.price
+                };
+                let effective_fee_rate = self
+                    .config
+                    .exchange
+                    .maker_fee
+                    .max(self.config.exchange.bnb_discount_fee);
+                let fee = executed_qty * avg_price * effective_fee_rate;
+                Some((true, avg_price, executed_qty, fee))
+            }
+            "CANCELED" | "EXPIRED" | "REJECTED" | "EXPIRED_IN_MATCH" => {
+                Some((false, 0.0, 0.0, 0.0))
+            }
+            _ => None, // still resting
+        }
+    }
+
+    /// Poll both active two-sided orders for async fills.
+    /// Returns true if any fill was detected and processed.
+    async fn poll_two_sided_orders(
+        &mut self,
+        trading_symbol: &str,
+        event_time_secs: f64,
+    ) -> bool {
+        let now_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        // Throttle: poll at most once per 2 seconds
+        if now_millis.saturating_sub(self.last_order_poll_millis) < 2000 {
+            return false;
+        }
+        self.last_order_poll_millis = now_millis;
+
+        let mut any_fill = false;
+
+        // Poll bid order
+        if let Some(active_bid) = self.active_bid_order.clone() {
+            if let Some((is_filled, avg_price, executed_qty, fee)) =
+                self.poll_one_sided_order(&active_bid).await
+            {
+                if is_filled {
+                    let effective_fee_rate = self
+                        .config
+                        .exchange
+                        .maker_fee
+                        .max(self.config.exchange.bnb_discount_fee);
+                    let effective_qty = executed_qty * (1.0 - effective_fee_rate);
+                    info!(
+                        symbol = %active_bid.symbol,
+                        order_id = active_bid.order_id,
+                        side = "BUY",
+                        price = %fmt_price(avg_price),
+                        effective_qty = %fmt_price(effective_qty),
+                        fee = %fmt_price(fee),
+                        "Two-sided: async BID fill detected"
+                    );
+                    let report = ExecutionReport {
+                        status: ExecutionStatus::Filled,
+                        symbol: Some(trading_symbol.to_string()),
+                        side: Some(Side::Buy),
+                        order_type: Some(OrderType::Maker),
+                        rationale: Some("two_sided_bid_fill"),
+                        decision_confidence: 1.0,
+                        decision_metrics: Vec::new(),
+                        requested_quantity: active_bid.quantity,
+                        executed_quantity: effective_qty,
+                        execution_price: Some(avg_price),
+                        fee_paid: fee,
+                        latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
+                        reason: None,
+                        expected_edge_bps: 0.0,
+                    };
+                    self.trade_manager.record_execution_report(&report);
+                    let _ = self.trade_manager.open_position(
+                        trading_symbol,
+                        avg_price,
+                        effective_qty,
+                        event_time_secs,
+                        Some(&report),
+                    );
+                    any_fill = true;
+                }
+                // Clear bid order on any terminal status (filled, cancelled, expired)
+                self.active_bid_order = None;
+            }
+        }
+
+        // Poll ask order
+        if let Some(active_ask) = self.active_ask_order.clone() {
+            if let Some((is_filled, avg_price, executed_qty, fee)) =
+                self.poll_one_sided_order(&active_ask).await
+            {
+                if is_filled {
+                    info!(
+                        symbol = %active_ask.symbol,
+                        order_id = active_ask.order_id,
+                        side = "SELL",
+                        price = %fmt_price(avg_price),
+                        quantity = %fmt_price(executed_qty),
+                        fee = %fmt_price(fee),
+                        "Two-sided: async ASK fill detected"
+                    );
+                    let report = ExecutionReport {
+                        status: ExecutionStatus::Filled,
+                        symbol: Some(trading_symbol.to_string()),
+                        side: Some(Side::Sell),
+                        order_type: Some(OrderType::Maker),
+                        rationale: Some("two_sided_ask_fill"),
+                        decision_confidence: 1.0,
+                        decision_metrics: Vec::new(),
+                        requested_quantity: active_ask.quantity,
+                        executed_quantity: executed_qty,
+                        execution_price: Some(avg_price),
+                        fee_paid: fee,
+                        latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
+                        reason: None,
+                        expected_edge_bps: 0.0,
+                    };
+                    self.trade_manager.record_execution_report(&report);
+                    // Partial close: reduce position by the sold quantity
+                    // instead of removing the entire position.
+                    let current_qty = self
+                        .trade_manager
+                        .get_position(trading_symbol)
+                        .map_or(0.0, |p| p.quantity);
+                    let remaining = (current_qty - executed_qty).max(0.0);
+                    self.trade_manager.update_position(
+                        trading_symbol,
+                        remaining,
+                        avg_price,
+                        event_time_secs,
+                        Some(fee),
+                    );
+                    any_fill = true;
+                }
+                // Clear ask order on any terminal status
+                self.active_ask_order = None;
+            }
+        }
+
+        any_fill
+    }
+
+    /// Place or replace a single side of a two-sided quote on the exchange.
+    /// Returns `PlaceResult::Resting` if the order is live on the book,
+    /// `PlaceResult::InstantFill` if the LIMIT order filled immediately (crossed the spread),
+    /// or `PlaceResult::Failed` on error.
+    async fn place_or_replace_side(
+        &mut self,
+        symbol: &str,
+        side: Side,
+        price: f64,
+        quantity: f64,
+        existing: &Option<ActiveLimitOrder>,
+    ) -> PlaceResult {
+        if quantity <= f64::EPSILON {
+            // Zero quantity — cancel existing order on this side if any
+            if let Some(active) = existing {
+                let cancel_params = OrderCancelParams::builder(active.symbol.clone())
+                    .orig_client_order_id(active.client_order_id.clone())
+                    .build()
+                    .expect("Failed to build cancel params");
+                let _ = self
+                    .connection
+                    .as_ref()
+                    .unwrap()
+                    .order_cancel(cancel_params)
+                    .await;
+            }
+            return PlaceResult::Failed;
+        }
+
+        // Two-sided cooldown: after a placement failure, wait before retrying.
+        // This prevents spamming Binance with doomed orders every tick.
+        const TWO_SIDED_COOLDOWN_MS: u64 = 10_000;
+        let now_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        if self.consecutive_two_sided_failures > 0
+            && now_millis.saturating_sub(self.last_two_sided_failure_millis) < TWO_SIDED_COOLDOWN_MS
+        {
+            // Still in cooldown — keep existing order if any, otherwise skip
+            if let Some(active) = existing {
+                return PlaceResult::Resting(active.clone());
+            }
+            return PlaceResult::Failed;
+        }
+
+        let tick_size = self.config.exchange.tick_size;
+        let step_size = self.config.exchange.step_size;
+        let min_notional = self.config.exchange.min_notional;
+
+        // Round price to tick
+        let rounded_price = (price / tick_size).round() * tick_size;
+        // Round quantity to step
+        let mut rounded_qty = (quantity / step_size).floor() * step_size;
+
+        // BNB fee adjustment for buys
+        if matches!(side, Side::Buy) && self.config.exchange.bnb_discount_fee > 0.0 {
+            rounded_qty += step_size;
+        }
+
+        // Min notional check
+        if rounded_qty * rounded_price < min_notional || rounded_qty < step_size {
+            return PlaceResult::Failed;
+        }
+
+        // Same-price-and-quantity skip + min rest enforcement
+        if let Some(active) = existing {
+            let resting_ms = now_millis.saturating_sub(active.placed_at_millis);
+            // If same price AND same quantity, and not stale, skip
+            if (active.price - rounded_price).abs() < tick_size * 0.5
+                && (active.quantity - rounded_qty).abs() < step_size * 0.5
+                && resting_ms < self.config.order_execution.max_order_rest_millis
+            {
+                // Order is fine where it is
+                return PlaceResult::Resting(active.clone());
+            }
+            // Min rest enforcement
+            if resting_ms < self.config.order_execution.min_order_rest_millis {
+                return PlaceResult::Resting(active.clone());
+            }
+        }
+
+        let qty_precision = if step_size >= 1.0 { 0 } else { (-step_size.log10()).ceil() as usize };
+        let price_precision = (-tick_size.log10()).ceil() as usize;
+        let qty_str = format!("{:.prec$}", rounded_qty, prec = qty_precision);
+        let price_str = format!("{:.prec$}", rounded_price, prec = price_precision);
+
+        let quantity_decimal = match Decimal::from_str(&qty_str) {
+            Ok(q) => q,
+            Err(_) => return PlaceResult::Failed,
+        };
+        let price_decimal = match Decimal::from_str(&price_str) {
+            Ok(p) => p,
+            Err(_) => return PlaceResult::Failed,
+        };
+
+        let client_oid = Self::next_client_order_id(&mut self.order_counter);
+
+        // Use atomic cancel-replace when an existing order needs to be updated.
+        // This avoids the race condition where a manual cancel frees the locked
+        // balance asynchronously and the subsequent place arrives before the
+        // unlock is processed, causing -2010 "insufficient balance".
+        if let Some(active) = existing {
+            let cr_side = match side {
+                Side::Buy => OrderCancelReplaceSideEnum::Buy,
+                Side::Sell => OrderCancelReplaceSideEnum::Sell,
+            };
+            let cr_params = OrderCancelReplaceParams::builder(
+                symbol.to_string(),
+                OrderCancelReplaceCancelReplaceModeEnum::StopOnFailure,
+                cr_side,
+                OrderCancelReplaceTypeEnum::Limit,
+            )
+            .cancel_orig_client_order_id(active.client_order_id.clone())
+            .quantity(quantity_decimal)
+            .price(price_decimal)
+            .time_in_force(OrderCancelReplaceTimeInForceEnum::Gtc)
+            .new_client_order_id(client_oid.clone())
+            .build()
+            .expect("Failed to build cancel-replace params");
+
+            let response = match self
+                .connection
+                .as_ref()
+                .unwrap()
+                .order_cancel_replace(cr_params)
+                .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    let err_str = format!("{}", e);
+                    if err_str.contains("-2011") {
+                        // -2011: Unknown order — the old order was already filled or
+                        // cancelled. Poll it to check for a fill we must not lose.
+                        warn!(
+                            symbol = %symbol,
+                            side = ?side,
+                            old_order_id = active.order_id,
+                            "Two-sided: cancel-replace failed — old order already gone, polling for fill"
+                        );
+                        if let Some((is_filled, avg_price, executed_qty, fee)) =
+                            self.poll_one_sided_order(active).await
+                        {
+                            if is_filled {
+                                info!(
+                                    symbol = %symbol,
+                                    side = ?side,
+                                    price = %fmt_price(avg_price),
+                                    qty = %fmt_price(executed_qty),
+                                    fee = %fmt_price(fee),
+                                    "Two-sided: recovered fill from gone order"
+                                );
+                                return PlaceResult::InstantFill {
+                                    avg_price,
+                                    executed_qty,
+                                    fee,
+                                };
+                            }
+                        }
+                    } else {
+                        error!(
+                            symbol = %symbol,
+                            side = ?side,
+                            old_price = %fmt_price(active.price),
+                            new_price = %price_str,
+                            quantity = %qty_str,
+                            error = %e,
+                            "Two-sided: cancel-replace failed — attempting explicit cancel of old order"
+                        );
+                        self.consecutive_two_sided_failures += 1;
+                        self.last_two_sided_failure_millis = now_millis;
+
+                        // The old order may still be alive on Binance (e.g. -2022).
+                        // Try to cancel it explicitly to avoid orphaned orders that
+                        // lock balance and cause -2010 on subsequent placements.
+                        let cancel_params = OrderCancelParams::builder(symbol.to_string())
+                            .orig_client_order_id(active.client_order_id.clone())
+                            .build()
+                            .expect("Failed to build cancel params");
+                        match self
+                            .connection
+                            .as_ref()
+                            .unwrap()
+                            .order_cancel(cancel_params)
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    symbol = %symbol,
+                                    side = ?side,
+                                    old_order_id = active.order_id,
+                                    "Two-sided: old order cancelled successfully after cancel-replace failure"
+                                );
+                            }
+                            Err(cancel_err) => {
+                                let cancel_err_str = format!("{}", cancel_err);
+                                if cancel_err_str.contains("-2011") {
+                                    // Old order already gone — check if it was filled
+                                    warn!(
+                                        symbol = %symbol,
+                                        side = ?side,
+                                        old_order_id = active.order_id,
+                                        "Two-sided: old order already gone during cleanup, polling for fill"
+                                    );
+                                    if let Some((is_filled, avg_price, executed_qty, fee)) =
+                                        self.poll_one_sided_order(active).await
+                                    {
+                                        if is_filled {
+                                            info!(
+                                                symbol = %symbol,
+                                                side = ?side,
+                                                price = %fmt_price(avg_price),
+                                                qty = %fmt_price(executed_qty),
+                                                fee = %fmt_price(fee),
+                                                "Two-sided: recovered fill from old order after cancel-replace failure"
+                                            );
+                                            return PlaceResult::InstantFill {
+                                                avg_price,
+                                                executed_qty,
+                                                fee,
+                                            };
+                                        }
+                                    }
+                                } else {
+                                    error!(
+                                        symbol = %symbol,
+                                        side = ?side,
+                                        old_order_id = active.order_id,
+                                        error = %cancel_err,
+                                        "Two-sided: failed to cancel old order after cancel-replace failure"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    return PlaceResult::Failed;
+                }
+            };
+
+            let Ok(data) = response.data() else {
+                return PlaceResult::Failed;
+            };
+
+            let cancel_result = data.cancel_result.as_deref().unwrap_or("UNKNOWN");
+            let new_order_result = data.new_order_result.as_deref().unwrap_or("UNKNOWN");
+
+            if new_order_result != "SUCCESS" {
+                warn!(
+                    symbol = %symbol,
+                    side = ?side,
+                    cancel_result = cancel_result,
+                    new_order_result = new_order_result,
+                    "Two-sided: cancel-replace — new order not placed"
+                );
+                return PlaceResult::Failed;
+            }
+
+            // Reset failure counter on success
+            self.consecutive_two_sided_failures = 0;
+
+            // Extract new order details from the response
+            let new_resp = match &data.new_order_response {
+                Some(r) => r,
+                None => return PlaceResult::Failed,
+            };
+            let order_id = new_resp.order_id.unwrap_or(0);
+            let status_str = new_resp.status.as_deref().unwrap_or("UNKNOWN");
+
+            if status_str == "REJECTED" || status_str == "EXPIRED_IN_MATCH" {
+                warn!(
+                    symbol = %symbol,
+                    side = ?side,
+                    order_id = order_id,
+                    status = status_str,
+                    "Two-sided: cancel-replace — new order rejected"
+                );
+                return PlaceResult::Failed;
+            }
+
+            // Check for immediate fill on the NEW order from cancel-replace
+            if status_str == "FILLED" {
+                let fill_price = new_resp
+                    .price
+                    .as_ref()
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .unwrap_or(rounded_price);
+                let fill_qty = new_resp
+                    .executed_qty
+                    .as_ref()
+                    .and_then(|q| q.parse::<f64>().ok())
+                    .unwrap_or(rounded_qty);
+                // Maker fee is 0% on this pair; actual fee from fills array
+                // would be more precise but for 0-fee pairs this is correct.
+                let fill_fee = 0.0;
+                info!(
+                    symbol = %symbol,
+                    side = ?side,
+                    order_id = order_id,
+                    old_price = %fmt_price(active.price),
+                    new_price = %price_str,
+                    quantity = %qty_str,
+                    status = status_str,
+                    "Two-sided: cancel-replace — new order filled immediately"
+                );
+                return PlaceResult::InstantFill {
+                    avg_price: fill_price,
+                    executed_qty: fill_qty,
+                    fee: fill_fee,
+                };
+            }
+
+            info!(
+                symbol = %symbol,
+                side = ?side,
+                order_id = order_id,
+                old_price = %fmt_price(active.price),
+                new_price = %price_str,
+                quantity = %qty_str,
+                status = status_str,
+                "Two-sided: cancel-replace succeeded"
+            );
+
+            return PlaceResult::Resting(ActiveLimitOrder {
+                order_id,
+                client_order_id: client_oid,
+                symbol: symbol.to_string(),
+                side,
+                price: rounded_price,
+                quantity: rounded_qty,
+                placed_at_millis: now_millis,
+            });
+        }
+
+        // No existing order — place a fresh limit order
+        let params = OrderPlaceParams::builder(
+            symbol.to_string(),
+            match side {
+                Side::Buy => OrderPlaceSideEnum::Buy,
+                Side::Sell => OrderPlaceSideEnum::Sell,
+            },
+            OrderPlaceTypeEnum::Limit,
+        )
+        .quantity(quantity_decimal)
+        .price(price_decimal)
+        .time_in_force(OrderPlaceTimeInForceEnum::Gtc)
+        .new_client_order_id(client_oid.clone())
+        .build()
+        .expect("Failed to build limit order params");
+
+        let response = match self.connection.as_ref().unwrap().order_place(params).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                error!(
+                    symbol = %symbol,
+                    side = ?side,
+                    price = %price_str,
+                    quantity = %qty_str,
+                    error = %e,
+                    "Two-sided: failed to place limit order"
+                );
+                self.consecutive_two_sided_failures += 1;
+                self.last_two_sided_failure_millis = now_millis;
+                return PlaceResult::Failed;
+            }
+        };
+
+        let Ok(data) = response.data() else {
+            return PlaceResult::Failed;
+        };
+
+        let order_id = data.order_id.unwrap_or(0);
+        let status_str = data.status.as_deref().unwrap_or("UNKNOWN");
+
+        if status_str == "REJECTED" || status_str == "EXPIRED_IN_MATCH" {
+            warn!(
+                symbol = %symbol,
+                side = ?side,
+                order_id = order_id,
+                status = status_str,
+                "Two-sided: order rejected by exchange"
+            );
+            return PlaceResult::Failed;
+        }
+
+        // Reset failure counter on success
+        self.consecutive_two_sided_failures = 0;
+
+        // Check for immediate fill — LIMIT that crossed the spread
+        if status_str == "FILLED" {
+            let fill_price = data
+                .price
+                .as_ref()
+                .and_then(|p| p.parse::<f64>().ok())
+                .unwrap_or(rounded_price);
+            let fill_qty = data
+                .executed_qty
+                .as_ref()
+                .and_then(|q| q.parse::<f64>().ok())
+                .unwrap_or(rounded_qty);
+            info!(
+                symbol = %symbol,
+                side = ?side,
+                order_id = order_id,
+                price = %price_str,
+                quantity = %qty_str,
+                status = status_str,
+                "Two-sided: placed limit order — filled immediately"
+            );
+            return PlaceResult::InstantFill {
+                avg_price: fill_price,
+                executed_qty: fill_qty,
+                fee: 0.0,
+            };
+        }
+
+        info!(
+            symbol = %symbol,
+            side = ?side,
+            order_id = order_id,
+            price = %price_str,
+            quantity = %qty_str,
+            status = status_str,
+            "Two-sided: placed limit order"
+        );
+
+        PlaceResult::Resting(ActiveLimitOrder {
+            order_id,
+            client_order_id: client_oid,
+            symbol: symbol.to_string(),
+            side,
+            price: rounded_price,
+            quantity: rounded_qty,
+            placed_at_millis: now_millis,
+        })
     }
 
     fn validate_entry_trade(&self, symbol: &str, quantity: f64, price: f64) -> bool {
@@ -142,7 +1075,7 @@ impl BinanceTrader {
         true
     }
 
-    fn validate_exit_trade(&self, symbol: &str, quantity: f64, price: f64) -> bool {
+    fn validate_exit_trade(&self, symbol: &str, quantity: f64, _price: f64) -> bool {
         if quantity <= 0.0 {
             self.logger.log_order_error(
                 symbol,
@@ -153,19 +1086,12 @@ impl BinanceTrader {
             return false;
         }
 
-        let notional = quantity * price;
-        if notional < self.config.exchange.min_notional {
-            self.logger.log_order_error(
-                symbol,
-                "min_notional",
-                "below_minimum",
-                &format!(
-                    "Exit size {} below minimum {}",
-                    notional, self.config.exchange.min_notional
-                ),
-            );
-            return false;
-        }
+        // NOTE: min_notional is intentionally NOT checked for exits.
+        // On Binance, you can always sell/close a position regardless of notional.
+        // min_notional only applies to opening new positions.
+        // Previously this check caused a "dust trap" where partial fills left
+        // positions below min_notional that could never be closed, causing the
+        // bot to loop forever with rejected sell orders.
 
         true
     }
@@ -241,7 +1167,37 @@ impl BinanceTrader {
                 bid: book.bid.price,
                 ask: book.ask.price,
             })
-            .or_else(|| market_state.last_price().map(MarketPrice::Trade))
+            .or_else(|| {
+                // In trade-only mode, synthesize bid/ask from the last trade price
+                // and the EMA spread estimate. This is critical for passive order
+                // simulation: without explicit bid/ask, a passive sell at "ask"
+                // would execute at the same price as a passive buy at "bid",
+                // making spread capture impossible.
+                let last_price = market_state.last_price()?;
+                let micro = market_state.micro();
+                if micro.mid_initialized() && micro.ema_spread_bps > 0.0 {
+                    let half_spread_frac = micro.ema_spread_bps / 20_000.0;
+                    // Use last trade's direction to infer which side of the
+                    // spread the price is on:
+                    //   - seller-initiated (is_buyer_market_maker=true) → price near bid
+                    //   - buyer-initiated  (is_buyer_market_maker=false) → price near ask
+                    let (bid, ask) = if let Some(last_trade) = market_state.last_trade() {
+                        if last_trade.is_buyer_market_maker {
+                            // Price is at bid; ask is one spread away
+                            (last_price, last_price * (1.0 + micro.ema_spread_bps / 10_000.0))
+                        } else {
+                            // Price is at ask; bid is one spread below
+                            (last_price * (1.0 - micro.ema_spread_bps / 10_000.0), last_price)
+                        }
+                    } else {
+                        // No direction info — assume mid
+                        (last_price * (1.0 - half_spread_frac), last_price * (1.0 + half_spread_frac))
+                    };
+                    Some(MarketPrice::Quote { bid, ask })
+                } else {
+                    Some(MarketPrice::Trade(last_price))
+                }
+            })
     }
 
     fn execution_reference_price_for_intent(
@@ -254,8 +1210,278 @@ impl BinanceTrader {
                 Side::Buy => market_price.execution_reference_price(trade::signal::Signal::Buy),
                 Side::Sell => market_price.execution_reference_price(trade::signal::Signal::Sell),
             },
-            OrderIntent::NoAction | OrderIntent::Cancel { .. } => market_price.decision_reference_price(),
+            OrderIntent::NoAction | OrderIntent::Cancel { .. } | OrderIntent::QuoteBothSides { .. } => market_price.decision_reference_price(),
         }
+    }
+
+    /// Connect to Binance WebSocket API (for rebalance and other operations).
+    pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if self.connection.is_some() {
+            return Ok(());
+        }
+        let (api_key, api_secret) = self.credentials()?;
+        let config = ConfigurationWebsocketApi::builder()
+            .api_key(api_key)
+            .api_secret(api_secret)
+            .build()
+            .expect("Failed to build Binance API configuration");
+        let client = SpotWsApi::production(config);
+        self.connection = Some(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(self.trader_config.websocket.connection_timeout),
+                client.connect(),
+            )
+            .await
+            .expect("WebSocket connection timeout")
+            .expect("Failed to connect to WebSocket API"),
+        );
+        Ok(())
+    }
+
+    /// Returns (quote_free, base_asset_free) — e.g. (98.6, 0.036) for BNBUSDT.
+    /// Quote asset is determined from the config's `exchange.quote_asset` field.
+    pub async fn account_balances(
+        &self,
+        base_asset: &str,
+    ) -> Result<(f64, f64), anyhow::Error> {
+        let Some(connection) = &self.connection else {
+            return Err(anyhow::anyhow!("no connection"));
+        };
+
+        let params = AccountStatusParams::builder()
+            .omit_zero_balances(true)
+            .build()?;
+        let status = connection.account_status(params).await?;
+        let data = status.data().unwrap();
+
+        if let Some(account_type) = &data.account_type {
+            info!(account_type = %account_type, "Account status retrieved");
+        }
+
+        let quote_asset = &self.config.exchange.quote_asset;
+        let mut quote_free: f64 = 0.0;
+        let mut base_free: f64 = 0.0;
+
+        if let Some(balances) = &data.balances {
+            for bal in balances {
+                let asset = bal.asset.as_deref().unwrap_or("");
+                let free: f64 = bal
+                    .free
+                    .as_deref()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+                let locked: f64 = bal
+                    .locked
+                    .as_deref()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                if free > 0.0 || locked > 0.0 {
+                    info!(
+                        asset = asset,
+                        free = %fmt_usd(free),
+                        locked = %fmt_usd(locked),
+                        "Account balance"
+                    );
+                }
+
+                if asset == quote_asset {
+                    quote_free = free;
+                }
+                if asset == base_asset {
+                    base_free = free;
+                }
+            }
+        }
+
+        Ok((quote_free, base_free))
+    }
+
+    /// Sell all base asset holdings at market to recover USDT.
+    pub async fn cleanup_base_asset(
+        &mut self,
+        symbol: &str,
+        base_asset: &str,
+    ) -> Result<f64, anyhow::Error> {
+        let (_, base_free) = self.account_balances(base_asset).await?;
+
+        let step_size = self.config.exchange.step_size;
+        let rounded_qty = if step_size > 0.0 {
+            (base_free / step_size).floor() * step_size
+        } else {
+            base_free
+        };
+
+        if rounded_qty < step_size {
+            info!(
+                base_asset = base_asset,
+                base_free = %fmt_price(base_free),
+                "No base asset to sell at startup"
+            );
+            return Ok(0.0);
+        }
+
+        let qty_precision = if step_size > 0.0 && step_size < 1.0 {
+            (-step_size.log10()).ceil() as usize
+        } else {
+            0
+        };
+        let qty_str = format!("{:.prec$}", rounded_qty, prec = qty_precision);
+        let quantity_decimal = Decimal::from_str(&qty_str)?;
+
+        info!(
+            symbol = symbol,
+            base_asset = base_asset,
+            quantity = %qty_str,
+            "Selling base asset at market to recover USDT"
+        );
+
+        let connection = self.connection.as_ref().unwrap();
+        let params = OrderPlaceParams::builder(
+            symbol.to_string(),
+            OrderPlaceSideEnum::Sell,
+            OrderPlaceTypeEnum::Market,
+        )
+        .quantity(quantity_decimal)
+        .build()?;
+
+        let response = connection.order_place(params).await
+            .map_err(|e| anyhow::anyhow!("Market sell failed: {}", e))?;
+        let data = response.data()
+            .map_err(|e| anyhow::anyhow!("Market sell response error: {}", e))?;
+
+        let executed_qty: f64 = data
+            .executed_qty
+            .as_ref()
+            .and_then(|q| q.parse().ok())
+            .unwrap_or(0.0);
+        let status = data.status.as_deref().unwrap_or("UNKNOWN");
+
+        info!(
+            symbol = symbol,
+            executed_qty = %fmt_price(executed_qty),
+            status = status,
+            "Base asset cleanup complete"
+        );
+
+        Ok(executed_qty)
+    }
+
+    /// Smart rebalance: called when exchange rejects with "insufficient balance".
+    /// 1. Cancel all open orders for this symbol (free locked USDT)
+    /// 2. Sell any stuck base asset at market (recover USDT)
+    /// 3. Query real USDT balance
+    /// 4. Sync virtual SimulationAccount cash with reality
+    /// Returns true if rebalance recovered enough balance to retry trading.
+    async fn smart_rebalance(&mut self, symbol: &str) -> bool {
+        let quote_asset = &self.config.exchange.quote_asset;
+        let base_asset = symbol.strip_suffix(quote_asset.as_str()).unwrap_or(symbol);
+
+        // Step 1: Cancel all open orders for this symbol
+        if let Some(ref connection) = self.connection {
+            let cancel_params = match OpenOrdersCancelAllParams::builder(symbol.to_string()).build()
+            {
+                Ok(p) => p,
+                Err(_) => return false,
+            };
+            match connection.open_orders_cancel_all(cancel_params).await {
+                Ok(response) => {
+                    let cancelled_count = response
+                        .raw
+                        .as_array()
+                        .map(|arr| arr.len())
+                        .unwrap_or(0);
+                    if cancelled_count > 0 {
+                        info!(
+                            symbol = symbol,
+                            cancelled_count = cancelled_count,
+                            "Smart rebalance: cancelled open orders"
+                        );
+                    }
+                }
+                Err(e) => {
+                    let err_str = format!("{:?}", e);
+                    if !err_str.contains("-2011") {
+                        // -2011 = no open orders, not an error
+                        error!(
+                            symbol = symbol,
+                            error = %e,
+                            "Smart rebalance: failed to cancel orders"
+                        );
+                    }
+                }
+            }
+        }
+        self.active_limit_order = None;
+        self.active_bid_order = None;
+        self.active_ask_order = None;
+
+        // Step 2: Sell any stuck base asset at market — but only if
+        // we do NOT hold a virtual position. If there is an active position,
+        // the base asset is intentional inventory, not a leftover.
+        let has_position = self
+            .trade_manager
+            .get_position(symbol)
+            .is_some_and(|p| p.quantity > 0.0);
+        if has_position {
+            info!(
+                symbol = symbol,
+                "Smart rebalance: skipping base asset cleanup — active position held"
+            );
+        } else {
+            match self.cleanup_base_asset(symbol, base_asset).await {
+                Ok(sold_qty) => {
+                    if sold_qty > 0.0 {
+                        info!(
+                            symbol = symbol,
+                            base_asset = base_asset,
+                            sold_qty = %fmt_price(sold_qty),
+                            "Smart rebalance: sold stuck base asset"
+                        );
+                    }
+                }
+                Err(e) => {
+                    debug!(
+                        symbol = symbol,
+                        error = %e,
+                        "Smart rebalance: base asset cleanup skipped"
+                    );
+                }
+            }
+        }
+
+        // Small delay to let Binance process cancels and sells
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Step 3: Query real USDT balance
+        let usdt_free = match self.account_balances(base_asset).await {
+            Ok((usdt, _)) => usdt,
+            Err(e) => {
+                error!(
+                    symbol = symbol,
+                    error = %e,
+                    "Smart rebalance: failed to query balance"
+                );
+                return false;
+            }
+        };
+
+        // Step 4: Sync virtual cash with reality
+        let old_cash = self.trade_manager.available_cash();
+        self.trade_manager.sync_cash(usdt_free);
+        let new_cash = self.trade_manager.available_cash();
+
+        info!(
+            symbol = symbol,
+            usdt_free = %fmt_usd(usdt_free),
+            old_virtual_cash = format!("{:.4}", old_cash),
+            new_virtual_cash = format!("{:.4}", new_cash),
+            "Smart rebalance: cash synced with exchange"
+        );
+
+        // Check if we have enough to trade
+        let min_notional = self.config.exchange.min_notional;
+        new_cash >= min_notional
     }
 }
 
@@ -273,20 +1499,9 @@ impl Trader for BinanceTrader {
         &self.trade_manager
     }
 
-    async fn account_status(&self) -> Result<(), anyhow::Error> {
-        if let Some(connection) = &self.connection {
-            let params = AccountStatusParams::builder()
-                .omit_zero_balances(true)
-                .build()?;
-            let status = connection.account_status(params).await?;
-            let data = status.data().unwrap();
-
-            if let Some(account_type) = &data.account_type {
-                info!(account_type = %account_type, "Account status retrieved");
-            }
-        }
-
-        Ok(())
+    async fn account_status(&self) -> Result<Option<f64>, anyhow::Error> {
+        let (usdt_free, _) = self.account_balances("").await?;
+        Ok(Some(usdt_free))
     }
 
     async fn on_order_intent(
@@ -295,7 +1510,7 @@ impl Trader for BinanceTrader {
         reference_price: f64,
         intent: OrderIntent,
     ) -> ExecutionReport {
-        let Some(connection) = &self.connection else {
+        if self.connection.is_none() {
             return ExecutionReport {
                 status: ExecutionStatus::Rejected,
                 symbol: None,
@@ -316,7 +1531,7 @@ impl Trader for BinanceTrader {
                 reason: Some("connection_missing"),
                 expected_edge_bps: 0.0,
             };
-        };
+        }
 
         match intent {
             OrderIntent::NoAction => ExecutionReport::ignored(),
@@ -343,7 +1558,9 @@ impl Trader for BinanceTrader {
             OrderIntent::Place {
                 side,
                 order_type,
+                price,
                 quantity,
+                time_in_force,
                 expected_edge_bps,
                 ..
             } => {
@@ -375,32 +1592,377 @@ impl Trader for BinanceTrader {
                     };
                 }
 
-                if matches!(order_type, OrderType::Maker) {
-                    return ExecutionReport {
-                        status: ExecutionStatus::Pending,
-                        symbol: Some(symbol.to_string()),
-                        side: Some(side),
-                        order_type: Some(order_type),
-                        rationale: None,
-                        decision_confidence: 0.0,
-                        decision_metrics: Vec::new(),
-                        requested_quantity: quantity,
-                        executed_quantity: 0.0,
-                        execution_price: Some(reference_price),
-                        fee_paid: 0.0,
-                        latency_seconds: 0.0,
-                        synthetic_half_spread_bps: 0.0,
-                        slippage_bps: 0.0,
-                        latency_impact_bps: 0.0,
-                        market_impact_bps: 0.0,
-                        reason: Some("live_maker_not_enabled"),
-                        expected_edge_bps,
-                    };
-                }
+                // Round quantity to step_size
+                let step_size = self.config.exchange.step_size;
+                let mut rounded_qty = if step_size > 0.0 {
+                    (quantity / step_size).floor() * step_size
+                } else {
+                    quantity
+                };
 
-                let quantity_decimal = match Decimal::from_f64(quantity) {
-                    Some(quantity) => quantity,
-                    None => {
+                // When BNB fee discount is active, buy fills lose a tiny fraction of
+                // base qty to commission. Adding 1 step_size to buy qty ensures
+                // sell qty (after fee deduction + floor rounding) = original target.
+                // Without this, e.g. buy 0.010 BNB → effective 0.0099925 → sell floor = 0.009
+                // → 10% dust loss per round-trip.
+                if matches!(side, Side::Buy)
+                    && self.config.exchange.bnb_discount_fee > 0.0
+                    && step_size > 0.0
+                {
+                    rounded_qty += step_size;
+                }
+                let qty_precision = if step_size > 0.0 && step_size < 1.0 {
+                    (-step_size.log10()).ceil() as usize
+                } else {
+                    0
+                };
+
+                if matches!(order_type, OrderType::Maker) {
+                    // === REJECTION COOLDOWN + SMART REBALANCE ===
+                    // After an exchange rejection (e.g. insufficient balance):
+                    // 1. First rejection: trigger smart_rebalance (cancel orders, sell base, sync cash)
+                    // 2. If rebalance recovers enough balance: reset and retry immediately
+                    // 3. If not: enter 30s cooldown to avoid spamming Binance
+                    if self.consecutive_rejections > 0 {
+                        let now_millis = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+
+                        // On first rejection, attempt smart rebalance before entering cooldown
+                        if self.consecutive_rejections == 1 {
+                            info!(
+                                symbol = %symbol,
+                                "Insufficient balance — triggering smart rebalance"
+                            );
+                            let recovered = self.smart_rebalance(symbol).await;
+                            if recovered {
+                                info!(
+                                    symbol = %symbol,
+                                    available_cash = format!("{:.4}", self.trade_manager.available_cash()),
+                                    "Smart rebalance succeeded — resuming trading"
+                                );
+                                self.consecutive_rejections = 0;
+                                // Fall through to place order normally
+                            } else {
+                                info!(
+                                    symbol = %symbol,
+                                    available_cash = format!("{:.4}", self.trade_manager.available_cash()),
+                                    "Smart rebalance: insufficient funds — entering 30s cooldown"
+                                );
+                                // Update rejection timestamp to start cooldown from now
+                                self.last_rejection_millis = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64;
+                                self.consecutive_rejections = 2; // skip rebalance on subsequent ticks
+                                return ExecutionReport {
+                                    status: ExecutionStatus::Ignored,
+                                    symbol: Some(symbol.to_string()),
+                                    side: Some(side),
+                                    order_type: Some(order_type),
+                                    rationale: None,
+                                    decision_confidence: 0.0,
+                                    decision_metrics: Vec::new(),
+                                    requested_quantity: rounded_qty,
+                                    executed_quantity: 0.0,
+                                    execution_price: None,
+                                    fee_paid: 0.0,
+                                    latency_seconds: 0.0,
+                                    synthetic_half_spread_bps: 0.0,
+                                    slippage_bps: 0.0,
+                                    latency_impact_bps: 0.0,
+                                    market_impact_bps: 0.0,
+                                    reason: Some("rebalance_insufficient"),
+                                    expected_edge_bps,
+                                };
+                            }
+                        } else {
+                            // Subsequent rejections: enforce cooldown
+                            let cooldown_ms: u64 = 30_000; // 30 seconds
+                            if now_millis.saturating_sub(self.last_rejection_millis) < cooldown_ms {
+                                debug!(
+                                    symbol = %symbol,
+                                    consecutive_rejections = self.consecutive_rejections,
+                                    cooldown_remaining_ms = cooldown_ms.saturating_sub(now_millis.saturating_sub(self.last_rejection_millis)),
+                                    "Skipping order — rejection cooldown active"
+                                );
+                                return ExecutionReport {
+                                    status: ExecutionStatus::Ignored,
+                                    symbol: Some(symbol.to_string()),
+                                    side: Some(side),
+                                    order_type: Some(order_type),
+                                    rationale: None,
+                                    decision_confidence: 0.0,
+                                    decision_metrics: Vec::new(),
+                                    requested_quantity: rounded_qty,
+                                    executed_quantity: 0.0,
+                                    execution_price: None,
+                                    fee_paid: 0.0,
+                                    latency_seconds: 0.0,
+                                    synthetic_half_spread_bps: 0.0,
+                                    slippage_bps: 0.0,
+                                    latency_impact_bps: 0.0,
+                                    market_impact_bps: 0.0,
+                                    reason: Some("rejection_cooldown"),
+                                    expected_edge_bps,
+                                };
+                            }
+                            // Cooldown expired — reset and retry
+                            self.consecutive_rejections = 0;
+                        }
+                    }
+
+                    // === LIVE LIMIT ORDER PLACEMENT ===
+                    // Place a LIMIT order at the specified price (or reference_price if None).
+                    let limit_price = price.unwrap_or(reference_price);
+
+                    // Round price to tick_size (Binance precision rules)
+                    let tick_size = self.config.exchange.tick_size;
+
+                    let rounded_price = if tick_size > 0.0 {
+                        (limit_price / tick_size).round() * tick_size
+                    } else {
+                        limit_price
+                    };
+
+                    let price_precision = if tick_size > 0.0 && tick_size < 1.0 {
+                        (-tick_size.log10()).ceil() as usize
+                    } else {
+                        0
+                    };
+
+                    let qty_str = format!("{:.prec$}", rounded_qty, prec = qty_precision);
+                    let price_str = format!("{:.prec$}", rounded_price, prec = price_precision);
+
+                    let quantity_decimal = match Decimal::from_str(&qty_str) {
+                        Ok(q) => q,
+                        Err(_) => {
+                            return ExecutionReport {
+                                status: ExecutionStatus::Rejected,
+                                symbol: Some(symbol.to_string()),
+                                side: Some(side),
+                                order_type: Some(order_type),
+                                rationale: None,
+                                decision_confidence: 0.0,
+                                decision_metrics: Vec::new(),
+                                requested_quantity: rounded_qty,
+                                executed_quantity: 0.0,
+                                execution_price: None,
+                                fee_paid: 0.0,
+                                latency_seconds: 0.0,
+                                synthetic_half_spread_bps: 0.0,
+                                slippage_bps: 0.0,
+                                latency_impact_bps: 0.0,
+                                market_impact_bps: 0.0,
+                                reason: Some("invalid_quantity"),
+                                expected_edge_bps,
+                            };
+                        }
+                    };
+
+                    let price_decimal = match Decimal::from_str(&price_str) {
+                        Ok(p) => p,
+                        Err(_) => {
+                            return ExecutionReport {
+                                status: ExecutionStatus::Rejected,
+                                symbol: Some(symbol.to_string()),
+                                side: Some(side),
+                                order_type: Some(order_type),
+                                rationale: None,
+                                decision_confidence: 0.0,
+                                decision_metrics: Vec::new(),
+                                requested_quantity: rounded_qty,
+                                executed_quantity: 0.0,
+                                execution_price: None,
+                                fee_paid: 0.0,
+                                latency_seconds: 0.0,
+                                synthetic_half_spread_bps: 0.0,
+                                slippage_bps: 0.0,
+                                latency_impact_bps: 0.0,
+                                market_impact_bps: 0.0,
+                                reason: Some("invalid_price"),
+                                expected_edge_bps,
+                            };
+                        }
+                    };
+
+                    // Skip cancel+replace if we already have a resting order at the same price and side,
+                    // UNLESS the order has been resting too long (staleness timeout).
+                    // This avoids API spam and the race condition where cancel frees USDT
+                    // slower than new order tries to lock it → "insufficient balance".
+                    if let Some(ref active) = self.active_limit_order {
+                        let now_millis = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let resting_ms = now_millis.saturating_sub(active.placed_at_millis);
+
+                        if active.side == side
+                            && (active.price - rounded_price).abs() < tick_size * 0.5
+                            && resting_ms < self.config.order_execution.max_order_rest_millis
+                        {
+                            return ExecutionReport {
+                                status: ExecutionStatus::Pending,
+                                symbol: Some(symbol.to_string()),
+                                side: Some(side),
+                                order_type: Some(order_type),
+                                rationale: None,
+                                decision_confidence: 0.0,
+                                decision_metrics: Vec::new(),
+                                requested_quantity: rounded_qty,
+                                executed_quantity: 0.0,
+                                execution_price: Some(active.price),
+                                fee_paid: 0.0,
+                                latency_seconds: 0.0,
+                                synthetic_half_spread_bps: 0.0,
+                                slippage_bps: 0.0,
+                                latency_impact_bps: 0.0,
+                                market_impact_bps: 0.0,
+                                reason: Some("limit_order_resting"),
+                                expected_edge_bps,
+                            };
+                        }
+                        // If we got here with same price/side, order exceeded max_order_rest_millis — stale
+                        if active.side == side
+                            && (active.price - rounded_price).abs() < tick_size * 0.5
+                        {
+                            info!(
+                                symbol = %symbol,
+                                resting_secs = resting_ms / 1000,
+                                "Stale order detected — cancelling to refresh queue position"
+                            );
+                        }
+                    }
+
+                    // Enforce minimum rest time for maker orders.
+                    // If the resting order hasn't been open long enough, skip cancel-replace.
+                    // This lets passive fills accumulate instead of churning.
+                    // Taker exits (stop_loss, panic_vol, max_hold) are NOT affected
+                    // because they go through the Taker branch, not Maker.
+                    if let Some(ref active) = self.active_limit_order {
+                        let now_millis = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let resting_ms = now_millis.saturating_sub(active.placed_at_millis);
+                        if resting_ms < self.config.order_execution.min_order_rest_millis {
+                            debug!(
+                                symbol = %symbol,
+                                resting_ms = resting_ms,
+                                min_rest_ms = self.config.order_execution.min_order_rest_millis,
+                                "Skipping cancel-replace: order has not rested long enough"
+                            );
+                            return ExecutionReport {
+                                status: ExecutionStatus::Pending,
+                                symbol: Some(symbol.to_string()),
+                                side: Some(side),
+                                order_type: Some(order_type),
+                                rationale: None,
+                                decision_confidence: 0.0,
+                                decision_metrics: Vec::new(),
+                                requested_quantity: rounded_qty,
+                                executed_quantity: 0.0,
+                                execution_price: Some(active.price),
+                                fee_paid: 0.0,
+                                latency_seconds: 0.0,
+                                synthetic_half_spread_bps: 0.0,
+                                slippage_bps: 0.0,
+                                latency_impact_bps: 0.0,
+                                market_impact_bps: 0.0,
+                                reason: Some("limit_order_resting"),
+                                expected_edge_bps,
+                            };
+                        }
+                    }
+
+                    // Cancel any existing active limit order before placing new one
+                    if let Some(ref active) = self.active_limit_order {
+                        let cancel_params = OrderCancelParams::builder(active.symbol.clone())
+                            .orig_client_order_id(active.client_order_id.clone())
+                            .build()
+                            .expect("Failed to build cancel params");
+                        // Best-effort cancel — ignore errors (order may already be filled)
+                        let _ = self.connection.as_ref().unwrap().order_cancel(cancel_params).await;
+                        info!(
+                            symbol = %active.symbol,
+                            order_id = active.order_id,
+                            side = ?active.side,
+                            price = %fmt_price(active.price),
+                            quantity = %fmt_price(active.quantity),
+                            "Cancelled previous limit order before placing new one"
+                        );
+                    }
+                    self.active_limit_order = None;
+
+                    let tif = match time_in_force {
+                        TimeInForce::Gtc => OrderPlaceTimeInForceEnum::Gtc,
+                        TimeInForce::Ioc => OrderPlaceTimeInForceEnum::Ioc,
+                        TimeInForce::Fok => OrderPlaceTimeInForceEnum::Fok,
+                    };
+
+                    let client_oid = Self::next_client_order_id(&mut self.order_counter);
+                    let params = OrderPlaceParams::builder(
+                        symbol.to_string(),
+                        match side {
+                            Side::Buy => OrderPlaceSideEnum::Buy,
+                            Side::Sell => OrderPlaceSideEnum::Sell,
+                        },
+                        OrderPlaceTypeEnum::Limit,
+                    )
+                    .quantity(quantity_decimal)
+                    .price(price_decimal)
+                    .time_in_force(tif)
+                    .new_client_order_id(client_oid.clone())
+                    .build()
+                    .expect("Failed to build limit order parameters");
+
+                    let response = match self.connection.as_ref().unwrap().order_place(params).await {
+                        Ok(resp) => {
+                            // Successful placement — reset rejection state
+                            self.consecutive_rejections = 0;
+                            resp
+                        }
+                        Err(e) => {
+                            // Track rejection for cooldown
+                            self.consecutive_rejections += 1;
+                            self.last_rejection_millis = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            error!(
+                                symbol = %symbol,
+                                side = ?side,
+                                quantity = %fmt_price(rounded_qty),
+                                price = %fmt_price(rounded_price),
+                                consecutive_rejections = self.consecutive_rejections,
+                                error = %e,
+                                "Limit order placement failed — cooldown 30s activated"
+                            );
+                            return ExecutionReport {
+                                status: ExecutionStatus::Rejected,
+                                symbol: Some(symbol.to_string()),
+                                side: Some(side),
+                                order_type: Some(order_type),
+                                rationale: None,
+                                decision_confidence: 0.0,
+                                decision_metrics: Vec::new(),
+                                requested_quantity: rounded_qty,
+                                executed_quantity: 0.0,
+                                execution_price: None,
+                                fee_paid: 0.0,
+                                latency_seconds: 0.0,
+                                synthetic_half_spread_bps: 0.0,
+                                slippage_bps: 0.0,
+                                latency_impact_bps: 0.0,
+                                market_impact_bps: 0.0,
+                                reason: Some("exchange_limit_order_failed"),
+                                expected_edge_bps,
+                            };
+                        }
+                    };
+
+                    let Ok(data) = response.data() else {
                         return ExecutionReport {
                             status: ExecutionStatus::Rejected,
                             symbol: Some(symbol.to_string()),
@@ -409,7 +1971,305 @@ impl Trader for BinanceTrader {
                             rationale: None,
                             decision_confidence: 0.0,
                             decision_metrics: Vec::new(),
-                            requested_quantity: quantity,
+                            requested_quantity: rounded_qty,
+                            executed_quantity: 0.0,
+                            execution_price: None,
+                            fee_paid: 0.0,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: Some("missing_limit_order_data"),
+                            expected_edge_bps,
+                        };
+                    };
+
+                    // Extract order_id for tracking
+                    let order_id = data.order_id.unwrap_or(0);
+
+                    // Check if immediately filled
+                    let executed_qty = data
+                        .executed_qty
+                        .as_ref()
+                        .and_then(|q| q.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+
+                    let status_str = data.status.as_deref().unwrap_or("");
+
+                    if status_str == "FILLED" || (executed_qty > 0.0 && executed_qty >= quantity * 0.99) {
+                        // Fully filled immediately (crossed the spread or liquidity was there)
+                        let avg_price = data
+                            .price
+                            .as_ref()
+                            .and_then(|p| p.parse::<f64>().ok())
+                            .unwrap_or(limit_price);
+
+                        // Calculate fee and detect commission-in-base-asset
+                        let quote_asset = &self.config.exchange.quote_asset;
+                        let base_asset = symbol.strip_suffix(quote_asset.as_str()).unwrap_or(symbol);
+                        let (fee_paid, base_commission) = if let Some(fills) = data.fills.as_ref() {
+                            let mut total_fee = 0.0_f64;
+                            let mut total_base_commission = 0.0_f64;
+                            for f in fills {
+                                let comm = f.commission.as_ref()
+                                    .and_then(|c| c.parse::<f64>().ok())
+                                    .unwrap_or(0.0);
+                                let comm_asset = f.commission_asset.as_deref().unwrap_or("");
+                                if comm_asset == base_asset {
+                                    // Commission charged in base asset — convert to USDT for fee tracking
+                                    total_fee += comm * avg_price;
+                                    total_base_commission += comm;
+                                } else {
+                                    // Commission in USDT or other quote asset
+                                    total_fee += comm;
+                                }
+                            }
+                            (total_fee, total_base_commission)
+                        } else {
+                            (executed_qty * avg_price * self.config.exchange.maker_fee, 0.0)
+                        };
+
+                        // When Binance charges fee in base asset on Buy, the actual received
+                        // quantity is less than executed_qty. Subtract the commission so the
+                        // virtual position matches the real balance.
+                        let effective_qty = if matches!(side, Side::Buy) && base_commission > 0.0 {
+                            let adj = executed_qty - base_commission;
+                            info!(
+                                symbol = %symbol,
+                                raw_qty = %fmt_price(executed_qty),
+                                base_commission = %fmt_price(base_commission),
+                                effective_qty = %fmt_price(adj),
+                                "Adjusted executed_qty for base-asset commission (immediate limit fill)"
+                            );
+                            adj
+                        } else {
+                            executed_qty
+                        };
+
+                        self.active_limit_order = None;
+
+                        info!(
+                            symbol = %symbol,
+                            side = ?side,
+                            price = %fmt_price(avg_price),
+                            quantity = %fmt_price(effective_qty),
+                            order_id = order_id,
+                            "Limit order filled immediately"
+                        );
+
+                        return ExecutionReport {
+                            status: ExecutionStatus::Filled,
+                            symbol: Some(symbol.to_string()),
+                            side: Some(side),
+                            order_type: Some(order_type),
+                            rationale: None,
+                            decision_confidence: 0.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: rounded_qty,
+                            executed_quantity: effective_qty,
+                            execution_price: Some(avg_price),
+                            fee_paid,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: None,
+                            expected_edge_bps,
+                        };
+                    }
+
+                    // Order is resting on the book — track it
+                    self.active_limit_order = Some(ActiveLimitOrder {
+                        order_id,
+                        client_order_id: client_oid.clone(),
+                        symbol: symbol.to_string(),
+                        side,
+                        price: rounded_price,
+                        quantity: rounded_qty,
+                        placed_at_millis: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    });
+
+                    info!(
+                        symbol = %symbol,
+                        side = ?side,
+                        price = %fmt_price(rounded_price),
+                        quantity = %fmt_price(rounded_qty),
+                        order_id = order_id,
+                        client_order_id = %client_oid,
+                        status = %status_str,
+                        "Limit order placed and resting"
+                    );
+
+                    return ExecutionReport {
+                        status: ExecutionStatus::Pending,
+                        symbol: Some(symbol.to_string()),
+                        side: Some(side),
+                        order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
+                        requested_quantity: rounded_qty,
+                        executed_quantity: 0.0,
+                        execution_price: Some(rounded_price),
+                        fee_paid: 0.0,
+                        latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
+                        reason: Some("limit_order_resting"),
+                        expected_edge_bps,
+                    };
+                }
+
+                // === TAKER (MARKET ORDER) ===
+
+                // --- Taker retry guard ---
+                // After MAX_TAKER_RETRIES consecutive failures, the virtual position
+                // is force-closed because the on-exchange balance is likely zero
+                // (e.g. BNB fee discount ate into base qty, or cleanup sold inventory).
+                const MAX_TAKER_RETRIES: u32 = 3;
+                const TAKER_RETRY_COOLDOWN_MS: u64 = 5_000; // 5 seconds between retries
+
+                if self.consecutive_taker_failures >= MAX_TAKER_RETRIES {
+                    error!(
+                        symbol = %symbol,
+                        side = ?side,
+                        failures = self.consecutive_taker_failures,
+                        "Taker order failed {} times — force-closing virtual position",
+                        MAX_TAKER_RETRIES,
+                    );
+                    self.consecutive_taker_failures = 0;
+                    self.last_taker_failure_millis = 0;
+                    // Return a synthetic "filled" report at zero qty so the main loop
+                    // does NOT try to close_position_with_report (executed_quantity==0).
+                    // The position will be force-closed by the caller via the
+                    // "force_close_position" reason.
+                    return ExecutionReport {
+                        status: ExecutionStatus::Rejected,
+                        symbol: Some(symbol.to_string()),
+                        side: Some(side),
+                        order_type: Some(order_type),
+                        rationale: None,
+                        decision_confidence: 0.0,
+                        decision_metrics: Vec::new(),
+                        requested_quantity: rounded_qty,
+                        executed_quantity: 0.0,
+                        execution_price: None,
+                        fee_paid: 0.0,
+                        latency_seconds: 0.0,
+                        synthetic_half_spread_bps: 0.0,
+                        slippage_bps: 0.0,
+                        latency_impact_bps: 0.0,
+                        market_impact_bps: 0.0,
+                        reason: Some("force_close_position"),
+                        expected_edge_bps,
+                    };
+                }
+
+                if self.consecutive_taker_failures > 0 {
+                    let now_millis = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let elapsed = now_millis.saturating_sub(self.last_taker_failure_millis);
+                    if elapsed < TAKER_RETRY_COOLDOWN_MS {
+                        debug!(
+                            symbol = %symbol,
+                            failures = self.consecutive_taker_failures,
+                            cooldown_remaining_ms = TAKER_RETRY_COOLDOWN_MS - elapsed,
+                            "Taker retry cooldown active — skipping"
+                        );
+                        return ExecutionReport {
+                            status: ExecutionStatus::Ignored,
+                            symbol: Some(symbol.to_string()),
+                            side: Some(side),
+                            order_type: Some(order_type),
+                            rationale: None,
+                            decision_confidence: 0.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: rounded_qty,
+                            executed_quantity: 0.0,
+                            execution_price: None,
+                            fee_paid: 0.0,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: Some("taker_retry_cooldown"),
+                            expected_edge_bps,
+                        };
+                    }
+                }
+
+                // Cancel any resting limit order before placing market order.
+                // Without this, the resting order locks the base asset balance
+                // and the market order fails with "insufficient balance".
+                if let Some(ref active) = self.active_limit_order {
+                    let cancel_params = OrderCancelParams::builder(active.symbol.clone())
+                        .orig_client_order_id(active.client_order_id.clone())
+                        .build()
+                        .expect("Failed to build cancel params");
+                    // Best-effort cancel — ignore errors (order may already be filled)
+                    let _ = self
+                        .connection
+                        .as_ref()
+                        .unwrap()
+                        .order_cancel(cancel_params)
+                        .await;
+                    info!(
+                        symbol = %active.symbol,
+                        order_id = active.order_id,
+                        side = ?active.side,
+                        price = %fmt_price(active.price),
+                        quantity = %fmt_price(active.quantity),
+                        "Cancelled resting limit order before taker exit"
+                    );
+                }
+                self.active_limit_order = None;
+                // Also cancel any two-sided orders before taker exit
+                for active_side in [self.active_bid_order.take(), self.active_ask_order.take()]
+                    .into_iter()
+                    .flatten()
+                {
+                    let cancel_params =
+                        OrderCancelParams::builder(active_side.symbol.clone())
+                            .orig_client_order_id(active_side.client_order_id.clone())
+                            .build()
+                            .expect("Failed to build cancel params");
+                    let _ = self
+                        .connection
+                        .as_ref()
+                        .unwrap()
+                        .order_cancel(cancel_params)
+                        .await;
+                    info!(
+                        symbol = %active_side.symbol,
+                        side = ?active_side.side,
+                        "Cancelled two-sided order before taker exit"
+                    );
+                }
+
+                let qty_str = format!("{:.prec$}", rounded_qty, prec = qty_precision);
+
+                let quantity_decimal = match Decimal::from_str(&qty_str) {
+                    Ok(quantity) => quantity,
+                    Err(_) => {
+                        return ExecutionReport {
+                            status: ExecutionStatus::Rejected,
+                            symbol: Some(symbol.to_string()),
+                            side: Some(side),
+                            order_type: Some(order_type),
+                            rationale: None,
+                            decision_confidence: 0.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: rounded_qty,
                             executed_quantity: 0.0,
                             execution_price: None,
                             fee_paid: 0.0,
@@ -436,50 +2296,76 @@ impl Trader for BinanceTrader {
                 .build()
                 .expect("Failed to build order parameters");
 
-                let Ok(response) = connection.order_place(params).await else {
-                    return ExecutionReport {
-                        status: ExecutionStatus::Rejected,
-                        symbol: Some(symbol.to_string()),
-                        side: Some(side),
-                        order_type: Some(order_type),
-                        rationale: None,
-                        decision_confidence: 0.0,
-                        decision_metrics: Vec::new(),
-                        requested_quantity: quantity,
-                        executed_quantity: 0.0,
-                        execution_price: None,
-                        fee_paid: 0.0,
-                        latency_seconds: 0.0,
-                        synthetic_half_spread_bps: 0.0,
-                        slippage_bps: 0.0,
-                        latency_impact_bps: 0.0,
-                        market_impact_bps: 0.0,
-                        reason: Some("exchange_order_failed"),
-                        expected_edge_bps,
-                    };
+                let response = match self.connection.as_ref().unwrap().order_place(params).await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        self.consecutive_taker_failures += 1;
+                        self.last_taker_failure_millis = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        error!(
+                            symbol = %symbol,
+                            side = ?side,
+                            quantity = %fmt_price(rounded_qty),
+                            error = %e,
+                            attempt = self.consecutive_taker_failures,
+                            max_retries = MAX_TAKER_RETRIES,
+                            "Taker (market) order placement failed"
+                        );
+                        return ExecutionReport {
+                            status: ExecutionStatus::Rejected,
+                            symbol: Some(symbol.to_string()),
+                            side: Some(side),
+                            order_type: Some(order_type),
+                            rationale: None,
+                            decision_confidence: 0.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: rounded_qty,
+                            executed_quantity: 0.0,
+                            execution_price: None,
+                            fee_paid: 0.0,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: Some("exchange_order_failed"),
+                            expected_edge_bps,
+                        };
+                    }
                 };
 
-                let Ok(data) = response.data() else {
-                    return ExecutionReport {
-                        status: ExecutionStatus::Rejected,
-                        symbol: Some(symbol.to_string()),
-                        side: Some(side),
-                        order_type: Some(order_type),
-                        rationale: None,
-                        decision_confidence: 0.0,
-                        decision_metrics: Vec::new(),
-                        requested_quantity: quantity,
-                        executed_quantity: 0.0,
-                        execution_price: None,
-                        fee_paid: 0.0,
-                        latency_seconds: 0.0,
-                        synthetic_half_spread_bps: 0.0,
-                        slippage_bps: 0.0,
-                        latency_impact_bps: 0.0,
-                        market_impact_bps: 0.0,
-                        reason: Some("missing_order_data"),
-                        expected_edge_bps,
-                    };
+                let data = match response.data() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!(
+                            symbol = %symbol,
+                            side = ?side,
+                            error = %e,
+                            "Taker order response missing data"
+                        );
+                        return ExecutionReport {
+                            status: ExecutionStatus::Rejected,
+                            symbol: Some(symbol.to_string()),
+                            side: Some(side),
+                            order_type: Some(order_type),
+                            rationale: None,
+                            decision_confidence: 0.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: rounded_qty,
+                            executed_quantity: 0.0,
+                            execution_price: None,
+                            fee_paid: 0.0,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: Some("missing_order_data"),
+                            expected_edge_bps,
+                        };
+                    }
                 };
 
                 let Some(fills) = data.fills.as_ref() else {
@@ -491,7 +2377,7 @@ impl Trader for BinanceTrader {
                         rationale: None,
                         decision_confidence: 0.0,
                         decision_metrics: Vec::new(),
-                        requested_quantity: quantity,
+                        requested_quantity: rounded_qty,
                         executed_quantity: 0.0,
                         execution_price: None,
                         fee_paid: 0.0,
@@ -514,9 +2400,52 @@ impl Trader for BinanceTrader {
                     .first()
                     .and_then(|fill| fill.price.as_ref())
                     .and_then(|value| value.parse::<f64>().ok());
-                let fee_paid = execution_price
-                    .map(|price| price * executed_quantity * self.config.exchange.taker_fee)
-                    .unwrap_or(0.0);
+
+                // Calculate fee and detect commission-in-base-asset
+                let quote_asset = &self.config.exchange.quote_asset;
+                let base_asset = symbol.strip_suffix(quote_asset.as_str()).unwrap_or(symbol);
+                let (fee_paid, base_commission) = {
+                    let mut total_fee = 0.0_f64;
+                    let mut total_base_commission = 0.0_f64;
+                    let fallback_price = execution_price.unwrap_or(0.0);
+                    for f in fills {
+                        let comm = f.commission.as_ref()
+                            .and_then(|c| c.parse::<f64>().ok())
+                            .unwrap_or(0.0);
+                        let comm_asset = f.commission_asset.as_deref().unwrap_or("");
+                        if comm_asset == base_asset {
+                            total_fee += comm * fallback_price;
+                            total_base_commission += comm;
+                        } else {
+                            total_fee += comm;
+                        }
+                    }
+                    // Fallback if no fills had commission info
+                    if total_fee == 0.0 {
+                        total_fee = execution_price
+                            .map(|p| p * executed_quantity * self.config.exchange.taker_fee)
+                            .unwrap_or(0.0);
+                    }
+                    (total_fee, total_base_commission)
+                };
+
+                // When Binance charges fee in base asset on Buy, reduce effective qty
+                let effective_qty = if matches!(side, Side::Buy) && base_commission > 0.0 {
+                    let adj = executed_quantity - base_commission;
+                    info!(
+                        symbol = %symbol,
+                        raw_qty = %fmt_price(executed_quantity),
+                        base_commission = %fmt_price(base_commission),
+                        effective_qty = %fmt_price(adj),
+                        "Adjusted executed_qty for base-asset commission (taker fill)"
+                    );
+                    adj
+                } else {
+                    executed_quantity
+                };
+
+                // Taker order succeeded — reset failure counter
+                self.consecutive_taker_failures = 0;
 
                 ExecutionReport {
                     status: ExecutionStatus::Filled,
@@ -526,8 +2455,8 @@ impl Trader for BinanceTrader {
                     rationale: None,
                     decision_confidence: 0.0,
                     decision_metrics: Vec::new(),
-                    requested_quantity: quantity,
-                    executed_quantity,
+                    requested_quantity: rounded_qty,
+                    executed_quantity: effective_qty,
                     execution_price,
                     fee_paid,
                     latency_seconds: 0.0,
@@ -536,6 +2465,176 @@ impl Trader for BinanceTrader {
                     latency_impact_bps: 0.0,
                     market_impact_bps: 0.0,
                     reason: None,
+                    expected_edge_bps,
+                }
+            }
+            // Two-sided market-making: place/replace both bid and ask limit orders.
+            OrderIntent::QuoteBothSides {
+                buy_price,
+                buy_quantity,
+                sell_price,
+                sell_quantity,
+                expected_edge_bps,
+                ..
+            } => {
+                let trading_symbol = symbol.to_string();
+                let event_time_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs_f64();
+
+                // Place or replace bid side
+                let existing_bid = self.active_bid_order.take();
+                let bid_result = self
+                    .place_or_replace_side(
+                        symbol,
+                        Side::Buy,
+                        buy_price,
+                        buy_quantity,
+                        &existing_bid,
+                    )
+                    .await;
+                match bid_result {
+                    PlaceResult::Resting(order) => {
+                        self.active_bid_order = Some(order);
+                    }
+                    PlaceResult::InstantFill { avg_price, executed_qty, fee } => {
+                        // BUY filled immediately — register in position tracker
+                        let effective_fee_rate = self
+                            .config
+                            .exchange
+                            .maker_fee
+                            .max(self.config.exchange.bnb_discount_fee);
+                        let effective_qty = executed_qty * (1.0 - effective_fee_rate);
+                        info!(
+                            symbol = %trading_symbol,
+                            side = "BUY",
+                            price = %fmt_price(avg_price),
+                            effective_qty = %fmt_price(effective_qty),
+                            fee = %fmt_price(fee),
+                            "Two-sided: immediate BID fill registered"
+                        );
+                        let report = ExecutionReport {
+                            status: ExecutionStatus::Filled,
+                            symbol: Some(trading_symbol.clone()),
+                            side: Some(Side::Buy),
+                            order_type: Some(OrderType::Maker),
+                            rationale: Some("two_sided_bid_instant_fill"),
+                            decision_confidence: 1.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: buy_quantity,
+                            executed_quantity: effective_qty,
+                            execution_price: Some(avg_price),
+                            fee_paid: fee,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: None,
+                            expected_edge_bps: 0.0,
+                        };
+                        self.trade_manager.record_execution_report(&report);
+                        let _ = self.trade_manager.open_position(
+                            &trading_symbol,
+                            avg_price,
+                            effective_qty,
+                            event_time_secs,
+                            Some(&report),
+                        );
+                        self.active_bid_order = None;
+                    }
+                    PlaceResult::Failed => {
+                        self.active_bid_order = None;
+                    }
+                }
+
+                // Place or replace ask side
+                let existing_ask = self.active_ask_order.take();
+                let ask_result = self
+                    .place_or_replace_side(
+                        symbol,
+                        Side::Sell,
+                        sell_price,
+                        sell_quantity,
+                        &existing_ask,
+                    )
+                    .await;
+                match ask_result {
+                    PlaceResult::Resting(order) => {
+                        self.active_ask_order = Some(order);
+                    }
+                    PlaceResult::InstantFill { avg_price, executed_qty, fee } => {
+                        // SELL filled immediately — close position
+                        info!(
+                            symbol = %trading_symbol,
+                            side = "SELL",
+                            price = %fmt_price(avg_price),
+                            quantity = %fmt_price(executed_qty),
+                            fee = %fmt_price(fee),
+                            "Two-sided: immediate ASK fill registered"
+                        );
+                        let report = ExecutionReport {
+                            status: ExecutionStatus::Filled,
+                            symbol: Some(trading_symbol.clone()),
+                            side: Some(Side::Sell),
+                            order_type: Some(OrderType::Maker),
+                            rationale: Some("two_sided_ask_instant_fill"),
+                            decision_confidence: 1.0,
+                            decision_metrics: Vec::new(),
+                            requested_quantity: sell_quantity,
+                            executed_quantity: executed_qty,
+                            execution_price: Some(avg_price),
+                            fee_paid: fee,
+                            latency_seconds: 0.0,
+                            synthetic_half_spread_bps: 0.0,
+                            slippage_bps: 0.0,
+                            latency_impact_bps: 0.0,
+                            market_impact_bps: 0.0,
+                            reason: None,
+                            expected_edge_bps: 0.0,
+                        };
+                        self.trade_manager.record_execution_report(&report);
+                        // Partial close: reduce position by the sold quantity
+                        // instead of removing the entire position.
+                        let current_qty = self
+                            .trade_manager
+                            .get_position(&trading_symbol)
+                            .map_or(0.0, |p| p.quantity);
+                        let remaining = (current_qty - executed_qty).max(0.0);
+                        self.trade_manager.update_position(
+                            &trading_symbol,
+                            remaining,
+                            avg_price,
+                            event_time_secs,
+                            Some(fee),
+                        );
+                        self.active_ask_order = None;
+                    }
+                    PlaceResult::Failed => {
+                        self.active_ask_order = None;
+                    }
+                }
+
+                // Return a summary report
+                ExecutionReport {
+                    status: ExecutionStatus::Pending,
+                    symbol: Some(symbol.to_string()),
+                    side: None,
+                    order_type: Some(OrderType::Maker),
+                    rationale: Some("two_sided_quote"),
+                    decision_confidence: 1.0,
+                    decision_metrics: Vec::new(),
+                    requested_quantity: buy_quantity + sell_quantity,
+                    executed_quantity: 0.0,
+                    execution_price: None,
+                    fee_paid: 0.0,
+                    latency_seconds: 0.0,
+                    synthetic_half_spread_bps: 0.0,
+                    slippage_bps: 0.0,
+                    latency_impact_bps: 0.0,
+                    market_impact_bps: 0.0,
+                    reason: Some("two_sided_orders_placed"),
                     expected_edge_bps,
                 }
             }
@@ -613,6 +2712,77 @@ impl Trader for BinanceTrader {
             );
         }
 
+        // ── Cancel all open orders on startup to clear stale orders from previous sessions ──
+        if trading_mode == TradeMode::Real {
+            if let Some(ref connection) = self.connection {
+                info!(
+                    symbol = trading_symbol,
+                    "Cancelling all open orders on startup"
+                );
+                let cancel_params =
+                    OpenOrdersCancelAllParams::builder(trading_symbol.to_string()).build()?;
+                match connection.open_orders_cancel_all(cancel_params).await {
+                    Ok(response) => {
+                        let cancelled_count = response
+                            .raw
+                            .as_array()
+                            .map(|arr| arr.len())
+                            .unwrap_or(0);
+                        info!(
+                            symbol = trading_symbol,
+                            cancelled_count = cancelled_count,
+                            "Open orders cancelled on startup"
+                        );
+                    }
+                    Err(e) => {
+                        // Error code -2011 means "no open orders" — not a real error
+                        let err_str = format!("{:?}", e);
+                        if err_str.contains("-2011") {
+                            info!(
+                                symbol = trading_symbol,
+                                "No open orders to cancel on startup"
+                            );
+                        } else {
+                            error!(
+                                symbol = trading_symbol,
+                                error = %e,
+                                "Failed to cancel open orders on startup"
+                            );
+                        }
+                    }
+                }
+                // Small delay to let Binance unlock balances after cancellation
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
+
+        // ── Live startup: sell leftover base asset + log balance ──
+        if trading_mode == TradeMode::Real {
+            let quote_asset = &self.config.exchange.quote_asset;
+            let base_asset = trading_symbol.strip_suffix(quote_asset.as_str()).unwrap_or(trading_symbol);
+
+            // Sell any leftover base asset from previous session
+            match self.account_balances(base_asset).await {
+                Ok((_usdt_free_before, base_free)) => {
+                    if base_free * self.config.exchange.step_size.recip().ceil() >= 1.0 {
+                        info!(
+                            base_asset = base_asset,
+                            base_free = %fmt_price(base_free),
+                            "Leftover base asset detected, selling at market"
+                        );
+                        let _ = self.cleanup_base_asset(trading_symbol, base_asset).await;
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        symbol = trading_symbol,
+                        error = %e,
+                        "Balance check failed on startup — continuing anyway"
+                    );
+                }
+            }
+        }
+
         self.logger
             .log_market_data_source(
                 trading_symbol,
@@ -626,6 +2796,10 @@ impl Trader for BinanceTrader {
         let mut market_state =
             MarketState::new(trading_symbol.to_string(), trading_strategy.market_state_window_millis());
         let mut last_trade_price = None;
+        // Cumulative passive tracker: counts consecutive ticks where strategy
+        // wants a Maker order on the same side. Used to boost fill probability
+        // via cumulative formula: 1 - (1-p)^N.
+        let mut cumulative_tracker = CumulativePassiveTracker::new();
 
         while let Some(event) = trading_stream.next().await {
             self.trade_manager.increment_ticks();
@@ -644,20 +2818,27 @@ impl Trader for BinanceTrader {
 
             if let Some(mark_price) = market_state.last_price() {
                 let current_drawdown = self.trade_manager.current_drawdown(trading_symbol, mark_price);
-                let max_allowed_drawdown = self
+                let drawdown_disabled = self
                     .config
                     .backtest_settings
                     .as_ref()
-                    .and_then(|settings| {
-                        if settings.disable_drawdown_limit {
-                            None
-                        } else {
-                            settings.max_drawdown_override
-                        }
-                    })
-                    .unwrap_or(self.config.risk_management.max_drawdown);
+                    .map(|s| s.disable_drawdown_limit)
+                    .unwrap_or(false);
 
-                if current_drawdown >= max_allowed_drawdown {
+                let max_allowed_drawdown = if drawdown_disabled {
+                    None // No limit — drawdown guardrail fully disabled
+                } else {
+                    Some(
+                        self.config
+                            .backtest_settings
+                            .as_ref()
+                            .and_then(|s| s.max_drawdown_override)
+                            .unwrap_or(self.config.risk_management.max_drawdown),
+                    )
+                };
+
+                if let Some(max_dd) = max_allowed_drawdown {
+                    if current_drawdown >= max_dd {
                     self.logger.log_warning(
                         trading_symbol,
                         "drawdown_guardrail",
@@ -665,6 +2846,8 @@ impl Trader for BinanceTrader {
                     );
 
                     if self.current_position(trading_symbol).quantity > 0.0 {
+                        // Reset cumulative tracker on forced drawdown exit
+                        cumulative_tracker.reset();
                         let position_quantity = self.current_position(trading_symbol).quantity;
                         let execution = backtest_engine.execute_with_constraints_at(
                             trade::signal::Signal::Sell,
@@ -693,6 +2876,7 @@ impl Trader for BinanceTrader {
                     }
 
                     continue;
+                    }
                 }
             }
 
@@ -705,18 +2889,30 @@ impl Trader for BinanceTrader {
                 market_state.order_book_imbalance(),
             );
 
-            let current_position = self.current_position(trading_symbol);
-            if current_position.quantity > 0.0
-                && current_position.quantity * decision_reference_price
-                    > self.config.position_sizing.max_position_notional
-            {
-                self.logger.log_warning(
-                    trading_symbol,
-                    "inventory_guardrail",
-                    "Current position notional exceeds configured max; suppressing new entries",
-                );
-                continue;
+            // Poll exchange for async fills on active limit orders (live mode only).
+            // This detects fills that happened between ticks and updates trade_manager
+            // so the strategy sees the correct position state.
+            if matches!(trading_mode, TradeMode::Real) && self.active_limit_order.is_some() {
+                let event_time = market_state.last_event_time_secs().unwrap_or(0.0);
+                self.poll_active_order_status(trading_symbol, event_time).await;
             }
+            // Poll two-sided orders (bid + ask) for async fills
+            if matches!(trading_mode, TradeMode::Real)
+                && (self.active_bid_order.is_some() || self.active_ask_order.is_some())
+            {
+                let event_time = market_state.last_event_time_secs().unwrap_or(0.0);
+                self.poll_two_sided_orders(trading_symbol, event_time).await;
+            }
+
+            let current_position = self.current_position(trading_symbol);
+            // Inventory guardrail: skip strategy entirely if position exceeds max.
+            // BUT: two-sided strategies manage their own inventory — they set
+            // buy_quantity=0 when full and still need sell-side to unwind.
+            // So we only `continue` for single-sided (Place) strategies.
+            // For two-sided, we let decide() run and trust the strategy's skew logic.
+            let inventory_exceeded = current_position.quantity > 0.0
+                && current_position.quantity * decision_reference_price
+                    > self.config.position_sizing.max_position_notional;
             let decision = trading_strategy.decide(
                 &market_state,
                 &StrategyContext {
@@ -724,8 +2920,28 @@ impl Trader for BinanceTrader {
                     current_position: current_position.clone(),
                     available_cash: self.trade_manager.available_cash(),
                     max_position_notional: self.config.position_sizing.max_position_notional,
+                    initial_capital: self.trade_manager.initial_capital(),
+                    tick_size: self.config.exchange.tick_size,
                 },
             );
+
+            // Post-decide inventory guardrail for single-sided strategies:
+            // Skip new BUY entries (Place { side: Buy }) when inventory exceeded.
+            // Two-sided QuoteBothSides already handles this via buy_quantity=0.
+            if inventory_exceeded {
+                match &decision.intent {
+                    OrderIntent::Place { side: Side::Buy, .. } => {
+                        self.logger.log_warning(
+                            trading_symbol,
+                            "inventory_guardrail",
+                            "Current position notional exceeds configured max; suppressing new entries",
+                        );
+                        continue;
+                    }
+                    // Allow sells, cancels, no_action, and QuoteBothSides through
+                    _ => {}
+                }
+            }
 
             {
                 let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
@@ -751,14 +2967,36 @@ impl Trader for BinanceTrader {
                         )
                         .await;
                     report.rationale = match &decision.intent {
-                        OrderIntent::Place { rationale, .. } | OrderIntent::Cancel { rationale } => Some(*rationale),
+                        OrderIntent::Place { rationale, .. } | OrderIntent::Cancel { rationale } | OrderIntent::QuoteBothSides { rationale, .. } => Some(*rationale),
                         OrderIntent::NoAction => None,
                     };
                     report.decision_confidence = decision.confidence;
                     report.decision_metrics = decision.metrics.clone();
                     report.symbol = Some(trading_symbol.to_string());
 
-                    let pnl = if report.side == Some(Side::Sell) {
+                    let pnl = if report.reason == Some("force_close_position") {
+                        // Taker sell failed MAX_TAKER_RETRIES times — force-close virtual
+                        // position at entry price (zero PnL). The real asset is missing.
+                        let pos = self.current_position(trading_symbol);
+                        if pos.quantity > 0.0 {
+                            error!(
+                                symbol = %trading_symbol,
+                                position_qty = %fmt_price(pos.quantity),
+                                entry_price = %fmt_price(pos.entry_price),
+                                "Force-closing virtual position — asset missing on exchange"
+                            );
+                            Some(self.trade_manager.close_position_with_report(
+                                trading_symbol,
+                                pos.entry_price, // close at entry → zero gross PnL
+                                market_state.last_event_time_secs().unwrap_or(0.0),
+                                Some(&report),
+                            ))
+                        } else {
+                            None
+                        }
+                    } else if report.side == Some(Side::Sell)
+                        && report.executed_quantity > 0.0
+                    {
                         report.execution_price.map(|price| {
                             self.trade_manager.close_position_with_report(
                                 trading_symbol,
@@ -798,7 +3036,14 @@ impl Trader for BinanceTrader {
                 }
                 TradeMode::Emulated | TradeMode::Backtest => {
                     let mut report = match decision.intent {
-                        OrderIntent::NoAction | OrderIntent::Cancel { .. } => ExecutionReport::ignored(),
+                        OrderIntent::NoAction => {
+                            cumulative_tracker.reset();
+                            ExecutionReport::ignored()
+                        }
+                        OrderIntent::Cancel { .. } => {
+                            cumulative_tracker.reset();
+                            ExecutionReport::ignored()
+                        }
                         OrderIntent::Place {
                             side,
                             order_type,
@@ -818,13 +3063,17 @@ impl Trader for BinanceTrader {
                             };
 
                             if matches!(order_type, OrderType::Maker) {
-                                backtest_engine.simulate_passive_order(
+                                let n = cumulative_tracker.record_maker_intent(side);
+                                backtest_engine.simulate_passive_order_cumulative(
                                     side,
                                     market_price,
                                     requested_quantity,
                                     expected_edge_bps,
+                                    n,
                                 )
                             } else {
+                                // Taker order: reset cumulative tracker
+                                cumulative_tracker.reset();
                                 let execution = backtest_engine.execute_with_constraints_at(
                                     signal,
                                     market_price,
@@ -871,9 +3120,201 @@ impl Trader for BinanceTrader {
                                 }
                             }
                         }
+                        OrderIntent::QuoteBothSides {
+                            buy_price,
+                            buy_quantity,
+                            sell_price,
+                            sell_quantity,
+                            expected_edge_bps,
+                            ..
+                        } => {
+                            // Reset single-sided tracker (not used in two-sided mode)
+                            cumulative_tracker.reset();
+
+                            // ═══════════════════════════════════════════════════════
+                            // Trade-through fill model for two-sided market-making.
+                            //
+                            // Instead of probabilistic cumulative fill, we check if
+                            // the latest trade crosses our quote prices:
+                            //   - Buy fills when seller-initiated trade at or below buy_price
+                            //   - Sell fills when buyer-initiated trade at or above sell_price
+                            //
+                            // This is far more realistic than the cumulative model
+                            // because it respects price levels and trade direction.
+                            // ═══════════════════════════════════════════════════════
+
+                            if let Some(last_trade) = market_state.last_trade() {
+                                let trade_price = last_trade.price;
+                                let trade_qty = last_trade.quantity;
+                                let step = self.config.exchange.step_size;
+                                let maker_fee = self.config.exchange.maker_fee;
+
+                                // --- BUY side: trade-through check ---
+                                // Passive buy rests at buy_price. Fills when a seller-
+                                // initiated trade occurs at or below our price.
+                                // is_buyer_market_maker == true means seller crossed the
+                                // spread (seller-initiated → price is at bid side).
+                                if buy_quantity > 0.0
+                                    && last_trade.is_buyer_market_maker
+                                    && trade_price <= buy_price
+                                {
+                                    // Fill quantity: min of our order, trade size, and
+                                    // a fraction to model queue position (we're not first).
+                                    // Use 30% of trade volume as fill — we share the queue
+                                    // with other market makers.
+                                    let queue_fill_fraction = 0.3;
+                                    let available_fill = (trade_qty * queue_fill_fraction).max(step);
+                                    let fill_qty = backtest_engine.round_down_to_step(
+                                        buy_quantity.min(available_fill),
+                                    );
+
+                                    if fill_qty > 0.0 {
+                                        let fill_price = buy_price; // maker fills at own price
+                                        let fee_paid = fill_price * fill_qty * maker_fee;
+                                        let buy_report = ExecutionReport {
+                                            status: if fill_qty < buy_quantity {
+                                                ExecutionStatus::PartiallyFilled
+                                            } else {
+                                                ExecutionStatus::Filled
+                                            },
+                                            symbol: Some(trading_symbol.to_string()),
+                                            side: Some(Side::Buy),
+                                            order_type: Some(OrderType::Maker),
+                                            rationale: Some("two_sided_buy_fill"),
+                                            decision_confidence: 1.0,
+                                            decision_metrics: Vec::new(),
+                                            requested_quantity: buy_quantity,
+                                            executed_quantity: fill_qty,
+                                            execution_price: Some(fill_price),
+                                            fee_paid,
+                                            latency_seconds: 0.0,
+                                            synthetic_half_spread_bps: 0.0,
+                                            slippage_bps: 0.0,
+                                            latency_impact_bps: 0.0,
+                                            market_impact_bps: 0.0,
+                                            reason: if fill_qty < buy_quantity {
+                                                Some("partial_queue_fill")
+                                            } else {
+                                                None
+                                            },
+                                            expected_edge_bps,
+                                        };
+
+                                        let _ = self.trade_manager.open_position(
+                                            trading_symbol,
+                                            fill_price,
+                                            fill_qty,
+                                            market_state.last_event_time_secs().unwrap_or(0.0),
+                                            Some(&buy_report),
+                                        );
+                                        self.trade_manager.record_execution_report(&buy_report);
+                                        let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
+                                        strategy_logger.log_execution(
+                                            trading_symbol,
+                                            &buy_report,
+                                            None,
+                                            Some(self.trade_manager.get_metrics().realized_pnl()),
+                                            Some(self.trade_manager.get_trade_summary()),
+                                        );
+                                    }
+                                }
+
+                                // --- SELL side: trade-through check ---
+                                // Passive sell rests at sell_price. Fills when a buyer-
+                                // initiated trade occurs at or above our price.
+                                // is_buyer_market_maker == false means buyer crossed the
+                                // spread (buyer-initiated → price is at ask side).
+                                let pos = self.current_position(trading_symbol);
+                                if sell_quantity > 0.0
+                                    && pos.quantity > 0.0
+                                    && !last_trade.is_buyer_market_maker
+                                    && trade_price >= sell_price
+                                {
+                                    let sell_qty = sell_quantity.min(pos.quantity);
+                                    let queue_fill_fraction = 0.3;
+                                    let available_fill = (trade_qty * queue_fill_fraction).max(step);
+                                    let fill_qty = if sell_qty <= step && available_fill >= step {
+                                        // All-or-nothing for min lot
+                                        sell_qty
+                                    } else {
+                                        backtest_engine.round_down_to_step(
+                                            sell_qty.min(available_fill),
+                                        )
+                                    };
+
+                                    if fill_qty > 0.0 {
+                                        let fill_price = sell_price; // maker fills at own price
+                                        let fee_paid = fill_price * fill_qty * maker_fee;
+                                        let sell_report = ExecutionReport {
+                                            status: if fill_qty < sell_qty {
+                                                ExecutionStatus::PartiallyFilled
+                                            } else {
+                                                ExecutionStatus::Filled
+                                            },
+                                            symbol: Some(trading_symbol.to_string()),
+                                            side: Some(Side::Sell),
+                                            order_type: Some(OrderType::Maker),
+                                            rationale: Some("two_sided_sell_fill"),
+                                            decision_confidence: 1.0,
+                                            decision_metrics: Vec::new(),
+                                            requested_quantity: sell_qty,
+                                            executed_quantity: fill_qty,
+                                            execution_price: Some(fill_price),
+                                            fee_paid,
+                                            latency_seconds: 0.0,
+                                            synthetic_half_spread_bps: 0.0,
+                                            slippage_bps: 0.0,
+                                            latency_impact_bps: 0.0,
+                                            market_impact_bps: 0.0,
+                                            reason: if fill_qty < sell_qty {
+                                                Some("partial_queue_fill")
+                                            } else {
+                                                None
+                                            },
+                                            expected_edge_bps,
+                                        };
+
+                                        let remaining = pos.quantity - fill_qty;
+                                        let pnl = if remaining > step * 0.5 {
+                                            let actual_fee = fill_price * fill_qty * maker_fee;
+                                            self.trade_manager.update_position(
+                                                trading_symbol,
+                                                remaining,
+                                                fill_price,
+                                                market_state.last_event_time_secs().unwrap_or(0.0),
+                                                Some(actual_fee),
+                                            );
+                                            let gross = (fill_price - pos.entry_price) * fill_qty;
+                                            gross - actual_fee
+                                        } else {
+                                            self.trade_manager.close_position_with_report(
+                                                trading_symbol,
+                                                fill_price,
+                                                market_state.last_event_time_secs().unwrap_or(0.0),
+                                                Some(&sell_report),
+                                            )
+                                        };
+
+                                        self.trade_manager.record_execution_report(&sell_report);
+                                        let strategy_logger = StrategyLoggerAdapter::new(&self.logger);
+                                        strategy_logger.log_execution(
+                                            trading_symbol,
+                                            &sell_report,
+                                            Some(pnl),
+                                            Some(self.trade_manager.get_metrics().realized_pnl()),
+                                            Some(self.trade_manager.get_trade_summary()),
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Return ignored for the main report pipeline — we handled
+                            // both sides above with their own logging.
+                            ExecutionReport::ignored()
+                        }
                     };
                     report.rationale = match &decision.intent {
-                        OrderIntent::Place { rationale, .. } | OrderIntent::Cancel { rationale } => Some(*rationale),
+                        OrderIntent::Place { rationale, .. } | OrderIntent::Cancel { rationale } | OrderIntent::QuoteBothSides { rationale, .. } => Some(*rationale),
                         OrderIntent::NoAction => None,
                     };
                     report.decision_confidence = decision.confidence;
@@ -882,6 +3323,8 @@ impl Trader for BinanceTrader {
 
                     let pnl = match report.side {
                         Some(Side::Buy) if report.executed_quantity > 0.0 => {
+                            // Reset cumulative tracker after successful buy fill
+                            cumulative_tracker.reset();
                             if let Some(price) = report.execution_price {
                                 if let Err(reason) = self.trade_manager.open_position(
                                     trading_symbol,
@@ -900,14 +3343,52 @@ impl Trader for BinanceTrader {
                             }
                             None
                         }
-                        Some(Side::Sell) if report.executed_quantity > 0.0 => report.execution_price.map(|price| {
-                            self.trade_manager.close_position_with_report(
-                                trading_symbol,
-                                price,
-                                market_state.last_event_time_secs().unwrap_or(0.0),
-                                Some(&report),
-                            )
-                        }),
+                        Some(Side::Sell) if report.executed_quantity > 0.0 => {
+                            // Reset cumulative tracker after sell fill
+                            cumulative_tracker.reset();
+                            // Check if this is a partial fill — only reduce position
+                            // instead of closing entirely
+                            let is_partial = matches!(report.status, ExecutionStatus::PartiallyFilled);
+                            if is_partial {
+                                report.execution_price.map(|price| {
+                                    let position = self.current_position(trading_symbol);
+                                    let remaining = position.quantity - report.executed_quantity;
+                                    if remaining > self.config.exchange.step_size * 0.5 {
+                                        // Partial close: reduce position by executed amount
+                                        let exit_fee = price * report.executed_quantity * self.config.exchange.maker_fee;
+                                        self.trade_manager.update_position(
+                                            trading_symbol,
+                                            remaining,
+                                            price,
+                                            market_state.last_event_time_secs().unwrap_or(0.0),
+                                            Some(exit_fee),
+                                        );
+                                        // Return approximate PnL for the partial
+                                        let entry_price = position.entry_price;
+                                        let gross_pnl = (price - entry_price) * report.executed_quantity;
+                                        let exit_fee = price * report.executed_quantity * self.config.exchange.maker_fee;
+                                        gross_pnl - exit_fee
+                                    } else {
+                                        // Remaining is dust — close entire position
+                                        self.trade_manager.close_position_with_report(
+                                            trading_symbol,
+                                            price,
+                                            market_state.last_event_time_secs().unwrap_or(0.0),
+                                            Some(&report),
+                                        )
+                                    }
+                                })
+                            } else {
+                                report.execution_price.map(|price| {
+                                    self.trade_manager.close_position_with_report(
+                                        trading_symbol,
+                                        price,
+                                        market_state.last_event_time_secs().unwrap_or(0.0),
+                                        Some(&report),
+                                    )
+                                })
+                            }
+                        }
                         _ => None,
                     };
 
@@ -921,6 +3402,47 @@ impl Trader for BinanceTrader {
                             Some(self.trade_manager.get_metrics().realized_pnl()),
                             Some(self.trade_manager.get_trade_summary()),
                         );
+                    }
+                }
+            }
+        }
+
+        // ── Cancel all open orders on shutdown (live mode) ──
+        if trading_mode == TradeMode::Real {
+            if let Some(ref connection) = self.connection {
+                info!(
+                    symbol = trading_symbol,
+                    "Cancelling all open orders on shutdown"
+                );
+                let cancel_params =
+                    OpenOrdersCancelAllParams::builder(trading_symbol.to_string()).build()?;
+                match connection.open_orders_cancel_all(cancel_params).await {
+                    Ok(response) => {
+                        let cancelled_count = response
+                            .raw
+                            .as_array()
+                            .map(|arr| arr.len())
+                            .unwrap_or(0);
+                        info!(
+                            symbol = trading_symbol,
+                            cancelled_count = cancelled_count,
+                            "Open orders cancelled on shutdown"
+                        );
+                    }
+                    Err(e) => {
+                        let err_str = format!("{:?}", e);
+                        if err_str.contains("-2011") {
+                            info!(
+                                symbol = trading_symbol,
+                                "No open orders to cancel on shutdown"
+                            );
+                        } else {
+                            error!(
+                                symbol = trading_symbol,
+                                error = %e,
+                                "Failed to cancel open orders on shutdown"
+                            );
+                        }
                     }
                 }
             }

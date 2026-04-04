@@ -465,13 +465,27 @@ struct Cli {
     #[arg(long, default_value = "trade-flow-momentum")]
     strategy: String,
 
+    /// Path to trading configuration file (symbol-specific)
+    #[arg(long, default_value = "config/trading_config.toml")]
+    config: String,
+
+    /// Path to strategy configuration file (overrides default for the chosen strategy)
+    #[arg(long)]
+    strategy_config: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 fn build_strategy(
     strategy_name: &str,
+    strategy_config_override: Option<&str>,
 ) -> Result<Box<dyn Strategy>, Box<dyn Error + Send + Sync>> {
+    // If a strategy config override is provided for market-maker, use it
+    let market_maker_config = strategy_config_override
+        .map(|p| resolve_workspace_path(p))
+        .unwrap_or_else(|| resolve_workspace_path("config/strategies/market_maker.toml"));
+
     match strategy_name {
         "trade-flow-momentum" => Ok(Box::new(
             strategies::trade_flow_momentum::TradeFlowMomentumStrategy::from_file(
@@ -503,8 +517,14 @@ fn build_strategy(
             )
             .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
         )),
+        "market-maker" => Ok(Box::new(
+            strategies::market_maker::MarketMakerStrategy::from_file(
+                market_maker_config,
+            )
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        )),
         _ => Err(format!(
-            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture",
+            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture, market-maker",
             strategy_name
         )
         .into()),
@@ -555,6 +575,7 @@ fn strategy_config_path(strategy_name: &str) -> Result<&'static str, Box<dyn Err
         "liquidity-sweep-reversal" => Ok("config/strategies/liquidity_sweep_reversal.toml"),
         "microprice-imbalance-maker" => Ok("config/strategies/microprice_imbalance_maker.toml"),
         "spread-regime-capture" => Ok("config/strategies/spread_regime_capture.toml"),
+        "market-maker" => Ok("config/strategies/market_maker.toml"),
         _ => Err(format!("Unknown strategy '{}'.", strategy_name).into()),
     }
 }
@@ -609,9 +630,13 @@ fn build_strategy_from_search_spec(
     strategy_name: &str,
     parameter: &str,
     value: f64,
+    strategy_config_override: Option<&str>,
 ) -> Result<Box<dyn Strategy>, Box<dyn Error + Send + Sync>> {
-    let config_path = strategy_config_path(strategy_name)?;
-    let mut config = load_config(resolve_workspace_path(config_path))?;
+    let resolved_path = match strategy_config_override {
+        Some(override_path) => resolve_workspace_path(override_path),
+        None => resolve_workspace_path(strategy_config_path(strategy_name)?),
+    };
+    let mut config = load_config(resolved_path)?;
     set_config_value(&mut config, parameter, value)?;
 
     let temp_dir = std::env::temp_dir();
@@ -644,6 +669,12 @@ fn build_strategy_from_search_spec(
             ) as Box<dyn Strategy>,
             "spread-regime-capture" => Box::new(
                 strategies::spread_regime_capture::SpreadRegimeCaptureStrategy::from_file(
+                    &temp_path,
+                )
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+            ) as Box<dyn Strategy>,
+            "market-maker" => Box::new(
+                strategies::market_maker::MarketMakerStrategy::from_file(
                     &temp_path,
                 )
                 .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
@@ -1025,6 +1056,8 @@ async fn run_capture_compare(
     filter: &CapturedDatasetFilter,
     limit: Option<usize>,
     duration_secs: Option<u64>,
+    config_path: &std::path::Path,
+    strategy_config_override: Option<&str>,
 ) -> Result<Vec<BacktestSummary>, Box<dyn Error + Send + Sync>> {
     let index = apply_captured_dataset_filter(build_captured_dataset_index(root).await?, filter);
     let mut datasets = index.datasets;
@@ -1037,7 +1070,7 @@ async fn run_capture_compare(
     for strategy_name in strategies {
         for dataset in &datasets {
             results.push(
-                run_backtest(trading_symbol, strategy_name, &dataset.data_path, duration_secs).await?,
+                run_backtest(trading_symbol, strategy_name, &dataset.data_path, duration_secs, config_path, strategy_config_override).await?,
             );
         }
     }
@@ -1110,9 +1143,11 @@ async fn run_backtest(
     strategy_name: &str,
     uri: &str,
     duration_secs: Option<u64>,
+    config_path: &std::path::Path,
+    strategy_config_override: Option<&str>,
 ) -> Result<BacktestSummary, Box<dyn Error + Send + Sync>> {
-    let mut binance_trader = BinanceTrader::new().await?;
-    let mut strategy = build_strategy(strategy_name)?;
+    let mut binance_trader = BinanceTrader::new_with_config_path(config_path).await?;
+    let mut strategy = build_strategy(strategy_name, strategy_config_override)?;
     Ok(run_backtest_with_strategy(
         &mut binance_trader,
         strategy.as_mut(),
@@ -1260,15 +1295,38 @@ async fn run_live_mode(
     strategy_name: &str,
     trade_mode: TradeMode,
     duration_secs: Option<u64>,
+    config_path: &std::path::Path,
+    strategy_config_override: Option<&str>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut binance_trader = BinanceTrader::new().await?;
-    let mut strategy = build_strategy(strategy_name)?;
+    let mut binance_trader = BinanceTrader::new_with_config_path(config_path).await?;
+    let mut strategy = build_strategy(strategy_name, strategy_config_override)?;
     let stream = BinanceClient::new().await?.market_event_stream(trading_symbol).await?;
+
+    // Build a future that resolves when shutdown is requested
+    let mut shutdown_rx = shutdown.clone();
+    let shutdown_signal = async move {
+        // Wait until value becomes true
+        while !*shutdown_rx.borrow() {
+            if shutdown_rx.changed().await.is_err() {
+                break;
+            }
+        }
+    };
+
     let trading_stream: Pin<Box<dyn futures_util::Stream<Item = MarketEvent> + Send + '_>> =
         if let Some(duration_secs) = duration_secs {
-            Box::pin(stream.take_until(tokio::time::sleep(Duration::from_secs(duration_secs))))
+            // Stop on whichever comes first: duration or shutdown signal
+            let deadline = tokio::time::sleep(Duration::from_secs(duration_secs));
+            let stop = async move {
+                tokio::select! {
+                    _ = deadline => {},
+                    _ = shutdown_signal => {},
+                }
+            };
+            Box::pin(stream.take_until(stop))
         } else {
-            Box::pin(stream)
+            Box::pin(stream.take_until(shutdown_signal))
         };
 
     info!(
@@ -1552,13 +1610,15 @@ async fn run_parameter_search(
     trading_symbol: &str,
     spec: &ParameterSearchSpec,
     duration_secs: Option<u64>,
+    config_path: &std::path::Path,
+    strategy_config_override: Option<&str>,
 ) -> Result<Vec<ParameterSearchResult>, Box<dyn Error + Send + Sync>> {
     let mut results = Vec::new();
 
     for value in &spec.values {
         for uri in &spec.uris {
-            let mut binance_trader = BinanceTrader::new().await?;
-            let mut strategy = build_strategy_from_search_spec(&spec.strategy, &spec.parameter, *value)?;
+            let mut binance_trader = BinanceTrader::new_with_config_path(config_path).await?;
+            let mut strategy = build_strategy_from_search_spec(&spec.strategy, &spec.parameter, *value, strategy_config_override)?;
             let artifacts = run_backtest_with_strategy(
                 &mut binance_trader,
                 strategy.as_mut(),
@@ -1597,6 +1657,8 @@ async fn run_parameter_optimization(
     trading_symbol: &str,
     spec: &ParameterOptimizationSpec,
     duration_secs: Option<u64>,
+    config_path: &std::path::Path,
+    strategy_config_override: Option<&str>,
 ) -> Result<Vec<ParameterOptimizationResult>, Box<dyn Error + Send + Sync>> {
     let search_results = run_parameter_search(
         trading_symbol,
@@ -1607,6 +1669,8 @@ async fn run_parameter_optimization(
             uris: spec.uris.clone(),
         },
         duration_secs,
+        config_path,
+        strategy_config_override,
     )
     .await?;
 
@@ -1622,6 +1686,8 @@ async fn run_walk_forward_validation(
     min_train_size: usize,
     test_size: usize,
     duration_secs: Option<u64>,
+    config_path: &std::path::Path,
+    strategy_config_override: Option<&str>,
 ) -> Result<(Vec<WalkForwardFoldResult>, WalkForwardSummary), Box<dyn Error + Send + Sync>> {
     let mut folds = Vec::new();
     let effective_test_size = test_size.max(1);
@@ -1645,6 +1711,8 @@ async fn run_walk_forward_validation(
                 uris: train_uris,
             },
             duration_secs,
+            config_path,
+            strategy_config_override,
         )
         .await?;
 
@@ -1661,6 +1729,8 @@ async fn run_walk_forward_validation(
                 uris: test_uris,
             },
             duration_secs,
+            config_path,
+            strategy_config_override,
         )
         .await?;
         let test_aggregate = aggregate_parameter_search_results(&test_results)
@@ -2554,6 +2624,7 @@ mod tests {
             "trade-flow-momentum",
             "min_price_drift_bps",
             9.0,
+            None,
         )
         .expect("strategy builds from overridden config");
 
@@ -2566,6 +2637,7 @@ mod tests {
             "microprice-imbalance-maker",
             "min_microprice_edge_bps",
             2.0,
+            None,
         )
         .expect("maker strategy builds from overridden config");
 
@@ -2854,6 +2926,7 @@ mod tests {
 enum Commands {
     Trade,
     Emulate,
+    Rebalance,
     Backtest {
         #[arg(short, long)]
         uri: String,
@@ -3041,6 +3114,8 @@ enum Commands {
         #[arg(long)]
         duration_secs: u64,
     },
+    /// Run live trading on multiple pairs simultaneously (TOP 5 portfolio)
+    MultiTrade,
 }
 
 #[tokio::main]
@@ -3058,23 +3133,59 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let cli = Cli::parse();
 
-    // Load trading configuration
+    // Graceful shutdown: Ctrl+C sends signal to all trading tasks
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        eprintln!("\n=== Ctrl+C received, shutting down gracefully... ===");
+        let _ = shutdown_tx.send(true);
+    });
+
+    // Load trading configuration (supports per-symbol configs via --config flag)
+    let config_path = resolve_workspace_path(&cli.config);
     let trading_config =
-        load_config("config/trading_config.toml").expect("Failed to load trading configuration");
+        load_config(&config_path).unwrap_or_else(|e| panic!("Failed to load trading configuration from {}: {}", config_path.display(), e));
 
     let trading_symbol: String = get_config_value(&trading_config, "position_sizing.trading_symbol")
         .ok_or("Trading symbol not defined in configuration")?;
 
+    let strategy_config_ref = cli.strategy_config.as_deref();
+
     match cli.command {
+        Commands::Rebalance => {
+            let mut trader = BinanceTrader::new_with_config_path(&config_path).await?;
+            trader.connect().await?;
+            let quote_asset = trader.config.exchange.quote_asset.clone();
+            let base_asset = trading_symbol.strip_suffix(quote_asset.as_str()).unwrap_or(&trading_symbol);
+            let (quote_before, base_before) = trader.account_balances(base_asset).await?;
+            println!("Before: {:.8} {}, {:.4} {}", base_before, base_asset, quote_before, quote_asset);
+
+            if base_before > 0.0 {
+                match trader.cleanup_base_asset(&trading_symbol, base_asset).await {
+                    Ok(sold_qty) => {
+                        if sold_qty > 0.0 {
+                            let (quote_after, base_after) = trader.account_balances(base_asset).await?;
+                            println!("Sold {:.8} {} at market", sold_qty, base_asset);
+                            println!("After:  {:.8} {}, {:.4} {}", base_after, base_asset, quote_after, quote_asset);
+                        } else {
+                            println!("Nothing to sell (qty below step_size)");
+                        }
+                    }
+                    Err(e) => println!("Sell failed: {}", e),
+                }
+            } else {
+                println!("No {} to sell", base_asset);
+            }
+        }
         Commands::Trade => {
-            run_live_mode(&trading_symbol, &cli.strategy, TradeMode::Real, cli.duration_secs).await?;
+            run_live_mode(&trading_symbol, &cli.strategy, TradeMode::Real, cli.duration_secs, &config_path, strategy_config_ref, shutdown_rx.clone()).await?;
         }
         Commands::Emulate => {
-            run_live_mode(&trading_symbol, &cli.strategy, TradeMode::Emulated, cli.duration_secs)
+            run_live_mode(&trading_symbol, &cli.strategy, TradeMode::Emulated, cli.duration_secs, &config_path, strategy_config_ref, shutdown_rx.clone())
                 .await?;
         }
         Commands::Backtest { uri } => {
-            let _ = run_backtest(&trading_symbol, &cli.strategy, &uri, cli.duration_secs).await?;
+            let _ = run_backtest(&trading_symbol, &cli.strategy, &uri, cli.duration_secs, &config_path, strategy_config_ref).await?;
         }
         Commands::Compare { uris, strategies } => {
             let mut results = Vec::new();
@@ -3082,7 +3193,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             for strategy_name in strategies {
                 for uri in &uris {
                     results.push(
-                        run_backtest(&trading_symbol, &strategy_name, uri, cli.duration_secs).await?,
+                        run_backtest(&trading_symbol, &strategy_name, uri, cli.duration_secs, &config_path, strategy_config_ref).await?,
                     );
                 }
             }
@@ -3102,7 +3213,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 values: parse_parameter_values(&values)?,
                 uris,
             };
-            let results = run_parameter_search(&trading_symbol, &spec, cli.duration_secs).await?;
+            let results = run_parameter_search(&trading_symbol, &spec, cli.duration_secs, &config_path, strategy_config_ref).await?;
             print_parameter_search_report(&results);
         }
         Commands::Optimize {
@@ -3118,7 +3229,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 uris,
             };
             let results =
-                run_parameter_optimization(&trading_symbol, &spec, cli.duration_secs).await?;
+                run_parameter_optimization(&trading_symbol, &spec, cli.duration_secs, &config_path, strategy_config_ref).await?;
             print_parameter_optimization_report(&results);
         }
         Commands::WalkForward {
@@ -3138,6 +3249,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 min_train_size,
                 test_size,
                 cli.duration_secs,
+                &config_path,
+                strategy_config_ref,
             )
             .await?;
             print_walk_forward_report(&folds, &summary);
@@ -3154,8 +3267,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let mut rows = Vec::new();
             for strategy_name in strategies {
                 for uri in &uris {
-                    let mut binance_trader = BinanceTrader::new().await?;
-                    let mut strategy = build_strategy(&strategy_name)?;
+                    let mut binance_trader = BinanceTrader::new_with_config_path(&config_path).await?;
+                    let mut strategy = build_strategy(&strategy_name, strategy_config_ref)?;
                     let artifacts = run_backtest_with_strategy(
                         &mut binance_trader,
                         strategy.as_mut(),
@@ -3174,8 +3287,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             let mut rows = Vec::new();
             for strategy_name in strategies {
                 for uri in &uris {
-                    let mut binance_trader = BinanceTrader::new().await?;
-                    let mut strategy = build_strategy(&strategy_name)?;
+                    let mut binance_trader = BinanceTrader::new_with_config_path(&config_path).await?;
+                    let mut strategy = build_strategy(&strategy_name, strategy_config_ref)?;
                     let artifacts = run_backtest_with_strategy(
                         &mut binance_trader,
                         strategy.as_mut(),
@@ -3248,6 +3361,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 &filter,
                 limit,
                 cli.duration_secs,
+                &config_path,
+                strategy_config_ref,
             )
             .await?;
             print_compare_report(&results);
@@ -3285,6 +3400,69 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             duration_secs,
         } => {
             run_capture(&trading_symbol, &output, duration_secs, depth_levels).await?;
+        }
+        Commands::MultiTrade => {
+            // TOP 5 profitable pairs from 8-day multi-day backtest
+            let pairs: Vec<(&str, &str, &str)> = vec![
+                ("TRUUSDT",  "config/trading_config_truusdt.toml",  "config/strategies/market_maker_truusdt.toml"),
+                ("GLMRUSDT", "config/trading_config_glmrusdt.toml", "config/strategies/market_maker_glmrusdt.toml"),
+                ("WIFUSDT",  "config/trading_config_wifusdt.toml",  "config/strategies/market_maker_wifusdt.toml"),
+                ("QIUSDT",   "config/trading_config_qiusdt.toml",   "config/strategies/market_maker_qiusdt.toml"),
+                ("PHBUSDT",  "config/trading_config_phbusdt.toml",  "config/strategies/market_maker_phbusdt.toml"),
+            ];
+
+            let duration = cli.duration_secs;
+            let strategy_name = cli.strategy.clone();
+
+            println!("=== MULTI-TRADE: launching {} pairs ===", pairs.len());
+            for (symbol, tc, sc) in &pairs {
+                println!("  {} | {} | {}", symbol, tc, sc);
+            }
+
+            let mut handles = Vec::new();
+            for (symbol, trading_cfg, strategy_cfg) in pairs {
+                let sym = symbol.to_string();
+                let strat = strategy_name.clone();
+                let tc = trading_cfg.to_string();
+                let sc = strategy_cfg.to_string();
+                let shutdown = shutdown_rx.clone();
+
+                let handle = tokio::spawn(async move {
+                    let cfg_path = resolve_workspace_path(&tc);
+                    let result = run_live_mode(
+                        &sym,
+                        &strat,
+                        TradeMode::Real,
+                        duration,
+                        &cfg_path,
+                        Some(sc.as_str()),
+                        shutdown,
+                    )
+                    .await;
+                    if let Err(ref e) = result {
+                        eprintln!("[{}] ERROR: {}", sym, e);
+                    }
+                    (sym, result)
+                });
+                handles.push(handle);
+            }
+
+            let mut errors = 0u32;
+            for handle in handles {
+                match handle.await {
+                    Ok((sym, Ok(()))) => println!("[{}] finished OK", sym),
+                    Ok((sym, Err(e))) => {
+                        eprintln!("[{}] trading error: {}", sym, e);
+                        errors += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("[multi-trade] task panicked: {}", e);
+                        errors += 1;
+                    }
+                }
+            }
+
+            println!("=== MULTI-TRADE: done, {} error(s) ===", errors);
         }
     }
 

@@ -1,0 +1,62 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — GLMRUSDT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# GLMRUSDT characteristics:
+#   Price: ~$0.0106
+#   Tick size: 0.0001
+#   1 tick = ~94 bps spread
+#   Step size: 0.1
+#
+# Strategy: Buy passive at bid, sell passive at ask.
+# Net edge per round-trip: ~74 bps (94 spread - 20 maker fees)
+
+# --- Spread & pricing ---
+
+# Minimum spread to accept entry (bps). GLMRUSDT has ~94 bps natural spread.
+# Set to 50 — well below 1-tick spread to accept most opportunities.
+min_spread_bps = 50.0
+
+# Round-trip maker cost: 2 * maker_fee = 2 * 10 bps = 20 bps.
+round_trip_cost_bps = 20.0
+
+# Minimum edge after subtracting costs. At ~94 bps tick and 20 bps cost,
+# typical edge = 74 bps. Require 20 bps to filter marginal entries.
+min_edge_bps = 20.0
+
+# --- Position management ---
+
+# Max hold time before taker exit. 2 minutes.
+max_hold_millis = 120000
+
+# Stop loss in bps. ~94 bps per tick → 200 bps ≈ ~2 adverse ticks.
+stop_loss_bps = 200.0
+
+# Cooldown after exit. 15 seconds.
+entry_cooldown_millis = 15000
+
+# --- Volatility filters ---
+max_vol_bps = 1000.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+trade_window_millis = 60000
+min_trades_in_window = 1
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering
+price_position_window = 20
+max_price_position = 0.5
+
+# Sell floor: never place passive sell below entry price.
+min_exit_edge_bps = 0.0
+
+# --- Sizing ---
+cash_fraction = 0.25

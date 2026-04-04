@@ -1,0 +1,20 @@
+# MarketMaker Strategy — PHBUSDT (tick ~105 bps)
+min_spread_bps = 42.0
+round_trip_cost_bps = 20.0
+min_edge_bps = 11.0
+max_hold_millis = 120000
+stop_loss_bps = 263.0
+entry_cooldown_millis = 15000
+max_vol_bps = 1000.0
+panic_vol_bps = 2000.0
+trade_window_millis = 60000
+min_trades_in_window = 2
+imbalance_skew = 0.0
+max_imbalance = 1.0
+require_seller_initiated = true
+min_sell_flow_fraction = 0.0
+price_position_window = 20
+max_price_position = 0.5
+# Sell floor: never place passive sell below entry price.
+min_exit_edge_bps = 0.0
+cash_fraction = 0.25

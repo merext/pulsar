@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — TRUUSDT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# TRUUSDT characteristics:
+#   Price: ~$0.0046
+#   Tick size: 0.0001
+#   1 tick = ~2174 bps spread (VERY wide)
+#   Step size: 1.0
+#
+# Strategy: Buy passive at bid, sell passive at ask.
+# Net edge per round-trip: ~2154 bps (2174 spread - 20 maker fees)
+# EXCELLENT spread but very low liquidity.
+
+# --- Spread & pricing ---
+min_spread_bps = 100.0
+round_trip_cost_bps = 20.0
+min_edge_bps = 15.0
+
+# --- Position management ---
+max_hold_millis = 180000
+stop_loss_bps = 500.0
+entry_cooldown_millis = 15000
+
+# --- Volatility filters ---
+max_vol_bps = 3000.0
+panic_vol_bps = 5000.0
+
+# --- Trade window ---
+trade_window_millis = 60000
+min_trades_in_window = 1
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering
+price_position_window = 20
+max_price_position = 1.0
+
+# Sell floor: never place passive sell below entry price.
+min_exit_edge_bps = 0.0
+
+# --- Sizing ---
+cash_fraction = 0.25

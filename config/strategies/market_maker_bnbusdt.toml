@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — BNBUSDT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# BNBUSDT characteristics:
+#   Price: ~$617
+#   Tick size: 0.01
+#   1 tick = ~0.16 bps spread
+#   ~600 trades/minute (super liquid)
+#   Step size: 0.001
+#
+# Purpose: PIPELINE VALIDATION — compare backtest vs emulate vs live.
+# Edge is always negative (~-20 bps), so we minimize loss while
+# generating enough trades for meaningful comparison.
+# Target: ~20-50 trades per 3-minute emulation window.
+
+# --- Spread & pricing ---
+
+# Accept any spread — edge is inherently negative on this pair.
+min_spread_bps = 0.1
+
+# Round-trip maker cost.
+round_trip_cost_bps = 20.0
+
+# NEGATIVE min edge — we intentionally allow losing trades for validation.
+min_edge_bps = -100.0
+
+# --- Position management ---
+
+# 60 second hold — enough time for passive sell to fill.
+max_hold_millis = 60000
+
+# Stop loss: 15 bps. Slightly wider to avoid whipsaw taker exits.
+stop_loss_bps = 15.0
+
+# 15 second cooldown — ~12 entries per 3-min emulation window.
+entry_cooldown_millis = 15000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+# 5 seconds — at 600 trades/min, this gives ~50 trades per window.
+trade_window_millis = 5000
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+# No directional filter.
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+
+# Price position filtering — disabled.
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Exit pricing ---
+
+# Sell floor: never place passive sell below entry + 1 tick (~1.7 bps at $586).
+# At 20 bps round-trip fees, this still loses ~18 bps per trade if it fills,
+# but captures the 1-tick spread rather than selling AT entry.
+# Taker exits (stop_loss, panic_vol, max_hold) are NOT affected.
+min_exit_edge_bps = 1.7
+
+# --- Sizing ---
+# $95 * 0.06 = $5.70 → above min_notional $5.0. ~0.010 BNB.
+cash_fraction = 0.06

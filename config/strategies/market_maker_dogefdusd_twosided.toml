@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — DOGEFDUSD TWO-SIDED
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# DOGEFDUSD characteristics:
+#   Price: ~$0.091
+#   Tick size: 0.00001 (~1.1 bps)
+#   Step size: 1 DOGE
+#   Median spread: 2.2 bps (2 ticks)
+#   ~14,400 trades/day (~10/min), $3M daily volume
+#
+# ZERO MAKER FEE (Binance FDUSD promotion)
+#   Round-trip maker+maker = 0%
+#   Taker exit (emergency) = 10 bps
+#
+# Two-sided market-making: quote buy + sell simultaneously,
+# manage inventory via asymmetric skew.
+
+# --- Two-sided mode ---
+two_sided = true
+
+# Base half-spread in bps. At zero inventory, both sides quote at mid ± this.
+# Must be > median_spread/2 (~1.1 bps) to be behind the best bid/ask,
+# but small enough to actually get filled.
+half_spread_bps = 2.0
+
+# Asymmetric skew factor [0.0, 0.95]. Controls how aggressively quotes
+# become asymmetric when holding inventory:
+#   buy_spread  = half_spread * (1 + inventory_ratio * skew_factor)
+#   sell_spread = half_spread * (1 - inventory_ratio * skew_factor)
+#
+# At 0.8 with max inventory: sell_spread = 20% of half_spread (very tight),
+#   buy_spread = 180% (very wide). This makes passive sells much more likely
+#   and passive buys much less likely → inventory naturally reverts.
+inventory_skew_bps = 0.8
+
+# Max inventory as fraction of initial capital. At 100%, stop buying.
+max_inventory_fraction = 0.3
+
+# Minimum price change before requoting. Prevents API spam.
+requote_threshold_bps = 0.5
+
+# --- Sizing ---
+# Fraction of available cash to use per buy order.
+# Smaller = less aggressive accumulation.
+cash_fraction = 0.08
+
+# --- Emergency exits (taker sells — costly!) ---
+# Very wide stop-loss: only fires in extreme adverse moves.
+# Let passive sells handle normal inventory unwind.
+max_hold_millis = 1200000
+stop_loss_bps = 200.0
+
+# --- Volatility filters ---
+max_vol_bps = 1000.0
+panic_vol_bps = 2000.0
+
+# --- These are used by single-sided path but some may still be read ---
+min_spread_bps = 0.1
+round_trip_cost_bps = 1.5
+min_edge_bps = 0.0
+entry_cooldown_millis = 2000
+trade_window_millis = 30000
+min_trades_in_window = 1
+imbalance_skew = 0.0
+max_imbalance = 1.0
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+price_position_window = 20
+max_price_position = 1.0
+min_exit_edge_bps = 1.0

@@ -14,6 +14,8 @@ fn context_with_position(quantity: f64, entry_price: f64, entry_time: f64) -> St
         },
         available_cash: 100.0,
         max_position_notional: 35.0,
+        initial_capital: 100.0,
+        tick_size: 0.01,
     }
 }
 

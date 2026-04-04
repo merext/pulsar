@@ -1,0 +1,97 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — TRUUSDT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# TRUUSDT characteristics:
+#   Price: ~$0.0045
+#   Tick size: 0.0001
+#   1 tick = ~217 bps spread
+#   ~3 trades/minute
+#   Step size: 0.1
+#
+# Strategy: Buy passive at bid, sell passive at ask.
+# Net edge per round-trip: ~197 bps (217 spread - 20 maker fees)
+
+# --- Spread & pricing ---
+
+# Minimum spread to accept entry (bps). TRUUSDT has ~217 bps natural spread.
+# Require at least 100 bps — filters out compressed-spread ticks,
+# only enters when spread is genuinely wide enough for profitable capture.
+min_spread_bps = 100.0
+
+# Round-trip maker cost: 2 * maker_fee = 2 * 10 bps = 20 bps.
+round_trip_cost_bps = 20.0
+
+# Minimum edge after subtracting costs. Must be > 0 for profitability.
+# 50 bps buffer filters out marginal entries. TRUUSDT typically gives 197 bps,
+# so this still allows most valid entries but rejects compressed spreads.
+min_edge_bps = 50.0
+
+# --- Position management ---
+
+# Max hold time before taker exit. 2 minutes — shorter holding reduces
+# adverse selection risk and forces faster rotation. At ~3 tr/min:
+# 120 seconds * 3 trades/min = ~6 tick opportunities for passive fill.
+max_hold_millis = 120000
+
+# Stop loss in bps. TRUUSDT moves in ~217 bps ticks, so 300 bps =
+# about 1.4 adverse ticks. Tighter than before (was 500) — limits losses
+# per trade when passive sell doesn't fill and price moves against us.
+stop_loss_bps = 300.0
+
+# Cooldown after exit. 15 seconds prevents churning — after a taker exit
+# (stop loss or max hold), wait before re-entering.
+entry_cooldown_millis = 15000
+
+# --- Volatility filters ---
+
+# Max entry volatility. Generous — we want to trade in most conditions.
+max_vol_bps = 1000.0
+
+# Panic exit volatility. Very high — only triggers in extreme events.
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+
+# Window for microstructure metrics (60 seconds for ~3 trades/min).
+trade_window_millis = 60000
+
+# Minimum trades in window before allowing entry. 2 is minimum to
+# compute any statistics.
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+
+# Imbalance skew factor. 0.0 = disabled. For trade-only data
+# (no book ticker), imbalance is not available, so keep disabled.
+imbalance_skew = 0.0
+
+# Maximum imbalance to allow entry. 1.0 = no filter.
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+
+# Only enter when the last trade was seller-initiated (is_buyer_market_maker=true).
+# This means price is near bid — ideal for a passive buy.
+# CRITICAL for trade-only mode to avoid buying at ask-side prices.
+require_seller_initiated = true
+
+# Minimum fraction of seller-initiated volume in recent window.
+# 0.0 = disabled. Higher values require more sell pressure.
+min_sell_flow_fraction = 0.0
+
+# Number of recent trades to consider for price position filtering.
+price_position_window = 20
+
+# Maximum price position in recent window [0.0, 1.0].
+# 0.0 = only buy at window low, 0.3 = bottom 30% of range.
+# For TRUUSDT with 1-tick spread, 0.3 means we only buy at the lower price level.
+max_price_position = 0.3
+
+# --- Sizing ---
+
+# Fraction of available cash per entry.
+# 0.08 = optimized position size (~$8 per trade on $100 capital).
+# Larger positions capture more spread per trade with fewer entries.
+# Validated: 8/8 profitable days, $7.19 total vs $6.66 at 0.05 (+8%).
+cash_fraction = 0.08

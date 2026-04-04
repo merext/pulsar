@@ -34,6 +34,18 @@ pub enum OrderIntent {
     Cancel {
         rationale: &'static str,
     },
+    /// Two-sided market-making: simultaneously quote buy and sell.
+    /// The trader manages two independent limit orders (one per side).
+    /// Fills on each side are processed independently — a buy fill
+    /// increases inventory, a sell fill decreases it.
+    QuoteBothSides {
+        buy_price: f64,
+        buy_quantity: f64,
+        sell_price: f64,
+        sell_quantity: f64,
+        rationale: &'static str,
+        expected_edge_bps: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

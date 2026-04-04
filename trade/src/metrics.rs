@@ -97,20 +97,34 @@ impl TradeManager {
         report: Option<&ExecutionReport>,
     ) -> Result<(), &'static str> {
         let notional_value = price * quantity;
-        let fee_paid = notional_value * self.trading_fee;
+        // Use actual fee from ExecutionReport when available (respects maker vs taker fee).
+        // Fallback to taker_fee estimate only if no report provided.
+        let fee_paid = report.map_or_else(|| notional_value * self.trading_fee, |r| r.fee_paid);
         let total_cost = notional_value + fee_paid;
 
         if total_cost > self.account.cash + 1e-9 {
             return Err("insufficient_cash");
         }
 
-        let position = Position {
-            symbol: symbol.to_string(),
-            quantity,
-            entry_price: price,
-            entry_time: timestamp,
-        };
-        self.positions.insert(symbol.to_string(), position);
+        // Accumulate into existing position (VWAP entry price) instead of replacing.
+        // This is critical for two-sided market-making where multiple buys happen
+        // before any sell — replacing would lose cash accounting for prior buys.
+        if let Some(existing) = self.positions.get_mut(symbol) {
+            let total_qty = existing.quantity + quantity;
+            let vwap_price =
+                (existing.entry_price * existing.quantity + price * quantity) / total_qty;
+            existing.quantity = total_qty;
+            existing.entry_price = vwap_price;
+            // entry_time stays from the first fill (for hold_time calculation)
+        } else {
+            let position = Position {
+                symbol: symbol.to_string(),
+                quantity,
+                entry_price: price,
+                entry_time: timestamp,
+            };
+            self.positions.insert(symbol.to_string(), position);
+        }
         self.account.record_buy(notional_value, fee_paid);
         self.metrics.set_fees_paid(self.account.fees_paid);
         let equity = self
@@ -187,8 +201,12 @@ impl TradeManager {
             let gross_pnl = (price - position.entry_price) * position.quantity;
 
             // Calculate exit fee only — entry fee was already deducted from cash
-            // at position open time in record_buy(notional, fee)
-            let exit_fee = price * position.quantity * self.trading_fee;
+            // at position open time in record_buy(notional, fee).
+            // Use actual fee from ExecutionReport when available (respects maker vs taker).
+            let exit_fee = report.map_or_else(
+                || price * position.quantity * self.trading_fee,
+                |r| r.fee_paid,
+            );
 
             // Net PnL after exit fee (entry fee already reflected in cash balance)
             let net_pnl = gross_pnl - exit_fee;
@@ -265,6 +283,7 @@ impl TradeManager {
         new_quantity: f64,
         new_price: f64,
         timestamp: f64,
+        actual_exit_fee: Option<f64>,
     ) {
         if let Some(position) = self.positions.get_mut(symbol)
             && new_quantity != position.quantity
@@ -273,13 +292,20 @@ impl TradeManager {
             let quantity_change = new_quantity - position.quantity;
             if quantity_change < 0.0 {
                 // Reducing position (partial close)
-                let gross_pnl = (new_price - position.entry_price) * quantity_change.abs();
+                let sold_quantity = quantity_change.abs();
+                let gross_pnl = (new_price - position.entry_price) * sold_quantity;
 
-                // Exit fee only — entry fee was already deducted from cash at open time
-                let exit_fee = new_price * quantity_change.abs() * self.trading_fee;
+                // Exit fee: use actual fee if provided, else fallback to taker_fee estimate
+                let exit_fee =
+                    actual_exit_fee.unwrap_or_else(|| new_price * sold_quantity * self.trading_fee);
 
                 // Net PnL after exit fee
                 let net_pnl = gross_pnl - exit_fee;
+
+                // Update account cash for the partial close notional
+                let notional_value = new_price * sold_quantity;
+                self.account.record_sell(notional_value, exit_fee, net_pnl);
+                self.metrics.set_fees_paid(self.account.fees_paid);
 
                 let trade_id = self.metrics.next_trade_id();
                 self.metrics.record_trade(TradeRecord {
@@ -287,7 +313,7 @@ impl TradeManager {
                     symbol: symbol.to_string(),
                     timestamp,
                     price: new_price,
-                    quantity: quantity_change.abs(),
+                    quantity: sold_quantity,
                     signal: Signal::Sell,
                     pnl: Some(net_pnl),
                     gross_pnl: Some(gross_pnl),
@@ -295,8 +321,8 @@ impl TradeManager {
                     expected_edge_bps: 0.0,
                     rationale: None,
                     decision_confidence: 1.0,
-                    requested_quantity: quantity_change.abs(),
-                    executed_quantity: quantity_change.abs(),
+                    requested_quantity: sold_quantity,
+                    executed_quantity: sold_quantity,
                     synthetic_half_spread_bps: 0.0,
                     slippage_bps: 0.0,
                     latency_impact_bps: 0.0,
@@ -309,8 +335,26 @@ impl TradeManager {
 
             position.quantity = new_quantity;
             if new_quantity == 0.0 {
-                // Position fully closed
+                // Position fully closed — update drawdown with no position
+                let equity = self.account.update_drawdown(new_price, None);
+                self.metrics.update_account_snapshot(
+                    self.account.cash,
+                    equity,
+                    self.account.equity_peak,
+                    self.account.max_drawdown,
+                );
                 self.positions.remove(symbol);
+            } else {
+                // Position reduced — update drawdown with remaining position
+                let equity = self
+                    .account
+                    .update_drawdown(new_price, self.positions.get(symbol));
+                self.metrics.update_account_snapshot(
+                    self.account.cash,
+                    equity,
+                    self.account.equity_peak,
+                    self.account.max_drawdown,
+                );
             }
         }
     }
@@ -442,6 +486,18 @@ impl TradeManager {
 
     pub fn available_cash(&self) -> f64 {
         self.account.cash
+    }
+
+    /// Synchronize virtual cash with actual exchange balance.
+    /// Called during smart rebalance when exchange reports insufficient balance.
+    /// Sets virtual cash to the given value (capped by initial_capital).
+    pub fn sync_cash(&mut self, real_available: f64) {
+        let capped = real_available.min(self.account.initial_cash);
+        self.account.cash = capped;
+    }
+
+    pub fn initial_capital(&self) -> f64 {
+        self.account.initial_cash
     }
 
     pub fn equity(&self, symbol: &str, mark_price: f64) -> f64 {

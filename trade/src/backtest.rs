@@ -1,5 +1,6 @@
 use crate::config::TradeConfig;
 use crate::execution::{ExecutionReport, ExecutionStatus, Side};
+use crate::models::Trade;
 use crate::signal::Signal;
 use crate::trader::OrderType;
 
@@ -79,6 +80,65 @@ pub struct QueueEstimate {
     pub queue_ahead_quantity: f64,
 }
 
+/// A passive (maker) order that persists across multiple ticks until filled,
+/// cancelled, or replaced. This models realistic order book behavior where
+/// limit orders rest at a price level and fill when the market trades through.
+#[derive(Debug, Clone)]
+pub struct PendingPassiveOrder {
+    pub side: Side,
+    pub order_price: f64,
+    pub requested_quantity: f64,
+    pub expected_edge_bps: f64,
+    pub rationale: &'static str,
+    pub placed_at_millis: u64,
+    /// Number of ticks this order has been resting in the book.
+    pub ticks_resting: u64,
+}
+
+/// Tracks consecutive ticks where the strategy wants a passive (maker) order
+/// on the same side. Used to compute cumulative fill probability:
+/// if base per-tick fill rate is `p`, then after `N` consecutive ticks the
+/// probability of having been filled at least once is `1 - (1-p)^N`.
+///
+/// This is superior to the multi-tick pending order model because:
+/// 1. It reuses the proven single-tick `simulate_passive_order()` fill model
+/// 2. It naturally handles EMA-synthesized bid/ask prices
+/// 3. Cumulative probability grows quickly: at p=0.35, after 3 ticks it's 73%
+#[derive(Debug, Clone)]
+pub struct CumulativePassiveTracker {
+    /// Current side the strategy wants to trade
+    pub side: Option<Side>,
+    /// Number of consecutive ticks requesting maker on this side
+    pub consecutive_ticks: u64,
+}
+
+impl CumulativePassiveTracker {
+    pub fn new() -> Self {
+        Self {
+            side: None,
+            consecutive_ticks: 0,
+        }
+    }
+
+    /// Record that the strategy wants a maker order on the given side.
+    /// Returns the number of consecutive ticks (including this one).
+    pub fn record_maker_intent(&mut self, side: Side) -> u64 {
+        if self.side == Some(side) {
+            self.consecutive_ticks += 1;
+        } else {
+            self.side = Some(side);
+            self.consecutive_ticks = 1;
+        }
+        self.consecutive_ticks
+    }
+
+    /// Reset the tracker (e.g. after a fill, cancel, or side change to taker).
+    pub fn reset(&mut self) {
+        self.side = None;
+        self.consecutive_ticks = 0;
+    }
+}
+
 impl BacktestEngine {
     pub fn new(config: TradeConfig) -> Self {
         Self { config }
@@ -139,8 +199,16 @@ impl BacktestEngine {
             Side::Sell => Signal::Buy, // ask price (passive sell rests at ask)
         });
         let queue = self.estimate_passive_fill(side, market_price, requested_quantity);
-        let executed_quantity =
-            self.round_down_to_step(requested_quantity * queue.expected_fill_ratio);
+        let raw_fill_qty = requested_quantity * queue.expected_fill_ratio;
+        let executed_quantity = if matches!(side, Side::Sell)
+            && requested_quantity <= self.config.exchange.step_size
+            && queue.fill_probability >= 0.5
+        {
+            // All-or-Nothing for min lot: can't round down below step_size.
+            requested_quantity
+        } else {
+            self.round_down_to_step(raw_fill_qty)
+        };
 
         if executed_quantity <= 0.0 || queue.fill_probability <= 0.0 {
             return ExecutionReport {
@@ -166,7 +234,7 @@ impl BacktestEngine {
         }
 
         let fee_rate = self.config.exchange.maker_fee - self.config.exchange.maker_rebate;
-        let fee_paid = reference_price * executed_quantity * fee_rate.max(0.0);
+        let fee_paid = reference_price * executed_quantity * fee_rate;
         ExecutionReport {
             status: if executed_quantity < requested_quantity {
                 ExecutionStatus::PartiallyFilled
@@ -194,6 +262,241 @@ impl BacktestEngine {
                 None
             },
             expected_edge_bps,
+        }
+    }
+
+    /// Simulate a passive order with cumulative fill probability.
+    ///
+    /// Instead of a single-tick probabilistic model, this accounts for the fact
+    /// that an order resting in the book for N consecutive ticks has probability
+    /// `1 - (1 - p_base)^N` of having been filled at least once.
+    ///
+    /// With base fill rate p=0.35:
+    ///   tick 1: 35%, tick 2: 58%, tick 3: 73%, tick 5: 88%, tick 10: 99%
+    ///
+    /// This gives more fills than single-tick (where each tick is independent)
+    /// while remaining realistic — the order genuinely rests in the book.
+    pub fn simulate_passive_order_cumulative(
+        &self,
+        side: Side,
+        market_price: MarketPrice,
+        requested_quantity: f64,
+        expected_edge_bps: f64,
+        consecutive_ticks: u64,
+    ) -> ExecutionReport {
+        // Use the standard single-tick estimate as the base
+        let queue = self.estimate_passive_fill(side, market_price, requested_quantity);
+
+        // Cumulative fill probability: 1 - (1-p)^N
+        let base_p = queue.fill_probability;
+        let n = consecutive_ticks.max(1) as f64;
+        let cumulative_p = 1.0 - (1.0 - base_p).powf(n);
+
+        // Cumulative expected fill ratio scales similarly
+        let cumulative_fill_ratio =
+            (queue.expected_fill_ratio / base_p.max(f64::EPSILON) * cumulative_p).clamp(0.0, 1.0);
+
+        let reference_price = market_price.execution_reference_price(match side {
+            Side::Buy => Signal::Sell, // bid price (passive buy rests at bid)
+            Side::Sell => Signal::Buy, // ask price (passive sell rests at ask)
+        });
+
+        let raw_fill_qty = requested_quantity * cumulative_fill_ratio;
+        let executed_quantity = if matches!(side, Side::Sell)
+            && requested_quantity <= self.config.exchange.step_size
+            && cumulative_fill_ratio >= 0.5
+        {
+            // When remaining position is at or below step_size, passive sell must
+            // fill the full remaining qty (can't round down to 0). This fixes the
+            // "eternal Pending" bug where qty == step_size → partial fill < step_size
+            // → round_down = 0 → sell never executes.
+            // Require cumulative_fill_ratio >= 0.5 (All-or-Nothing for min lot).
+            requested_quantity
+        } else {
+            self.round_down_to_step(raw_fill_qty)
+        };
+
+        if executed_quantity <= 0.0 || cumulative_p <= 0.0 {
+            return ExecutionReport {
+                status: ExecutionStatus::Pending,
+                symbol: None,
+                side: Some(side),
+                order_type: Some(OrderType::Maker),
+                rationale: None,
+                decision_confidence: 0.0,
+                decision_metrics: Vec::new(),
+                requested_quantity,
+                executed_quantity: 0.0,
+                execution_price: Some(reference_price),
+                fee_paid: 0.0,
+                latency_seconds: 0.0,
+                synthetic_half_spread_bps: 0.0,
+                slippage_bps: 0.0,
+                latency_impact_bps: 0.0,
+                market_impact_bps: 0.0,
+                reason: Some("queue_not_filled"),
+                expected_edge_bps,
+            };
+        }
+
+        let fee_rate = self.config.exchange.maker_fee - self.config.exchange.maker_rebate;
+        let fee_paid = reference_price * executed_quantity * fee_rate;
+        ExecutionReport {
+            status: if executed_quantity < requested_quantity {
+                ExecutionStatus::PartiallyFilled
+            } else {
+                ExecutionStatus::Filled
+            },
+            symbol: None,
+            side: Some(side),
+            order_type: Some(OrderType::Maker),
+            rationale: None,
+            decision_confidence: 0.0,
+            decision_metrics: Vec::new(),
+            requested_quantity,
+            executed_quantity,
+            execution_price: Some(reference_price),
+            fee_paid,
+            latency_seconds: 0.0,
+            synthetic_half_spread_bps: 0.0,
+            slippage_bps: 0.0,
+            latency_impact_bps: 0.0,
+            market_impact_bps: 0.0,
+            reason: if executed_quantity < requested_quantity {
+                Some("partial_queue_fill")
+            } else {
+                None
+            },
+            expected_edge_bps,
+        }
+    }
+
+    /// Check if a pending passive order should be filled based on the latest trade.
+    ///
+    /// Fill logic (realistic order book model):
+    /// - Passive Buy @ bid: fills when a trade occurs at or below the order price
+    ///   (someone sold into the bid, or price traded through).
+    /// - Passive Sell @ ask: fills when a trade occurs at or above the order price
+    ///   (someone bought at the ask, or price traded through).
+    ///
+    /// Additionally, even when the trade price doesn't cross our level, there's a
+    /// small per-tick probability of fill from queue advancement (other orders ahead
+    /// of us being cancelled/filled). This probability increases with time resting.
+    pub fn check_pending_fill(&self, pending: &PendingPassiveOrder, trade: &Trade) -> bool {
+        match pending.side {
+            Side::Buy => {
+                // Passive buy rests at bid. Fills when:
+                // 1. Trade price <= order price (market traded at or below our bid)
+                // 2. Seller-initiated trade at our price (is_buyer_market_maker=true means seller crossed)
+                if trade.price <= pending.order_price {
+                    return true;
+                }
+                // Queue advancement: small chance per tick based on fill rate and resting time
+                let settings = self.config.backtest_settings.as_ref();
+                let base_rate =
+                    settings.map_or(0.2, |cfg| cfg.limit_order_fill_rate.clamp(0.0, 1.0));
+                // Per-tick advancement probability: base_rate * 0.1 * (1 + log2(ticks))
+                // This gives ~3.5% per tick at base_rate=0.35 initially, growing slowly
+                let time_factor = 1.0 + (pending.ticks_resting as f64 + 1.0).log2();
+                let queue_advance_prob = base_rate * 0.1 * time_factor;
+                // Deterministic fill: use trade properties as pseudo-random source
+                // We use the trade's quantity relative to our order as a proxy
+                // for "was there enough volume to fill us"
+                let volume_ratio = trade.quantity / pending.requested_quantity.max(f64::EPSILON);
+                // Fill if seller-initiated trade at our price level with enough volume
+                if trade.is_buyer_market_maker
+                    && (trade.price - pending.order_price).abs() < f64::EPSILON
+                    && volume_ratio >= (1.0 - queue_advance_prob)
+                {
+                    return true;
+                }
+                false
+            }
+            Side::Sell => {
+                // Passive sell rests at ask. Fills when:
+                // 1. Trade price >= order price (market traded at or above our ask)
+                // 2. Buyer-initiated trade at our price (!is_buyer_market_maker means buyer crossed)
+                if trade.price >= pending.order_price {
+                    return true;
+                }
+                // Queue advancement for sells
+                let settings = self.config.backtest_settings.as_ref();
+                let base_rate =
+                    settings.map_or(0.2, |cfg| cfg.limit_order_fill_rate.clamp(0.0, 1.0));
+                let time_factor = 1.0 + (pending.ticks_resting as f64 + 1.0).log2();
+                let queue_advance_prob = base_rate * 0.1 * time_factor;
+                let volume_ratio = trade.quantity / pending.requested_quantity.max(f64::EPSILON);
+                if !trade.is_buyer_market_maker
+                    && (trade.price - pending.order_price).abs() < f64::EPSILON
+                    && volume_ratio >= (1.0 - queue_advance_prob)
+                {
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
+    /// Execute a pending passive order fill. Called when check_pending_fill returns true.
+    /// Returns an ExecutionReport for the filled order.
+    pub fn execute_pending_fill(&self, pending: &PendingPassiveOrder) -> ExecutionReport {
+        let executed_quantity = if matches!(pending.side, Side::Sell)
+            && pending.requested_quantity < self.config.exchange.step_size
+            && pending.requested_quantity > 0.0
+        {
+            pending.requested_quantity
+        } else {
+            self.round_down_to_step(pending.requested_quantity)
+        };
+        if executed_quantity <= 0.0 {
+            return ExecutionReport {
+                status: ExecutionStatus::Rejected,
+                symbol: None,
+                side: Some(pending.side),
+                order_type: Some(OrderType::Maker),
+                rationale: Some(pending.rationale),
+                decision_confidence: 1.0,
+                decision_metrics: Vec::new(),
+                requested_quantity: pending.requested_quantity,
+                executed_quantity: 0.0,
+                execution_price: Some(pending.order_price),
+                fee_paid: 0.0,
+                latency_seconds: 0.0,
+                synthetic_half_spread_bps: 0.0,
+                slippage_bps: 0.0,
+                latency_impact_bps: 0.0,
+                market_impact_bps: 0.0,
+                reason: Some("quantity_below_step"),
+                expected_edge_bps: pending.expected_edge_bps,
+            };
+        }
+
+        let fee_rate = self.config.exchange.maker_fee - self.config.exchange.maker_rebate;
+        let fee_paid = pending.order_price * executed_quantity * fee_rate;
+
+        ExecutionReport {
+            status: if executed_quantity < pending.requested_quantity {
+                ExecutionStatus::PartiallyFilled
+            } else {
+                ExecutionStatus::Filled
+            },
+            symbol: None,
+            side: Some(pending.side),
+            order_type: Some(OrderType::Maker),
+            rationale: Some(pending.rationale),
+            decision_confidence: 1.0,
+            decision_metrics: Vec::new(),
+            requested_quantity: pending.requested_quantity,
+            executed_quantity,
+            execution_price: Some(pending.order_price),
+            fee_paid,
+            latency_seconds: 0.0,
+            synthetic_half_spread_bps: 0.0,
+            slippage_bps: 0.0,
+            latency_impact_bps: 0.0,
+            market_impact_bps: 0.0,
+            reason: None,
+            expected_edge_bps: pending.expected_edge_bps,
         }
     }
 
@@ -274,7 +577,18 @@ impl BacktestEngine {
             Signal::Hold => reference_price,
         };
 
-        let mut executed_quantity = self.round_down_to_step(requested_quantity);
+        let mut executed_quantity = if matches!(signal, Signal::Sell)
+            && requested_quantity < self.config.exchange.step_size
+            && requested_quantity > 0.0
+        {
+            // For exits: allow selling sub-step-size dust positions.
+            // On Binance, you can always sell remaining balance regardless of lot size.
+            // Without this, partial fills create zombie positions below step_size that
+            // can never be closed, permanently blocking new entries.
+            requested_quantity
+        } else {
+            self.round_down_to_step(requested_quantity)
+        };
         let mut partially_filled = false;
 
         if matches!(signal, Signal::Buy) {
@@ -311,7 +625,9 @@ impl BacktestEngine {
             };
         }
 
-        if notional_value < self.config.exchange.min_notional {
+        // min_notional only blocks Buy (entry) orders, not Sell (exit).
+        // On Binance, you can always sell/close regardless of notional value.
+        if notional_value < self.config.exchange.min_notional && matches!(signal, Signal::Buy) {
             return SimulatedExecution {
                 execution_price,
                 executed_quantity: 0.0,
@@ -465,7 +781,7 @@ impl BacktestEngine {
             })
     }
 
-    fn round_down_to_step(&self, quantity: f64) -> f64 {
+    pub fn round_down_to_step(&self, quantity: f64) -> f64 {
         let step = self.config.exchange.step_size;
         if step <= 0.0 {
             return quantity.max(0.0);

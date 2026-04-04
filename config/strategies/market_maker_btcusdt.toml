@@ -1,0 +1,33 @@
+# MarketMaker Strategy Configuration — BTCUSDT
+# Test config: spread ~1 bps, we expect losses but want to verify WS pipeline
+
+# --- Spread & pricing ---
+min_spread_bps = 0.5
+round_trip_cost_bps = 20.0
+min_edge_bps = -100.0
+
+# --- Position management ---
+max_hold_millis = 30000
+stop_loss_bps = 50.0
+entry_cooldown_millis = 2000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+trade_window_millis = 5000
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = false
+min_sell_flow_fraction = 0.0
+price_position_window = 20
+max_price_position = 1.0
+
+# --- Sizing ---
+cash_fraction = 0.05

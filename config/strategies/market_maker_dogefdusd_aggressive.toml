@@ -1,0 +1,40 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy — DOGEFDUSD AGGRESSIVE FILTER
+# ═══════════════════════════════════════════════════════════════════════════
+# Only enter when spread is wide enough (3+ bps) and at bottom of range.
+
+# --- Spread & pricing ---
+min_spread_bps = 3.0
+round_trip_cost_bps = 1.5
+min_edge_bps = 1.0
+
+# --- Position management ---
+max_hold_millis = 3600000
+stop_loss_bps = 50.0
+entry_cooldown_millis = 60000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+trade_window_millis = 5000
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = true
+min_sell_flow_fraction = 0.0
+
+# Price position filtering
+price_position_window = 50
+max_price_position = 0.1
+
+# --- Exit pricing ---
+min_exit_edge_bps = 2.2
+
+# --- Sizing ---
+cash_fraction = 0.15

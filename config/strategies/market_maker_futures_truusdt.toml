@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — FUTURES TRUUSDT (USDT-M Perpetual)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# TRUUSDT FUTURES characteristics:
+#   Price: ~$0.0044
+#   Tick size: 0.000001
+#   1 tick = ~2.3 bps spread
+#   Very liquid: ~50+ trades/minute
+#   Step size: 1
+#
+# Fee structure: maker rebate -0.02% = -2 bps per side
+# Round-trip maker rebate: -4 bps (we EARN on fees)
+# Net edge per round-trip: spread_bps + 4 bps
+
+# --- Spread & pricing ---
+
+# Minimum spread to accept entry (bps).
+# Futures TRUUSDT has ~2-5 bps typical spread.
+# Even 1 bps spread is profitable due to maker rebate.
+min_spread_bps = 1.0
+
+# Round-trip maker cost: 2 * (-0.02%) = -4 bps (NEGATIVE = REBATE).
+# We set this to -4.0 so the strategy correctly sees cost as negative.
+round_trip_cost_bps = -4.0
+
+# Minimum edge after costs. With -4 bps cost (rebate), edge = spread + 4.
+# Even 0.5 bps edge means we're profitable.
+min_edge_bps = 0.5
+
+# --- Position management ---
+max_hold_millis = 60000
+stop_loss_bps = 30.0
+entry_cooldown_millis = 5000
+
+# --- Volatility filters ---
+max_vol_bps = 500.0
+panic_vol_bps = 1000.0
+
+# --- Trade window ---
+trade_window_millis = 30000
+min_trades_in_window = 5
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = true
+min_sell_flow_fraction = 0.0
+price_position_window = 50
+max_price_position = 0.3
+
+# --- Sizing ---
+cash_fraction = 0.08

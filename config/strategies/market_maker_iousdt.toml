@@ -1,0 +1,57 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMaker Strategy Configuration — IOUSDT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# IOUSDT characteristics:
+#   Price: ~$0.103
+#   Tick size: 0.001
+#   1 tick = ~97 bps spread
+#   Step size: 0.01
+#
+# Strategy: Buy passive at bid, sell passive at ask.
+# Net edge per round-trip: ~77 bps (97 spread - 20 maker fees)
+
+# --- Spread & pricing ---
+
+# Minimum spread to accept entry (bps). IOUSDT has ~97 bps natural spread.
+# Set to 50 — below 1-tick spread to accept most opportunities.
+min_spread_bps = 50.0
+
+# Round-trip maker cost.
+round_trip_cost_bps = 20.0
+
+# Minimum edge after costs. At ~97 bps tick and 20 bps cost,
+# typical edge = 77 bps. Require 25 bps buffer.
+min_edge_bps = 25.0
+
+# --- Position management ---
+max_hold_millis = 120000
+
+# Stop loss in bps. ~97 bps per tick → 200 bps ≈ ~2 adverse ticks.
+stop_loss_bps = 200.0
+
+# Cooldown after exit.
+entry_cooldown_millis = 15000
+
+# --- Volatility filters ---
+max_vol_bps = 1000.0
+panic_vol_bps = 2000.0
+
+# --- Trade window ---
+trade_window_millis = 60000
+min_trades_in_window = 2
+
+# --- Order book imbalance ---
+imbalance_skew = 0.0
+max_imbalance = 1.0
+
+# --- Trade direction filter ---
+require_seller_initiated = true
+min_sell_flow_fraction = 0.0
+
+# Price position filtering
+price_position_window = 20
+max_price_position = 0.3
+
+# --- Sizing ---
+cash_fraction = 0.05
