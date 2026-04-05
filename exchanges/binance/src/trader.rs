@@ -63,6 +63,22 @@ pub struct BinanceTrader {
     last_two_sided_failure_millis: u64,
     /// Count of consecutive two-sided placement failures (resets on success).
     consecutive_two_sided_failures: u32,
+    /// Last known market mid-price from on_order_intent reference_price.
+    /// Used by rebalance() to determine current market price.
+    last_reference_price: f64,
+    /// Previous two-sided state for change-detection logging.
+    /// (bid_active, ask_active, bid_price, bid_qty, ask_price, ask_qty)
+    last_two_sided_state: (bool, bool, f64, f64, f64, f64),
+    /// Count of consecutive ticks where the strategy returned qty=0 for at least one side.
+    /// Triggers automatic rebalance after threshold is exceeded.
+    consecutive_zero_qty_ticks: u32,
+    /// Millis when the last BID instant fill occurred.
+    /// Used to enforce cooldown: no new bid placement for `min_order_rest_millis` after fill.
+    last_bid_instant_fill_millis: u64,
+    /// Millis when the last ASK instant fill occurred.
+    last_ask_instant_fill_millis: u64,
+    /// Millis when the last rebalance was executed. Used to enforce minimum interval between rebalances.
+    last_rebalance_millis: u64,
 }
 
 /// Tracks a pending limit order placed on the exchange.
@@ -139,6 +155,12 @@ impl BinanceTrader {
             last_taker_failure_millis: 0,
             last_two_sided_failure_millis: 0,
             consecutive_two_sided_failures: 0,
+            last_reference_price: 0.0,
+            last_two_sided_state: (false, false, 0.0, 0.0, 0.0, 0.0),
+            consecutive_zero_qty_ticks: 0,
+            last_bid_instant_fill_millis: 0,
+            last_ask_instant_fill_millis: 0,
+            last_rebalance_millis: 0,
         })
     }
 
@@ -1328,46 +1350,131 @@ impl BinanceTrader {
         Ok((quote_free, base_free))
     }
 
-    pub async fn rebalance_half_and_half(
-        &mut self,
-        symbol: &str,
-        base_asset: &str,
-    ) -> Result<bool, anyhow::Error> {
-        let (quote_free, base_free) = self.account_balances(base_asset).await?;
-        let market_price = if let Some(order) = self.active_bid_order.as_ref() {
-            order.price
-        } else if let Some(order) = self.active_ask_order.as_ref() {
-            order.price
-        } else if let Some(order) = self.active_limit_order.as_ref() {
-            order.price
+    /// Rebalance: отменяет все ордера, делит баланс 50/50 между base и quote
+    /// маркет-ордером, синхронизирует виртуальный стейт с биржей.
+    /// Возвращает true если после ребалансировки обе стороны имеют достаточный баланс.
+    pub async fn rebalance(&mut self, symbol: &str) -> Result<bool, anyhow::Error> {
+        let quote_asset = self.config.exchange.quote_asset.clone();
+        let base_asset = symbol
+            .strip_suffix(quote_asset.as_str())
+            .unwrap_or(symbol)
+            .to_string();
+
+        // 1. Отменяем все открытые ордера по символу
+        if let Some(ref connection) = self.connection {
+            let cancel_params = OpenOrdersCancelAllParams::builder(symbol.to_string()).build()?;
+            match connection.open_orders_cancel_all(cancel_params).await {
+                Ok(response) => {
+                    let cancelled = response
+                        .raw
+                        .as_array()
+                        .map(|arr| arr.len())
+                        .unwrap_or(0);
+                    if cancelled > 0 {
+                        info!(symbol = symbol, cancelled = cancelled, "Rebalance: cancelled open orders");
+                    }
+                }
+                Err(e) => {
+                    let err_str = format!("{:?}", e);
+                    if !err_str.contains("-2011") {
+                        error!(symbol = symbol, error = %e, "Rebalance: failed to cancel orders");
+                    }
+                }
+            }
+        }
+        self.active_limit_order = None;
+        self.active_bid_order = None;
+        self.active_ask_order = None;
+
+        // Небольшая пауза чтобы Binance обработал отмены
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        // 2. Получаем текущие балансы
+        let (quote_free, base_free) = self.account_balances(&base_asset).await?;
+
+        // Определяем рыночную цену: last_reference_price из bookTicker (самый надёжный),
+        // иначе — HTTP REST API фоллбэк через /api/v3/ticker/price
+        let market_price = if self.last_reference_price > f64::EPSILON {
+            self.last_reference_price
         } else {
-            return Ok(false);
+            // Fallback: fetch price from Binance REST API
+            let url = format!(
+                "https://api.binance.com/api/v3/ticker/price?symbol={}",
+                symbol
+            );
+            match reqwest::get(&url).await {
+                Ok(resp) => {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        let price_str = json["price"].as_str().unwrap_or("0");
+                        let price: f64 = price_str.parse().unwrap_or(0.0);
+                        if price > f64::EPSILON {
+                            info!(symbol = symbol, price = %fmt_price(price), "Rebalance: fetched price from REST API");
+                            self.last_reference_price = price;
+                            price
+                        } else {
+                            return Err(anyhow::anyhow!("Cannot determine market price for rebalance — REST API returned zero"));
+                        }
+                    } else {
+                        return Err(anyhow::anyhow!("Cannot determine market price for rebalance — REST API response parse error"));
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Cannot determine market price for rebalance — REST API error: {}", e));
+                }
+            }
         };
 
         if market_price <= f64::EPSILON {
-            return Ok(false);
+            return Err(anyhow::anyhow!("Market price is zero, cannot rebalance"));
         }
 
         let base_value = base_free * market_price;
         let total_value = quote_free + base_value;
-        if total_value <= self.config.exchange.min_notional * 2.0 {
-            return Ok(false);
+        let min_notional = self.config.exchange.min_notional;
+
+        if total_value <= min_notional * 2.0 {
+            return Err(anyhow::anyhow!(
+                "Total value {:.4} too small to rebalance (min {:.4})",
+                total_value,
+                min_notional * 2.0
+            ));
         }
 
+        // 3. Считаем дельту до 50/50
         let target_side_value = total_value / 2.0;
         let value_delta = target_side_value - base_value;
-        if value_delta.abs() < self.config.exchange.min_notional {
+
+        info!(
+            symbol = symbol,
+            quote_free = %fmt_usd(quote_free),
+            base_free = %fmt_price(base_free),
+            base_value = %fmt_usd(base_value),
+            total_value = %fmt_usd(total_value),
+            target_per_side = %fmt_usd(target_side_value),
+            delta = %fmt_usd(value_delta),
+            market_price = %fmt_price(market_price),
+            "Rebalance: current state"
+        );
+
+        // Если дельта меньше min_notional — уже сбалансировано
+        if value_delta.abs() < min_notional {
+            info!(symbol = symbol, "Rebalance: already balanced, skipping");
+            // Синхронизируем виртуальный стейт даже если не торгуем
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64();
+            self.trade_manager
+                .sync_live_balances(symbol, quote_free, base_free, market_price, timestamp);
             return Ok(true);
         }
 
-        let side = if value_delta > 0.0 {
-            Side::Buy
-        } else {
-            Side::Sell
-        };
-        let desired_qty = (value_delta.abs() / market_price).max(0.0);
+        // 4. Размещаем маркет-ордер для ребалансировки
+        let side = if value_delta > 0.0 { Side::Buy } else { Side::Sell };
+        let desired_qty = value_delta.abs() / market_price;
         let step_size = self.config.exchange.step_size.max(f64::EPSILON);
         let rounded_qty = (desired_qty / step_size).floor() * step_size;
+
         if rounded_qty < step_size {
             return Ok(false);
         }
@@ -1383,12 +1490,9 @@ impl BinanceTrader {
         info!(
             symbol = symbol,
             side = ?side,
-            base_asset = base_asset,
             quantity = %qty_str,
-            reference_price = %fmt_price(market_price),
-            quote_free = %fmt_usd(quote_free),
-            base_free = %fmt_price(base_free),
-            "Rebalancing balances toward 50/50 split"
+            market_price = %fmt_price(market_price),
+            "Rebalance: placing market order"
         );
 
         let params = OrderPlaceParams::builder(
@@ -1408,10 +1512,10 @@ impl BinanceTrader {
             .unwrap()
             .order_place(params)
             .await
-            .map_err(|e| anyhow::anyhow!("Market rebalance failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Rebalance market order failed: {}", e))?;
         let data = response
             .data()
-            .map_err(|e| anyhow::anyhow!("Market rebalance response error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Rebalance response error: {}", e))?;
 
         let executed_qty: f64 = data
             .executed_qty
@@ -1424,125 +1528,33 @@ impl BinanceTrader {
             side = ?side,
             executed_qty = %fmt_price(executed_qty),
             status = status,
-            "Rebalance order complete"
+            "Rebalance: market order complete"
         );
 
-        Ok(executed_qty > 0.0)
-    }
-
-    /// Smart rebalance: pause quoting, cancel open orders, rebalance spot balances
-    /// toward 50/50 between quote and base, then sync the virtual account.
-    async fn smart_rebalance(&mut self, symbol: &str) -> bool {
-        let quote_asset = &self.config.exchange.quote_asset;
-        let base_asset = symbol.strip_suffix(quote_asset.as_str()).unwrap_or(symbol);
-
-        // Step 1: Cancel all open orders for this symbol
-        if let Some(ref connection) = self.connection {
-            let cancel_params = match OpenOrdersCancelAllParams::builder(symbol.to_string()).build()
-            {
-                Ok(p) => p,
-                Err(_) => return false,
-            };
-            match connection.open_orders_cancel_all(cancel_params).await {
-                Ok(response) => {
-                    let cancelled_count = response
-                        .raw
-                        .as_array()
-                        .map(|arr| arr.len())
-                        .unwrap_or(0);
-                    if cancelled_count > 0 {
-                        info!(
-                            symbol = symbol,
-                            cancelled_count = cancelled_count,
-                            "Smart rebalance: cancelled open orders"
-                        );
-                    }
-                }
-                Err(e) => {
-                    let err_str = format!("{:?}", e);
-                    if !err_str.contains("-2011") {
-                        // -2011 = no open orders, not an error
-                        error!(
-                            symbol = symbol,
-                            error = %e,
-                            "Smart rebalance: failed to cancel orders"
-                        );
-                    }
-                }
-            }
-        }
-        self.active_limit_order = None;
-        self.active_bid_order = None;
-        self.active_ask_order = None;
-
-        // Step 2: market rebalance balances toward a 50/50 quote/base split.
-        match self.rebalance_half_and_half(symbol, base_asset).await {
-            Ok(rebalanced) => {
-                info!(
-                    symbol = symbol,
-                    rebalanced = rebalanced,
-                    "Smart rebalance step complete"
-                );
-            }
-            Err(e) => {
-                debug!(
-                    symbol = symbol,
-                    error = %e,
-                    "Smart rebalance: rebalance order skipped"
-                );
-            }
-        }
-
-        // Small delay to let Binance process cancels and rebalance trades.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        // Step 3: query live balances and sync virtual state to reality.
-        let (quote_free, base_free) = match self.account_balances(base_asset).await {
-            Ok((quote, base)) => (quote, base),
-            Err(e) => {
-                error!(
-                    symbol = symbol,
-                    error = %e,
-                    "Smart rebalance: failed to query balance"
-                );
-                return false;
-            }
-        };
-
-        let reference_price = if let Some(order) = self.active_bid_order.as_ref() {
-            order.price
-        } else if let Some(order) = self.active_ask_order.as_ref() {
-            order.price
-        } else if let Some(order) = self.active_limit_order.as_ref() {
-            order.price
-        } else if let Some(position) = self.trade_manager.get_position(symbol) {
-            position.entry_price
+        // 5. Пауза + синхронизация балансов
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let (quote_after, base_after) = self.account_balances(&base_asset).await?;
+        let sync_price = if market_price > f64::EPSILON {
+            market_price
         } else {
-            0.0
-        };
-        let sync_price = if reference_price > f64::EPSILON {
-            reference_price
-        } else {
-            quote_free / base_free.max(f64::EPSILON)
+            quote_after / base_after.max(f64::EPSILON)
         };
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64();
-
         self.trade_manager
-            .sync_live_balances(symbol, quote_free, base_free, sync_price, timestamp);
+            .sync_live_balances(symbol, quote_after, base_after, sync_price, timestamp);
 
         info!(
             symbol = symbol,
-            quote_free = %fmt_usd(quote_free),
-            base_free = %fmt_price(base_free),
-            reference_price = %fmt_price(sync_price),
-            "Smart rebalance: balances synced with exchange"
+            quote = %fmt_usd(quote_after),
+            base = %fmt_price(base_after),
+            "Rebalance: balances synced"
         );
 
-        let base_notional = base_free * sync_price.max(0.0);
-        quote_free >= self.config.exchange.min_notional && base_notional >= self.config.exchange.min_notional
+        let base_notional = base_after * sync_price;
+        Ok(quote_after >= min_notional && base_notional >= min_notional)
     }
 }
 
@@ -1592,6 +1604,11 @@ impl Trader for BinanceTrader {
                 reason: Some("connection_missing"),
                 expected_edge_bps: 0.0,
             };
+        }
+
+        // Запоминаем последнюю рыночную цену для rebalance
+        if reference_price > f64::EPSILON {
+            self.last_reference_price = reference_price;
         }
 
         match intent {
@@ -1682,9 +1699,9 @@ impl Trader for BinanceTrader {
                 };
 
                 if matches!(order_type, OrderType::Maker) {
-                    // === REJECTION COOLDOWN + SMART REBALANCE ===
+                    // === REJECTION COOLDOWN + REBALANCE ===
                     // After an exchange rejection (e.g. insufficient balance):
-                    // 1. First rejection: trigger smart_rebalance (cancel orders, rebalance 50/50, sync balances)
+                    // 1. First rejection: trigger rebalance (cancel orders, 50/50 split, sync balances)
                     // 2. If rebalance recovers enough balance: reset and retry immediately
                     // 3. If not: enter 30s cooldown to avoid spamming Binance
                     if self.consecutive_rejections > 0 {
@@ -1693,18 +1710,18 @@ impl Trader for BinanceTrader {
                             .unwrap_or_default()
                             .as_millis() as u64;
 
-                        // On first rejection, attempt smart rebalance before entering cooldown
+                        // On first rejection, attempt rebalance before entering cooldown
                         if self.consecutive_rejections == 1 {
                             info!(
                                 symbol = %symbol,
-                                "Insufficient balance — triggering smart rebalance"
+                                "Insufficient balance — triggering rebalance"
                             );
-                            let recovered = self.smart_rebalance(symbol).await;
+                            let recovered = self.rebalance(symbol).await.unwrap_or(false);
                             if recovered {
                                 info!(
                                     symbol = %symbol,
                                     available_cash = format!("{:.4}", self.trade_manager.available_cash()),
-                                    "Smart rebalance succeeded — resuming trading"
+                                    "Rebalance succeeded — resuming trading"
                                 );
                                 self.consecutive_rejections = 0;
                                 // Fall through to place order normally
@@ -1712,14 +1729,13 @@ impl Trader for BinanceTrader {
                                 info!(
                                     symbol = %symbol,
                                     available_cash = format!("{:.4}", self.trade_manager.available_cash()),
-                                    "Smart rebalance: insufficient funds — entering 30s cooldown"
+                                    "Rebalance: insufficient funds — entering 30s cooldown"
                                 );
-                                // Update rejection timestamp to start cooldown from now
                                 self.last_rejection_millis = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap_or_default()
                                     .as_millis() as u64;
-                                self.consecutive_rejections = 2; // skip rebalance on subsequent ticks
+                                self.consecutive_rejections = 2;
                                 return ExecutionReport {
                                     status: ExecutionStatus::Ignored,
                                     symbol: Some(symbol.to_string()),
@@ -2530,9 +2546,25 @@ impl Trader for BinanceTrader {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs_f64();
+                let now_millis = (event_time_secs * 1000.0) as u64;
+                let instant_fill_cooldown_ms = self.config.order_execution.min_order_rest_millis;
 
-                // Place or replace bid side
+                // When BOTH sides are empty (no resting orders), we MUST re-enter
+                // the market immediately — bypass instant-fill cooldown.
+                // Otherwise the bot goes dark after both sides fill.
+                let both_sides_empty = self.active_bid_order.is_none()
+                    && self.active_ask_order.is_none();
+
+                // Place or replace bid side (with instant-fill cooldown)
+                let bid_in_cooldown = !both_sides_empty
+                    && self.last_bid_instant_fill_millis > 0
+                    && now_millis.saturating_sub(self.last_bid_instant_fill_millis)
+                        < instant_fill_cooldown_ms;
                 let existing_bid = self.active_bid_order.take();
+                if bid_in_cooldown && existing_bid.is_none() {
+                    // Skip bid placement — still in cooldown after instant fill
+                    self.active_bid_order = None;
+                } else {
                 let bid_result = self
                     .place_or_replace_side(
                         symbol,
@@ -2591,14 +2623,28 @@ impl Trader for BinanceTrader {
                             Some(&report),
                         );
                         self.active_bid_order = None;
+                        self.last_bid_instant_fill_millis = now_millis;
                     }
                     PlaceResult::Failed => {
                         self.active_bid_order = None;
                     }
                 }
+                } // end bid cooldown else
 
-                // Place or replace ask side
+                // Place or replace ask side (with instant-fill cooldown)
+                // Re-check both_sides_empty after bid placement (bid may have
+                // been placed successfully, making it no longer empty)
+                let both_sides_empty_for_ask = self.active_bid_order.is_none()
+                    && self.active_ask_order.is_none();
+                let ask_in_cooldown = !both_sides_empty_for_ask
+                    && self.last_ask_instant_fill_millis > 0
+                    && now_millis.saturating_sub(self.last_ask_instant_fill_millis)
+                        < instant_fill_cooldown_ms;
                 let existing_ask = self.active_ask_order.take();
+                if ask_in_cooldown && existing_ask.is_none() {
+                    // Skip ask placement — still in cooldown after instant fill
+                    self.active_ask_order = None;
+                } else {
                 let ask_result = self
                     .place_or_replace_side(
                         symbol,
@@ -2658,9 +2704,114 @@ impl Trader for BinanceTrader {
                             Some(fee),
                         );
                         self.active_ask_order = None;
+                        self.last_ask_instant_fill_millis = now_millis;
                     }
                     PlaceResult::Failed => {
                         self.active_ask_order = None;
+                    }
+                }
+                } // end ask cooldown else
+
+                // === TWO-SIDED STATE LOG (change-detection for both branches) ===
+                let bid_active = self.active_bid_order.is_some();
+                let ask_active = self.active_ask_order.is_some();
+                if !bid_active || !ask_active {
+                    let new_state = (bid_active, ask_active, 0.0, 0.0, 0.0, 0.0);
+                    if new_state != self.last_two_sided_state {
+                        self.last_two_sided_state = new_state;
+                        warn!(
+                            symbol = %trading_symbol,
+                            bid_active = bid_active,
+                            ask_active = ask_active,
+                            buy_qty_requested = %fmt_price(buy_quantity),
+                            sell_qty_requested = %fmt_price(sell_quantity),
+                            "Two-sided: NOT both sides active after placement"
+                        );
+                    }
+                } else {
+                    let bp = self.active_bid_order.as_ref().unwrap().price;
+                    let bq = self.active_bid_order.as_ref().unwrap().quantity;
+                    let ap = self.active_ask_order.as_ref().unwrap().price;
+                    let aq = self.active_ask_order.as_ref().unwrap().quantity;
+                    let new_state = (true, true, bp, bq, ap, aq);
+                    if new_state != self.last_two_sided_state {
+                        self.last_two_sided_state = new_state;
+                        info!(
+                            symbol = %trading_symbol,
+                            bid_price = %fmt_price(bp),
+                            bid_qty = %fmt_price(bq),
+                            ask_price = %fmt_price(ap),
+                            ask_qty = %fmt_price(aq),
+                            "Two-sided: both sides active"
+                        );
+                    }
+                }
+
+                // === TWO-SIDED REBALANCE ===
+                // Track ticks where the strategy returned qty=0 for BOTH sides
+                // (completely unable to quote). After threshold, auto-rebalance.
+                // Note: one-sided quoting (e.g. trend filter blocking buys) is
+                // intentional and should NOT trigger rebalance.
+                let buy_zero = buy_quantity < f64::EPSILON;
+                let sell_zero = sell_quantity < f64::EPSILON;
+                if buy_zero && sell_zero {
+                    self.consecutive_zero_qty_ticks += 1;
+                } else {
+                    self.consecutive_zero_qty_ticks = 0;
+                }
+
+                // Trigger rebalance if:
+                // (a) either side FAILED placement (order rejected / insufficient balance)
+                //     AND at least 3 consecutive failures (avoids rebalance on transient cancel-replace errors)
+                //     AND at least 30s since last rebalance
+                // (b) strategy returned qty=0 for one side for 10+ consecutive ticks
+                //     (inventory exhausted, A-S scaling drove qty to zero)
+                const ZERO_QTY_REBALANCE_THRESHOLD: u32 = 100;
+                const MIN_REBALANCE_INTERVAL_MS: u64 = 30_000; // 30 seconds
+                const FAILURE_REBALANCE_THRESHOLD: u32 = 3;
+                let bid_failed = self.active_bid_order.is_none() && buy_quantity > f64::EPSILON;
+                let ask_failed = self.active_ask_order.is_none() && sell_quantity > f64::EPSILON;
+                let zero_qty_trigger = self.consecutive_zero_qty_ticks >= ZERO_QTY_REBALANCE_THRESHOLD;
+
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let since_last_rebalance = now_ms.saturating_sub(self.last_rebalance_millis);
+                let rebalance_cooldown_ok = self.last_rebalance_millis == 0 || since_last_rebalance >= MIN_REBALANCE_INTERVAL_MS;
+
+                let failure_trigger = (bid_failed || ask_failed) && self.consecutive_two_sided_failures >= FAILURE_REBALANCE_THRESHOLD && rebalance_cooldown_ok;
+                let should_rebalance = failure_trigger || (zero_qty_trigger && rebalance_cooldown_ok);
+
+                if should_rebalance {
+                    info!(
+                        symbol = %trading_symbol,
+                        bid_failed = bid_failed,
+                        ask_failed = ask_failed,
+                        consecutive_failures = self.consecutive_two_sided_failures,
+                        zero_qty_ticks = self.consecutive_zero_qty_ticks,
+                        since_last_rebalance_ms = since_last_rebalance,
+                        "Two-sided: triggering rebalance (placement failure or inventory exhausted)"
+                    );
+                    let recovered = self.rebalance(symbol).await.unwrap_or(false);
+                    self.last_rebalance_millis = now_ms;
+                    if recovered {
+                        info!(
+                            symbol = %trading_symbol,
+                            available_cash = format!("{:.4}", self.trade_manager.available_cash()),
+                            "Two-sided: rebalance succeeded — resuming trading"
+                        );
+                        self.consecutive_two_sided_failures = 0;
+                        self.last_two_sided_failure_millis = 0;
+                        self.consecutive_zero_qty_ticks = 0;
+                    } else {
+                        info!(
+                            symbol = %trading_symbol,
+                            available_cash = format!("{:.4}", self.trade_manager.available_cash()),
+                            "Two-sided: rebalance insufficient — entering cooldown"
+                        );
+                        self.consecutive_two_sided_failures = 0; // reset so we accumulate fresh
+                        self.consecutive_zero_qty_ticks = 0;
                     }
                 }
 
@@ -2810,16 +2961,17 @@ impl Trader for BinanceTrader {
         // ── Live startup: sync real balances into virtual state ──
         if trading_mode == TradeMode::Real {
             let quote_asset = self.config.exchange.quote_asset.clone();
-            let step_size = self.config.exchange.step_size.max(f64::EPSILON);
             let base_asset = trading_symbol.strip_suffix(quote_asset.as_str()).unwrap_or(trading_symbol);
 
             match self.account_balances(base_asset).await {
                 Ok((quote_free_before, base_free_before)) => {
-                    let startup_reference_price = if base_free_before >= step_size {
-                        quote_free_before / base_free_before.max(f64::EPSILON)
-                    } else {
-                        0.0
-                    };
+                    // Do NOT compute startup reference price from balance ratio
+                    // (quote_free / base_free) — this gives a meaningless number
+                    // (e.g. 66 FDUSD / 79 DOGE = 0.835 when real price ≈ 0.092).
+                    // Use 0.0 so sync_live_balances records balances without creating
+                    // a phantom position at a bogus entry price.
+                    // last_reference_price will be set correctly on first bookTicker.
+                    let startup_reference_price = 0.0;
                     let event_time_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
@@ -2880,6 +3032,26 @@ impl Trader for BinanceTrader {
                 continue;
             };
             let decision_reference_price = market_price.decision_reference_price();
+
+            // On first valid market price, fix up any startup position
+            // that was synced with entry_price=0 (because we didn't have
+            // a market price yet during sync_live_balances).
+            if decision_reference_price > f64::EPSILON {
+                if let Some(pos) = self.trade_manager.get_position(trading_symbol) {
+                    if pos.entry_price <= f64::EPSILON {
+                        info!(
+                            symbol = trading_symbol,
+                            new_entry_price = %fmt_price(decision_reference_price),
+                            quantity = %fmt_price(pos.quantity),
+                            "Startup position: fixing entry_price from first bookTicker"
+                        );
+                        self.trade_manager.fix_entry_price(
+                            trading_symbol,
+                            decision_reference_price,
+                        );
+                    }
+                }
+            }
 
             if let Some(last_trade) = market_state.last_trade() {
                 last_trade_price = Some(last_trade.price);
@@ -2992,6 +3164,8 @@ impl Trader for BinanceTrader {
                     max_position_notional: self.config.position_sizing.max_position_notional,
                     initial_capital: self.trade_manager.initial_capital(),
                     tick_size: self.config.exchange.tick_size,
+                    step_size: Some(self.config.exchange.step_size),
+                    min_notional: Some(self.config.exchange.min_notional),
                 },
             );
 

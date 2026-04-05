@@ -11,7 +11,7 @@ trading_symbol = "DOGEFDUSD"
 min_trade_notional = 5.0
 max_trade_notional = 12.0
 cash_reserve_ratio = 0.10
-max_position_notional = 15.0
+max_position_notional = 3.0
 
 [exchange]
 taker_fee = 0.001
@@ -48,8 +48,8 @@ maintenance_margin = 0.05
 order_timeout = 5.0
 max_retries = 3
 retry_delay = 0.1
-min_order_rest_millis = 3_000
-max_order_rest_millis = 1_800_000
+min_order_rest_millis = 1000
+max_order_rest_millis = 30_000
 
 [market_data]
 min_trade_size = 1.0
@@ -71,7 +71,7 @@ calculate_calmar_ratio = false
 calculate_profit_factor = false
 
 [backtest_settings]
-initial_capital = 62.0
+initial_capital = 112.0
 commission_model = "binance"
 slippage_model = "realistic"
 fill_model = "immediate"

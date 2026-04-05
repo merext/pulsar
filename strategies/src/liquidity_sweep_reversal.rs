@@ -1,13 +1,16 @@
 use crate::cost_gate::{
-    clears_taker_cost_gate, expected_edge_after_cost_bps, DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS,
-    DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+    DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS, DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+    clears_taker_cost_gate, expected_edge_after_cost_bps,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
 use trade::market::{MarketEvent, MarketState};
-use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics, StrategyLogger};
+use trade::strategy::{
+    NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics,
+    StrategyLogger,
+};
 use trade::trader::OrderType;
 
 #[derive(Default)]
@@ -100,7 +103,9 @@ pub struct LiquiditySweepReversalStrategy {
 }
 
 impl LiquiditySweepReversalStrategy {
-    fn load_config<P: AsRef<Path>>(config_path: P) -> Result<LiquiditySweepReversalConfig, Box<dyn std::error::Error>> {
+    fn load_config<P: AsRef<Path>>(
+        config_path: P,
+    ) -> Result<LiquiditySweepReversalConfig, Box<dyn std::error::Error>> {
         let path = config_path.as_ref();
         if path == Path::new("/dev/null") || !path.exists() {
             return Ok(LiquiditySweepReversalConfig::default());
@@ -261,7 +266,11 @@ impl LiquiditySweepReversalStrategy {
         true
     }
 
-    fn should_exit_long(&mut self, market_state: &MarketState, context: &StrategyContext) -> Option<&'static str> {
+    fn should_exit_long(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> Option<&'static str> {
         if context.current_position.quantity <= 0.0 {
             return None;
         }
@@ -288,7 +297,8 @@ impl LiquiditySweepReversalStrategy {
 
         let now = market_state.last_event_time_millis()?;
         if context.current_position.entry_time > 0.0 {
-            let held_millis = now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
+            let held_millis =
+                now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
             if held_millis >= self.config.hold_time_millis {
                 self.diagnostics.exits_max_hold += 1;
                 return Some("max_hold_time");
@@ -335,31 +345,97 @@ impl Strategy for LiquiditySweepReversalStrategy {
 
     fn diagnostics(&self) -> StrategyDiagnostics {
         let mut counters = BTreeMap::new();
-        counters.insert("sweep.total_decisions".to_string(), self.diagnostics.total_decisions);
-        counters.insert("sweep.blocked_min_trades".to_string(), self.diagnostics.blocked_min_trades);
-        counters.insert("sweep.blocked_spread".to_string(), self.diagnostics.blocked_spread);
-        counters.insert("sweep.blocked_sweep_drop".to_string(), self.diagnostics.blocked_sweep_drop);
-        counters.insert("sweep.blocked_reclaim_band".to_string(), self.diagnostics.blocked_reclaim_band);
-        counters.insert("sweep.blocked_flow".to_string(), self.diagnostics.blocked_flow);
-        counters.insert("sweep.blocked_recent_flow".to_string(), self.diagnostics.blocked_recent_flow);
-        counters.insert("sweep.blocked_vwap_stretch".to_string(), self.diagnostics.blocked_vwap_stretch);
-        counters.insert("sweep.blocked_order_book".to_string(), self.diagnostics.blocked_order_book);
-        counters.insert("sweep.blocked_large_trade_ratio".to_string(), self.diagnostics.blocked_large_trade_ratio);
-        counters.insert("sweep.blocked_cost_gate".to_string(), self.diagnostics.blocked_cost_gate);
+        counters.insert(
+            "sweep.total_decisions".to_string(),
+            self.diagnostics.total_decisions,
+        );
+        counters.insert(
+            "sweep.blocked_min_trades".to_string(),
+            self.diagnostics.blocked_min_trades,
+        );
+        counters.insert(
+            "sweep.blocked_spread".to_string(),
+            self.diagnostics.blocked_spread,
+        );
+        counters.insert(
+            "sweep.blocked_sweep_drop".to_string(),
+            self.diagnostics.blocked_sweep_drop,
+        );
+        counters.insert(
+            "sweep.blocked_reclaim_band".to_string(),
+            self.diagnostics.blocked_reclaim_band,
+        );
+        counters.insert(
+            "sweep.blocked_flow".to_string(),
+            self.diagnostics.blocked_flow,
+        );
+        counters.insert(
+            "sweep.blocked_recent_flow".to_string(),
+            self.diagnostics.blocked_recent_flow,
+        );
+        counters.insert(
+            "sweep.blocked_vwap_stretch".to_string(),
+            self.diagnostics.blocked_vwap_stretch,
+        );
+        counters.insert(
+            "sweep.blocked_order_book".to_string(),
+            self.diagnostics.blocked_order_book,
+        );
+        counters.insert(
+            "sweep.blocked_large_trade_ratio".to_string(),
+            self.diagnostics.blocked_large_trade_ratio,
+        );
+        counters.insert(
+            "sweep.blocked_cost_gate".to_string(),
+            self.diagnostics.blocked_cost_gate,
+        );
         counters.insert("sweep.entries".to_string(), self.diagnostics.entries);
-        counters.insert("sweep.exits_stop_loss".to_string(), self.diagnostics.exits_stop_loss);
-        counters.insert("sweep.exits_take_profit".to_string(), self.diagnostics.exits_take_profit);
-        counters.insert("sweep.exits_reversal_failed".to_string(), self.diagnostics.exits_reversal_failed);
-        counters.insert("sweep.exits_max_hold".to_string(), self.diagnostics.exits_max_hold);
+        counters.insert(
+            "sweep.exits_stop_loss".to_string(),
+            self.diagnostics.exits_stop_loss,
+        );
+        counters.insert(
+            "sweep.exits_take_profit".to_string(),
+            self.diagnostics.exits_take_profit,
+        );
+        counters.insert(
+            "sweep.exits_reversal_failed".to_string(),
+            self.diagnostics.exits_reversal_failed,
+        );
+        counters.insert(
+            "sweep.exits_max_hold".to_string(),
+            self.diagnostics.exits_max_hold,
+        );
 
         let mut gauges = BTreeMap::new();
-        gauges.insert("sweep.last_sweep_drop_bps".to_string(), self.diagnostics.last_sweep_drop_bps);
-        gauges.insert("sweep.last_reclaim_bps".to_string(), self.diagnostics.last_reclaim_bps);
-        gauges.insert("sweep.last_recent_buyer_imbalance".to_string(), self.diagnostics.last_recent_buyer_imbalance);
-        gauges.insert("sweep.last_large_trade_ratio".to_string(), self.diagnostics.last_large_trade_ratio);
-        gauges.insert("sweep.last_reclaim_above_vwap_bps".to_string(), self.diagnostics.last_reclaim_above_vwap_bps);
-        gauges.insert("sweep.last_expected_edge_bps".to_string(), self.diagnostics.last_expected_edge_bps);
-        gauges.insert("sweep.last_edge_after_cost_bps".to_string(), self.diagnostics.last_edge_after_cost_bps);
+        gauges.insert(
+            "sweep.last_sweep_drop_bps".to_string(),
+            self.diagnostics.last_sweep_drop_bps,
+        );
+        gauges.insert(
+            "sweep.last_reclaim_bps".to_string(),
+            self.diagnostics.last_reclaim_bps,
+        );
+        gauges.insert(
+            "sweep.last_recent_buyer_imbalance".to_string(),
+            self.diagnostics.last_recent_buyer_imbalance,
+        );
+        gauges.insert(
+            "sweep.last_large_trade_ratio".to_string(),
+            self.diagnostics.last_large_trade_ratio,
+        );
+        gauges.insert(
+            "sweep.last_reclaim_above_vwap_bps".to_string(),
+            self.diagnostics.last_reclaim_above_vwap_bps,
+        );
+        gauges.insert(
+            "sweep.last_expected_edge_bps".to_string(),
+            self.diagnostics.last_expected_edge_bps,
+        );
+        gauges.insert(
+            "sweep.last_edge_after_cost_bps".to_string(),
+            self.diagnostics.last_edge_after_cost_bps,
+        );
 
         StrategyDiagnostics { counters, gauges }
     }
@@ -372,7 +448,11 @@ impl Strategy for LiquiditySweepReversalStrategy {
         if let MarketEvent::Trade(_) = event {}
     }
 
-    fn decide(&mut self, market_state: &MarketState, context: &StrategyContext) -> StrategyDecision {
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> StrategyDecision {
         if let Some(rationale) = self.should_exit_long(market_state, context) {
             return StrategyDecision {
                 confidence: 1.0,
@@ -385,7 +465,10 @@ impl Strategy for LiquiditySweepReversalStrategy {
                     rationale,
                     expected_edge_bps: 0.0,
                 },
-                metrics: vec![DecisionMetric { name: "position_quantity", value: context.current_position.quantity }],
+                metrics: vec![DecisionMetric {
+                    name: "position_quantity",
+                    value: context.current_position.quantity,
+                }],
             };
         }
 
@@ -425,11 +508,26 @@ impl Strategy for LiquiditySweepReversalStrategy {
                 expected_edge_bps,
             },
             metrics: vec![
-                DecisionMetric { name: "sweep_drop_bps", value: self.high_to_low_drop_bps(market_state) },
-                DecisionMetric { name: "reclaim_bps", value: expected_edge_bps },
-                DecisionMetric { name: "recent_buyer_imbalance", value: self.recent_buyer_imbalance(market_state) },
-                DecisionMetric { name: "large_trade_ratio", value: self.large_trade_ratio(market_state) },
-                DecisionMetric { name: "reclaim_above_vwap_bps", value: self.reclaim_above_vwap_bps(market_state) },
+                DecisionMetric {
+                    name: "sweep_drop_bps",
+                    value: self.high_to_low_drop_bps(market_state),
+                },
+                DecisionMetric {
+                    name: "reclaim_bps",
+                    value: expected_edge_bps,
+                },
+                DecisionMetric {
+                    name: "recent_buyer_imbalance",
+                    value: self.recent_buyer_imbalance(market_state),
+                },
+                DecisionMetric {
+                    name: "large_trade_ratio",
+                    value: self.large_trade_ratio(market_state),
+                },
+                DecisionMetric {
+                    name: "reclaim_above_vwap_bps",
+                    value: self.reclaim_above_vwap_bps(market_state),
+                },
                 DecisionMetric {
                     name: "edge_after_cost_bps",
                     value: expected_edge_after_cost_bps(

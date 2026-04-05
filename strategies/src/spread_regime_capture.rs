@@ -240,11 +240,7 @@ impl SpreadRegimeCaptureStrategy {
             (w_ema / total) * ema_mid + (w_vwap / total) * vwap
         };
 
-        if fv > f64::EPSILON {
-            Some(fv)
-        } else {
-            None
-        }
+        if fv > f64::EPSILON { Some(fv) } else { None }
     }
 
     /// Compute dislocation of last trade vs fair value, in bps.
@@ -271,8 +267,7 @@ impl SpreadRegimeCaptureStrategy {
     /// Dislocation adds to this when price reverts toward fair value.
     fn expected_edge_bps(&self, dislocation_bps: f64, market_state: &MarketState) -> f64 {
         let spread_capture = market_state.micro().ema_spread_bps;
-        dislocation_bps.abs() * self.config.mean_reversion_factor
-            + spread_capture
+        dislocation_bps.abs() * self.config.mean_reversion_factor + spread_capture
             - self.config.half_round_trip_cost_bps * 2.0 // both legs are maker
     }
 
@@ -488,35 +483,98 @@ impl Strategy for SpreadRegimeCaptureStrategy {
 
     fn diagnostics(&self) -> StrategyDiagnostics {
         let mut counters = BTreeMap::new();
-        counters.insert("src.total_decisions".into(), self.diagnostics.total_decisions);
-        counters.insert("src.blocked_no_quote".into(), self.diagnostics.blocked_no_quote);
-        counters.insert("src.blocked_no_vwap".into(), self.diagnostics.blocked_no_vwap);
-        counters.insert("src.blocked_min_trades".into(), self.diagnostics.blocked_min_trades);
+        counters.insert(
+            "src.total_decisions".into(),
+            self.diagnostics.total_decisions,
+        );
+        counters.insert(
+            "src.blocked_no_quote".into(),
+            self.diagnostics.blocked_no_quote,
+        );
+        counters.insert(
+            "src.blocked_no_vwap".into(),
+            self.diagnostics.blocked_no_vwap,
+        );
+        counters.insert(
+            "src.blocked_min_trades".into(),
+            self.diagnostics.blocked_min_trades,
+        );
         counters.insert("src.blocked_spread".into(), self.diagnostics.blocked_spread);
-        counters.insert("src.blocked_vol_low".into(), self.diagnostics.blocked_vol_low);
-        counters.insert("src.blocked_vol_high".into(), self.diagnostics.blocked_vol_high);
-        counters.insert("src.blocked_dislocation".into(), self.diagnostics.blocked_dislocation);
+        counters.insert(
+            "src.blocked_vol_low".into(),
+            self.diagnostics.blocked_vol_low,
+        );
+        counters.insert(
+            "src.blocked_vol_high".into(),
+            self.diagnostics.blocked_vol_high,
+        );
+        counters.insert(
+            "src.blocked_dislocation".into(),
+            self.diagnostics.blocked_dislocation,
+        );
         counters.insert("src.blocked_edge".into(), self.diagnostics.blocked_edge);
-        counters.insert("src.blocked_adverse_depth".into(), self.diagnostics.blocked_adverse_depth);
-        counters.insert("src.blocked_cooldown".into(), self.diagnostics.blocked_cooldown);
-        counters.insert("src.blocked_flow_imbalance".into(), self.diagnostics.blocked_flow_imbalance);
+        counters.insert(
+            "src.blocked_adverse_depth".into(),
+            self.diagnostics.blocked_adverse_depth,
+        );
+        counters.insert(
+            "src.blocked_cooldown".into(),
+            self.diagnostics.blocked_cooldown,
+        );
+        counters.insert(
+            "src.blocked_flow_imbalance".into(),
+            self.diagnostics.blocked_flow_imbalance,
+        );
         counters.insert("src.entries_long".into(), self.diagnostics.entries_long);
-        counters.insert("src.exits_stop_loss".into(), self.diagnostics.exits_stop_loss);
-        counters.insert("src.exits_take_profit".into(), self.diagnostics.exits_take_profit);
+        counters.insert(
+            "src.exits_stop_loss".into(),
+            self.diagnostics.exits_stop_loss,
+        );
+        counters.insert(
+            "src.exits_take_profit".into(),
+            self.diagnostics.exits_take_profit,
+        );
         counters.insert("src.exits_max_hold".into(), self.diagnostics.exits_max_hold);
-        counters.insert("src.exits_panic_vol".into(), self.diagnostics.exits_panic_vol);
-        counters.insert("src.exits_dislocation_reversal".into(), self.diagnostics.exits_dislocation_reversal);
+        counters.insert(
+            "src.exits_panic_vol".into(),
+            self.diagnostics.exits_panic_vol,
+        );
+        counters.insert(
+            "src.exits_dislocation_reversal".into(),
+            self.diagnostics.exits_dislocation_reversal,
+        );
         counters.insert("src.exits_maker".into(), self.diagnostics.exits_maker);
         counters.insert("src.exits_taker".into(), self.diagnostics.exits_taker);
 
         let mut gauges = BTreeMap::new();
-        gauges.insert("src.last_fair_value".into(), self.diagnostics.last_fair_value);
-        gauges.insert("src.last_dislocation_bps".into(), self.diagnostics.last_dislocation_bps);
-        gauges.insert("src.last_entry_threshold_bps".into(), self.diagnostics.last_entry_threshold_bps);
-        gauges.insert("src.last_expected_edge_bps".into(), self.diagnostics.last_expected_edge_bps);
-        gauges.insert("src.last_realized_vol_bps".into(), self.diagnostics.last_realized_vol_bps);
-        gauges.insert("src.last_ema_spread_bps".into(), self.diagnostics.last_ema_spread_bps);
-        gauges.insert("src.last_depth_imbalance".into(), self.diagnostics.last_depth_imbalance);
+        gauges.insert(
+            "src.last_fair_value".into(),
+            self.diagnostics.last_fair_value,
+        );
+        gauges.insert(
+            "src.last_dislocation_bps".into(),
+            self.diagnostics.last_dislocation_bps,
+        );
+        gauges.insert(
+            "src.last_entry_threshold_bps".into(),
+            self.diagnostics.last_entry_threshold_bps,
+        );
+        gauges.insert(
+            "src.last_expected_edge_bps".into(),
+            self.diagnostics.last_expected_edge_bps,
+        );
+        gauges.insert(
+            "src.last_realized_vol_bps".into(),
+            self.diagnostics.last_realized_vol_bps,
+        );
+        gauges.insert(
+            "src.last_ema_spread_bps".into(),
+            self.diagnostics.last_ema_spread_bps,
+        );
+        gauges.insert(
+            "src.last_depth_imbalance".into(),
+            self.diagnostics.last_depth_imbalance,
+        );
 
         StrategyDiagnostics { counters, gauges }
     }

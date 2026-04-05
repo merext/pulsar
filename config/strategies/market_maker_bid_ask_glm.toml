@@ -1,0 +1,57 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMakerBidAskGlmStrategy — Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+# Tuned for DOGEFDUSD (narrow ~1 bps spread, ZERO maker fee on Binance)
+
+# --- Spread & pricing ---
+base_half_spread_bps = 0.6        # Base half-spread in bps (buy at mid - hs, sell at mid + hs)
+min_half_spread_bps = 0.3         # Minimum half-spread clamp
+max_half_spread_bps = 10.0        # Maximum half-spread clamp
+volatility_reference_bps = 50.0   # Reference vol for spread scaling
+volatility_multiplier_min = 0.5   # Min vol multiplier
+volatility_multiplier_max = 4.0   # Max vol multiplier
+min_edge_bps = 0.3                # Minimum full quoted spread to emit a quote
+
+# --- Inventory management ---
+max_inventory_fraction = 1.0      # Max inventory = 100% of initial_capital. Rebalance targets
+                                  # 50/50 split, so normal inventory_ratio ≈ 0.5. This gives
+                                  # the A-S model full range to work with.
+inventory_skew_factor = 200.0     # Avellaneda-Stoikov gamma (risk aversion). Higher = more
+                                  # aggressive inventory mean-reversion via reservation price shift.
+                                  # At gamma=200 with vol=50bps: full inventory shifts reservation
+                                  # ~4 bps — meaningful for DOGE/FDUSD with ~1 bps spread.
+                                  # At balanced inventory (q=0), shift = 0 (symmetric quotes).
+
+# --- Sizing ---
+cash_fraction = 0.30              # Base cash fraction per entry
+dynamic_sizing = false            # Enable vol/spread/budget-adjusted sizing
+min_cash_fraction = 0.02          # Floor for dynamic sizing
+max_cash_fraction = 0.40          # Ceiling for dynamic sizing
+spread_ref_bps = 5.0              # Reference spread for dynamic sizing normalization
+vol_ref_bps = 50.0                # Reference vol for dynamic sizing normalization
+budget_guard_threshold = 0.5      # Reduce sizing when cash drops below this fraction of capital
+
+# --- Exit pricing ---
+min_exit_edge_bps = 0.0           # Min edge for passive sell relative to entry price (0 = disabled)
+
+# --- Emergency exits ---
+stop_loss_bps = 500.0             # Taker exit if unrealized PnL drops this many bps
+panic_vol_bps = 2000.0            # Taker exit if realized vol exceeds this
+max_hold_millis = 0               # DISABLED for MM — A-S model manages inventory via quote skewing.
+                                  # Setting to 0 prevents the death cycle: rebalance buy → max_hold dump → rebalance buy.
+                                  # Was 300000 (5 min) which caused 7 taker dumps per hour.
+max_vol_bps = 800.0               # Above this vol, no new buys (only sell to unwind)
+
+# --- Cooldown ---
+cooldown_millis = 5000            # No new buys for 5s after a taker exit
+
+# --- Adverse selection filters ---
+max_imbalance = 1.0               # Order book imbalance gate [-1,1]. 1.0 = disabled
+min_sell_flow_fraction = 0.0      # Min seller-initiated volume fraction. 0.0 = disabled
+min_trades_in_window = 0          # Min trades in window before allowing entry. 0 = disabled
+
+# --- Requoting ---
+requote_threshold_bps = 0.1       # Min price change before re-quoting (prevents API spam)
+
+# --- Market state window ---
+trade_window_millis = 30000       # Window for trade_window_stats / microstructure metrics

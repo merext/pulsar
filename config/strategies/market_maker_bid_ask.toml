@@ -1,0 +1,57 @@
+# MarketMakerBidAskStrategy — HFT configuration
+# Quotes at best bid/ask (1 tick from book) for maximum fill probability
+
+# --- Base half-spreads (bps from mid) — minimal for HFT ---
+bid_half_spread_bps = 0.1
+ask_half_spread_bps = 0.1
+
+# --- Spread bounds ---
+min_half_spread_bps = 0.05
+max_half_spread_bps = 5.0
+
+# --- Volatility adjustment ---
+vol_reference_bps = 25.0
+vol_multiplier_min = 0.5
+vol_multiplier_max = 2.0
+
+# --- Trade flow filter ---
+flow_window_millis = 5000
+flow_imbalance_threshold = 0.15
+flow_skew_factor = 0.5
+
+# --- Microprice edge ---
+microprice_edge_threshold_bps = 0.0
+use_microprice_fair = false
+
+# --- Inventory management ---
+inventory_skew_factor = 0.7
+max_inventory_fraction = 0.4
+inventory_decay_rate = 0.0
+
+# --- Sizing ---
+cash_fraction = 0.05
+min_cash_fraction = 0.01
+max_cash_fraction = 0.12
+dynamic_sizing = true
+spread_ref_bps = 80.0
+vol_ref_bps = 40.0
+budget_guard_threshold = 0.5
+
+# --- Safety exits ---
+stop_loss_bps = 400.0
+panic_vol_bps = 1500.0
+max_hold_millis = 180000
+min_exit_edge_bps = 5.0
+
+# --- Cooldown ---
+entry_cooldown_millis = 1000
+
+# --- Volatility filter ---
+max_vol_bps = 800.0
+
+# --- Requote threshold ---
+requote_threshold_bps = 0.1
+
+# --- Trade window ---
+trade_window_millis = 30000
+min_trades_in_window = 0

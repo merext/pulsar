@@ -2,7 +2,9 @@ use serde::Deserialize;
 use std::path::Path;
 use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
 use trade::market::{MarketEvent, MarketState};
-use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyLogger};
+use trade::strategy::{
+    NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyLogger,
+};
 use trade::trader::OrderType;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,7 +82,11 @@ impl MicropriceImbalanceMakerStrategy {
             .is_some_and(|edge| edge >= self.config.min_microprice_edge_bps)
     }
 
-    fn should_exit_long(&self, market_state: &MarketState, context: &StrategyContext) -> Option<&'static str> {
+    fn should_exit_long(
+        &self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> Option<&'static str> {
         if context.current_position.quantity <= 0.0 {
             return None;
         }
@@ -107,7 +113,8 @@ impl MicropriceImbalanceMakerStrategy {
 
         let now = market_state.last_event_time_millis()?;
         if context.current_position.entry_time > 0.0 {
-            let held_millis = now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
+            let held_millis =
+                now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
             if held_millis >= self.config.hold_time_millis {
                 return Some("max_hold_time");
             }
@@ -156,7 +163,11 @@ impl Strategy for MicropriceImbalanceMakerStrategy {
         }
     }
 
-    fn decide(&mut self, market_state: &MarketState, context: &StrategyContext) -> StrategyDecision {
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> StrategyDecision {
         if let Some(rationale) = self.should_exit_long(market_state, context) {
             return StrategyDecision {
                 confidence: 1.0,
@@ -169,7 +180,10 @@ impl Strategy for MicropriceImbalanceMakerStrategy {
                     rationale,
                     expected_edge_bps: 0.0,
                 },
-                metrics: vec![DecisionMetric { name: "position_quantity", value: context.current_position.quantity }],
+                metrics: vec![DecisionMetric {
+                    name: "position_quantity",
+                    value: context.current_position.quantity,
+                }],
             };
         }
 

@@ -1,13 +1,16 @@
 use crate::cost_gate::{
-    clears_taker_cost_gate, expected_edge_after_cost_bps, DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS,
-    DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+    DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS, DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+    clears_taker_cost_gate, expected_edge_after_cost_bps,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
 use trade::market::{MarketEvent, MarketState};
-use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics, StrategyLogger};
+use trade::strategy::{
+    NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics,
+    StrategyLogger,
+};
 use trade::trader::OrderType;
 
 #[derive(Default)]
@@ -101,7 +104,9 @@ pub struct TradeFlowMomentumStrategy {
 }
 
 impl TradeFlowMomentumStrategy {
-    fn load_config<P: AsRef<Path>>(config_path: P) -> Result<TradeFlowMomentumConfig, Box<dyn std::error::Error>> {
+    fn load_config<P: AsRef<Path>>(
+        config_path: P,
+    ) -> Result<TradeFlowMomentumConfig, Box<dyn std::error::Error>> {
         let path = config_path.as_ref();
         if path == Path::new("/dev/null") || !path.exists() {
             return Ok(TradeFlowMomentumConfig::default());
@@ -157,8 +162,9 @@ impl TradeFlowMomentumStrategy {
     }
 
     fn entry_confidence(&self, flow_imbalance: f64, drift_bps: f64, burst_per_second: f64) -> f64 {
-        let flow_component =
-            (flow_imbalance.abs() / self.config.min_trade_flow_imbalance.max(f64::EPSILON)).min(2.0);
+        let flow_component = (flow_imbalance.abs()
+            / self.config.min_trade_flow_imbalance.max(f64::EPSILON))
+        .min(2.0);
         let drift_component =
             (drift_bps.abs() / self.config.min_price_drift_bps.max(f64::EPSILON)).min(2.0);
         let burst_component =
@@ -168,7 +174,8 @@ impl TradeFlowMomentumStrategy {
     }
 
     fn expected_edge_bps(&self, market_state: &MarketState) -> f64 {
-        self.price_drift_bps(market_state).max(self.config.min_price_drift_bps)
+        self.price_drift_bps(market_state)
+            .max(self.config.min_price_drift_bps)
     }
 
     fn should_enter_long(&mut self, market_state: &MarketState) -> bool {
@@ -203,7 +210,9 @@ impl TradeFlowMomentumStrategy {
 
         let drift_bps = self.price_drift_bps(market_state);
         self.diagnostics.last_drift_bps = drift_bps;
-        if drift_bps < self.config.min_price_drift_bps || drift_bps > self.config.max_price_drift_bps {
+        if drift_bps < self.config.min_price_drift_bps
+            || drift_bps > self.config.max_price_drift_bps
+        {
             self.diagnostics.blocked_drift_band += 1;
             return false;
         }
@@ -249,7 +258,11 @@ impl TradeFlowMomentumStrategy {
         true
     }
 
-    fn should_exit_long(&mut self, market_state: &MarketState, context: &StrategyContext) -> Option<&'static str> {
+    fn should_exit_long(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> Option<&'static str> {
         if context.current_position.quantity <= 0.0 {
             return None;
         }
@@ -277,7 +290,8 @@ impl TradeFlowMomentumStrategy {
 
         let now = market_state.last_event_time_millis()?;
         if context.current_position.entry_time > 0.0 {
-            let held_millis = now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
+            let held_millis =
+                now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
             if held_millis >= self.config.hold_time_millis {
                 self.diagnostics.exits_max_hold += 1;
                 return Some("max_hold_time");
@@ -324,29 +338,89 @@ impl Strategy for TradeFlowMomentumStrategy {
 
     fn diagnostics(&self) -> StrategyDiagnostics {
         let mut counters = BTreeMap::new();
-        counters.insert("momentum.total_decisions".to_string(), self.diagnostics.total_decisions);
-        counters.insert("momentum.blocked_min_trades".to_string(), self.diagnostics.blocked_min_trades);
-        counters.insert("momentum.blocked_spread".to_string(), self.diagnostics.blocked_spread);
-        counters.insert("momentum.blocked_flow".to_string(), self.diagnostics.blocked_flow);
-        counters.insert("momentum.blocked_recent_flow".to_string(), self.diagnostics.blocked_recent_flow);
-        counters.insert("momentum.blocked_drift_band".to_string(), self.diagnostics.blocked_drift_band);
-        counters.insert("momentum.blocked_vwap_stretch".to_string(), self.diagnostics.blocked_vwap_stretch);
-        counters.insert("momentum.blocked_order_book".to_string(), self.diagnostics.blocked_order_book);
-        counters.insert("momentum.blocked_burst".to_string(), self.diagnostics.blocked_burst);
-        counters.insert("momentum.blocked_cost_gate".to_string(), self.diagnostics.blocked_cost_gate);
+        counters.insert(
+            "momentum.total_decisions".to_string(),
+            self.diagnostics.total_decisions,
+        );
+        counters.insert(
+            "momentum.blocked_min_trades".to_string(),
+            self.diagnostics.blocked_min_trades,
+        );
+        counters.insert(
+            "momentum.blocked_spread".to_string(),
+            self.diagnostics.blocked_spread,
+        );
+        counters.insert(
+            "momentum.blocked_flow".to_string(),
+            self.diagnostics.blocked_flow,
+        );
+        counters.insert(
+            "momentum.blocked_recent_flow".to_string(),
+            self.diagnostics.blocked_recent_flow,
+        );
+        counters.insert(
+            "momentum.blocked_drift_band".to_string(),
+            self.diagnostics.blocked_drift_band,
+        );
+        counters.insert(
+            "momentum.blocked_vwap_stretch".to_string(),
+            self.diagnostics.blocked_vwap_stretch,
+        );
+        counters.insert(
+            "momentum.blocked_order_book".to_string(),
+            self.diagnostics.blocked_order_book,
+        );
+        counters.insert(
+            "momentum.blocked_burst".to_string(),
+            self.diagnostics.blocked_burst,
+        );
+        counters.insert(
+            "momentum.blocked_cost_gate".to_string(),
+            self.diagnostics.blocked_cost_gate,
+        );
         counters.insert("momentum.entries".to_string(), self.diagnostics.entries);
-        counters.insert("momentum.exits_stop_loss".to_string(), self.diagnostics.exits_stop_loss);
-        counters.insert("momentum.exits_take_profit".to_string(), self.diagnostics.exits_take_profit);
-        counters.insert("momentum.exits_flow_reversal".to_string(), self.diagnostics.exits_flow_reversal);
-        counters.insert("momentum.exits_max_hold".to_string(), self.diagnostics.exits_max_hold);
+        counters.insert(
+            "momentum.exits_stop_loss".to_string(),
+            self.diagnostics.exits_stop_loss,
+        );
+        counters.insert(
+            "momentum.exits_take_profit".to_string(),
+            self.diagnostics.exits_take_profit,
+        );
+        counters.insert(
+            "momentum.exits_flow_reversal".to_string(),
+            self.diagnostics.exits_flow_reversal,
+        );
+        counters.insert(
+            "momentum.exits_max_hold".to_string(),
+            self.diagnostics.exits_max_hold,
+        );
 
         let mut gauges = BTreeMap::new();
-        gauges.insert("momentum.last_flow_imbalance".to_string(), self.diagnostics.last_flow_imbalance);
-        gauges.insert("momentum.last_recent_flow_imbalance".to_string(), self.diagnostics.last_recent_flow_imbalance);
-        gauges.insert("momentum.last_drift_bps".to_string(), self.diagnostics.last_drift_bps);
-        gauges.insert("momentum.last_drift_above_vwap_bps".to_string(), self.diagnostics.last_drift_above_vwap_bps);
-        gauges.insert("momentum.last_burst_per_second".to_string(), self.diagnostics.last_burst_per_second);
-        gauges.insert("momentum.last_expected_edge_bps".to_string(), self.diagnostics.last_expected_edge_bps);
+        gauges.insert(
+            "momentum.last_flow_imbalance".to_string(),
+            self.diagnostics.last_flow_imbalance,
+        );
+        gauges.insert(
+            "momentum.last_recent_flow_imbalance".to_string(),
+            self.diagnostics.last_recent_flow_imbalance,
+        );
+        gauges.insert(
+            "momentum.last_drift_bps".to_string(),
+            self.diagnostics.last_drift_bps,
+        );
+        gauges.insert(
+            "momentum.last_drift_above_vwap_bps".to_string(),
+            self.diagnostics.last_drift_above_vwap_bps,
+        );
+        gauges.insert(
+            "momentum.last_burst_per_second".to_string(),
+            self.diagnostics.last_burst_per_second,
+        );
+        gauges.insert(
+            "momentum.last_expected_edge_bps".to_string(),
+            self.diagnostics.last_expected_edge_bps,
+        );
         gauges.insert(
             "momentum.last_edge_after_cost_bps".to_string(),
             self.diagnostics.last_edge_after_cost_bps,
@@ -363,7 +437,11 @@ impl Strategy for TradeFlowMomentumStrategy {
         if let MarketEvent::Trade(_) = event {}
     }
 
-    fn decide(&mut self, market_state: &MarketState, context: &StrategyContext) -> StrategyDecision {
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> StrategyDecision {
         if let Some(rationale) = self.should_exit_long(market_state, context) {
             return StrategyDecision {
                 confidence: 1.0,
@@ -376,7 +454,10 @@ impl Strategy for TradeFlowMomentumStrategy {
                     rationale,
                     expected_edge_bps: 0.0,
                 },
-                metrics: vec![DecisionMetric { name: "position_quantity", value: context.current_position.quantity }],
+                metrics: vec![DecisionMetric {
+                    name: "position_quantity",
+                    value: context.current_position.quantity,
+                }],
             };
         }
 
@@ -424,11 +505,26 @@ impl Strategy for TradeFlowMomentumStrategy {
                 expected_edge_bps,
             },
             metrics: vec![
-                DecisionMetric { name: "flow_imbalance", value: flow_imbalance },
-                DecisionMetric { name: "recent_flow_imbalance", value: self.recent_trade_flow_imbalance(market_state) },
-                DecisionMetric { name: "drift_bps", value: drift_bps },
-                DecisionMetric { name: "burst_per_second", value: burst_per_second },
-                DecisionMetric { name: "drift_above_vwap_bps", value: self.drift_above_vwap_bps(market_state) },
+                DecisionMetric {
+                    name: "flow_imbalance",
+                    value: flow_imbalance,
+                },
+                DecisionMetric {
+                    name: "recent_flow_imbalance",
+                    value: self.recent_trade_flow_imbalance(market_state),
+                },
+                DecisionMetric {
+                    name: "drift_bps",
+                    value: drift_bps,
+                },
+                DecisionMetric {
+                    name: "burst_per_second",
+                    value: burst_per_second,
+                },
+                DecisionMetric {
+                    name: "drift_above_vwap_bps",
+                    value: self.drift_above_vwap_bps(market_state),
+                },
                 DecisionMetric {
                     name: "edge_after_cost_bps",
                     value: expected_edge_after_cost_bps(

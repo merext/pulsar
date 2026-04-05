@@ -26,13 +26,27 @@ pub struct MarketMakerBaConfig {
     pub cash_fraction: f64,
 }
 
-fn default_base_half_spread_bps() -> f64 { 1.0 }
-fn default_min_half_spread_bps() -> f64 { 0.4 }
-fn default_max_half_spread_bps() -> f64 { 8.0 }
-fn default_volatility_reference_bps() -> f64 { 30.0 }
-fn default_volatility_multiplier_min() -> f64 { 0.8 }
-fn default_volatility_multiplier_max() -> f64 { 3.0 }
-fn default_cash_fraction() -> f64 { 0.04 }
+fn default_base_half_spread_bps() -> f64 {
+    1.0
+}
+fn default_min_half_spread_bps() -> f64 {
+    0.4
+}
+fn default_max_half_spread_bps() -> f64 {
+    8.0
+}
+fn default_volatility_reference_bps() -> f64 {
+    30.0
+}
+fn default_volatility_multiplier_min() -> f64 {
+    0.8
+}
+fn default_volatility_multiplier_max() -> f64 {
+    3.0
+}
+fn default_cash_fraction() -> f64 {
+    0.04
+}
 
 impl Default for MarketMakerBaConfig {
     fn default() -> Self {
@@ -88,7 +102,9 @@ impl MarketMakerBaStrategy {
         }
 
         let fair = micro.ema_mid_price;
-        let spread_bps = micro.ema_spread_bps.max(self.config.base_half_spread_bps * 2.0);
+        let spread_bps = micro
+            .ema_spread_bps
+            .max(self.config.base_half_spread_bps * 2.0);
         let half_spread_frac = spread_bps / 20_000.0;
         let bid = fair * (1.0 - half_spread_frac);
         let ask = fair * (1.0 + half_spread_frac);
@@ -136,13 +152,22 @@ impl Strategy for MarketMakerBaStrategy {
         counters.insert("ba.no_quote_ticks".into(), self.diagnostics.no_quote_ticks);
 
         let mut gauges = BTreeMap::new();
-        gauges.insert("ba.last_fair_price".into(), self.diagnostics.last_fair_price);
+        gauges.insert(
+            "ba.last_fair_price".into(),
+            self.diagnostics.last_fair_price,
+        );
         gauges.insert(
             "ba.last_half_spread_bps".into(),
             self.diagnostics.last_half_spread_bps,
         );
-        gauges.insert("ba.last_buy_quantity".into(), self.diagnostics.last_buy_quantity);
-        gauges.insert("ba.last_sell_quantity".into(), self.diagnostics.last_sell_quantity);
+        gauges.insert(
+            "ba.last_buy_quantity".into(),
+            self.diagnostics.last_buy_quantity,
+        );
+        gauges.insert(
+            "ba.last_sell_quantity".into(),
+            self.diagnostics.last_sell_quantity,
+        );
 
         StrategyDiagnostics { counters, gauges }
     }
@@ -157,7 +182,11 @@ impl Strategy for MarketMakerBaStrategy {
         }
     }
 
-    fn decide(&mut self, market_state: &MarketState, context: &StrategyContext) -> StrategyDecision {
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> StrategyDecision {
         let Some((best_bid, best_ask, fair_price)) = self.fair_price_and_book(market_state) else {
             self.diagnostics.no_quote_ticks += 1;
             return StrategyDecision::no_action();

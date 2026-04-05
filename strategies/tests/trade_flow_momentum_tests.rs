@@ -1,5 +1,5 @@
-use strategies::TradeFlowMomentumStrategy;
 use std::fs;
+use strategies::TradeFlowMomentumStrategy;
 use trade::market::{BookLevel, BookTicker, MarketEvent, MarketState};
 use trade::strategy::{Strategy, StrategyContext};
 use trade::{OrderIntent, Position, Trade};
@@ -17,6 +17,8 @@ fn context_with_position(quantity: f64, entry_price: f64, entry_time: f64) -> St
         max_position_notional: 35.0,
         initial_capital: 100.0,
         tick_size: 0.01,
+        step_size: None,
+        min_notional: None,
     }
 }
 
@@ -58,7 +60,9 @@ async fn enters_on_strong_trade_flow_burst() {
 
     let decision = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
     match decision.intent {
-        OrderIntent::Place { side, rationale, .. } => {
+        OrderIntent::Place {
+            side, rationale, ..
+        } => {
             assert_eq!(side, trade::Side::Buy);
             assert_eq!(rationale, "trade_flow_momentum_entry");
             assert!(decision.confidence > 0.0);
@@ -100,7 +104,9 @@ async fn exits_on_flow_reversal_when_position_open() {
 
     let decision = strategy.decide(&market_state, &context_with_position(300.0, 0.1001, 2.0));
     match decision.intent {
-        OrderIntent::Place { side, rationale, .. } => {
+        OrderIntent::Place {
+            side, rationale, ..
+        } => {
             assert_eq!(side, trade::Side::Sell);
             assert_eq!(rationale, "flow_reversal");
         }
@@ -164,7 +170,10 @@ async fn exposes_momentum_diagnostics_after_blocked_entry() {
 
     let _ = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
     let diagnostics = strategy.diagnostics();
-    assert_eq!(diagnostics.counters.get("momentum.blocked_min_trades"), Some(&1));
+    assert_eq!(
+        diagnostics.counters.get("momentum.blocked_min_trades"),
+        Some(&1)
+    );
 }
 
 #[tokio::test]
@@ -207,8 +216,16 @@ async fn rejects_entry_when_expected_edge_does_not_clear_cost_gate() {
     assert!(matches!(decision.intent, OrderIntent::NoAction));
 
     let diagnostics = strategy.diagnostics();
-    assert_eq!(diagnostics.counters.get("momentum.blocked_cost_gate"), Some(&1));
-    assert!(diagnostics.gauges.get("momentum.last_edge_after_cost_bps").is_some_and(|value| *value < 0.0));
+    assert_eq!(
+        diagnostics.counters.get("momentum.blocked_cost_gate"),
+        Some(&1)
+    );
+    assert!(
+        diagnostics
+            .gauges
+            .get("momentum.last_edge_after_cost_bps")
+            .is_some_and(|value| *value < 0.0)
+    );
 
     let _ = fs::remove_file(config_path);
 }

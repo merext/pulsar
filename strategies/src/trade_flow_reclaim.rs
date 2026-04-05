@@ -1,13 +1,16 @@
 use crate::cost_gate::{
-    clears_taker_cost_gate, expected_edge_after_cost_bps, DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS,
-    DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+    DEFAULT_ASSUMED_ROUND_TRIP_TAKER_COST_BPS, DEFAULT_MIN_EXPECTED_EDGE_AFTER_COST_BPS,
+    clears_taker_cost_gate, expected_edge_after_cost_bps,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
 use trade::market::{MarketEvent, MarketState};
-use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics, StrategyLogger};
+use trade::strategy::{
+    NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics,
+    StrategyLogger,
+};
 use trade::trader::OrderType;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -90,7 +93,9 @@ pub struct TradeFlowReclaimStrategy {
 }
 
 impl TradeFlowReclaimStrategy {
-    fn load_config<P: AsRef<Path>>(config_path: P) -> Result<TradeFlowReclaimConfig, Box<dyn std::error::Error>> {
+    fn load_config<P: AsRef<Path>>(
+        config_path: P,
+    ) -> Result<TradeFlowReclaimConfig, Box<dyn std::error::Error>> {
         let path = config_path.as_ref();
         if path == Path::new("/dev/null") || !path.exists() {
             return Ok(TradeFlowReclaimConfig::default());
@@ -102,7 +107,10 @@ impl TradeFlowReclaimStrategy {
     }
 
     fn reference_price(&self, market_state: &MarketState) -> f64 {
-        market_state.mid_price().or_else(|| market_state.last_price()).unwrap_or(0.0)
+        market_state
+            .mid_price()
+            .or_else(|| market_state.last_price())
+            .unwrap_or(0.0)
     }
 
     fn pullback_from_high_bps(&self, market_state: &MarketState) -> f64 {
@@ -139,7 +147,10 @@ impl TradeFlowReclaimStrategy {
             return false;
         }
 
-        if market_state.spread_bps().is_some_and(|spread| spread > self.config.max_spread_bps) {
+        if market_state
+            .spread_bps()
+            .is_some_and(|spread| spread > self.config.max_spread_bps)
+        {
             self.diagnostics.blocked_spread += 1;
             return false;
         }
@@ -193,7 +204,11 @@ impl TradeFlowReclaimStrategy {
         true
     }
 
-    fn should_exit_long(&mut self, market_state: &MarketState, context: &StrategyContext) -> Option<&'static str> {
+    fn should_exit_long(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> Option<&'static str> {
         if context.current_position.quantity <= 0.0 {
             return None;
         }
@@ -260,35 +275,87 @@ impl Strategy for TradeFlowReclaimStrategy {
     }
 
     fn get_info(&self) -> String {
-        "TradeFlowReclaimStrategy - taker reclaim after pullback with buyer flow confirmation".to_string()
+        "TradeFlowReclaimStrategy - taker reclaim after pullback with buyer flow confirmation"
+            .to_string()
     }
 
     fn diagnostics(&self) -> StrategyDiagnostics {
         let mut counters = BTreeMap::new();
-        counters.insert("reclaim.total_decisions".to_string(), self.diagnostics.total_decisions);
-        counters.insert("reclaim.blocked_min_trades".to_string(), self.diagnostics.blocked_min_trades);
-        counters.insert("reclaim.blocked_spread".to_string(), self.diagnostics.blocked_spread);
-        counters.insert("reclaim.blocked_pullback_band".to_string(), self.diagnostics.blocked_pullback_band);
-        counters.insert("reclaim.blocked_reclaim".to_string(), self.diagnostics.blocked_reclaim);
-        counters.insert("reclaim.blocked_flow".to_string(), self.diagnostics.blocked_flow);
-        counters.insert("reclaim.blocked_recent_flow".to_string(), self.diagnostics.blocked_recent_flow);
-        counters.insert("reclaim.blocked_cost_gate".to_string(), self.diagnostics.blocked_cost_gate);
+        counters.insert(
+            "reclaim.total_decisions".to_string(),
+            self.diagnostics.total_decisions,
+        );
+        counters.insert(
+            "reclaim.blocked_min_trades".to_string(),
+            self.diagnostics.blocked_min_trades,
+        );
+        counters.insert(
+            "reclaim.blocked_spread".to_string(),
+            self.diagnostics.blocked_spread,
+        );
+        counters.insert(
+            "reclaim.blocked_pullback_band".to_string(),
+            self.diagnostics.blocked_pullback_band,
+        );
+        counters.insert(
+            "reclaim.blocked_reclaim".to_string(),
+            self.diagnostics.blocked_reclaim,
+        );
+        counters.insert(
+            "reclaim.blocked_flow".to_string(),
+            self.diagnostics.blocked_flow,
+        );
+        counters.insert(
+            "reclaim.blocked_recent_flow".to_string(),
+            self.diagnostics.blocked_recent_flow,
+        );
+        counters.insert(
+            "reclaim.blocked_cost_gate".to_string(),
+            self.diagnostics.blocked_cost_gate,
+        );
         counters.insert("reclaim.entries".to_string(), self.diagnostics.entries);
-        counters.insert("reclaim.exits_stop_loss".to_string(), self.diagnostics.exits_stop_loss);
-        counters.insert("reclaim.exits_take_profit".to_string(), self.diagnostics.exits_take_profit);
-        counters.insert("reclaim.exits_flow_reversal".to_string(), self.diagnostics.exits_flow_reversal);
-        counters.insert("reclaim.exits_max_hold".to_string(), self.diagnostics.exits_max_hold);
+        counters.insert(
+            "reclaim.exits_stop_loss".to_string(),
+            self.diagnostics.exits_stop_loss,
+        );
+        counters.insert(
+            "reclaim.exits_take_profit".to_string(),
+            self.diagnostics.exits_take_profit,
+        );
+        counters.insert(
+            "reclaim.exits_flow_reversal".to_string(),
+            self.diagnostics.exits_flow_reversal,
+        );
+        counters.insert(
+            "reclaim.exits_max_hold".to_string(),
+            self.diagnostics.exits_max_hold,
+        );
 
         let mut gauges = BTreeMap::new();
-        gauges.insert("reclaim.last_pullback_bps".to_string(), self.diagnostics.last_pullback_bps);
-        gauges.insert("reclaim.last_reclaim_bps".to_string(), self.diagnostics.last_reclaim_bps);
-        gauges.insert("reclaim.last_flow_imbalance".to_string(), self.diagnostics.last_flow_imbalance);
+        gauges.insert(
+            "reclaim.last_pullback_bps".to_string(),
+            self.diagnostics.last_pullback_bps,
+        );
+        gauges.insert(
+            "reclaim.last_reclaim_bps".to_string(),
+            self.diagnostics.last_reclaim_bps,
+        );
+        gauges.insert(
+            "reclaim.last_flow_imbalance".to_string(),
+            self.diagnostics.last_flow_imbalance,
+        );
         gauges.insert(
             "reclaim.last_recent_flow_imbalance".to_string(),
             self.diagnostics.last_recent_flow_imbalance,
         );
-        gauges.insert("reclaim.last_expected_edge_bps".to_string(), self.diagnostics.last_expected_edge_bps);
-        gauges.insert("reclaim.last_edge_after_cost_bps".to_string(), self.diagnostics.last_edge_after_cost_bps);
+        gauges.insert(
+            "reclaim.last_expected_edge_bps".to_string(),
+            self.diagnostics.last_expected_edge_bps,
+        );
+        gauges.insert(
+            "reclaim.last_edge_after_cost_bps".to_string(),
+            self.diagnostics.last_edge_after_cost_bps,
+        );
 
         StrategyDiagnostics { counters, gauges }
     }
@@ -299,7 +366,11 @@ impl Strategy for TradeFlowReclaimStrategy {
 
     async fn on_event(&mut self, _event: &MarketEvent, _market_state: &MarketState) {}
 
-    fn decide(&mut self, market_state: &MarketState, context: &StrategyContext) -> StrategyDecision {
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> StrategyDecision {
         if let Some(rationale) = self.should_exit_long(market_state, context) {
             return StrategyDecision {
                 confidence: 1.0,
@@ -312,7 +383,10 @@ impl Strategy for TradeFlowReclaimStrategy {
                     rationale,
                     expected_edge_bps: 0.0,
                 },
-                metrics: vec![DecisionMetric { name: "position_quantity", value: context.current_position.quantity }],
+                metrics: vec![DecisionMetric {
+                    name: "position_quantity",
+                    value: context.current_position.quantity,
+                }],
             };
         }
 
@@ -349,10 +423,22 @@ impl Strategy for TradeFlowReclaimStrategy {
                 expected_edge_bps,
             },
             metrics: vec![
-                DecisionMetric { name: "pullback_bps", value: self.pullback_from_high_bps(market_state) },
-                DecisionMetric { name: "reclaim_bps", value: expected_edge_bps },
-                DecisionMetric { name: "flow_imbalance", value: market_state.trade_flow_imbalance() },
-                DecisionMetric { name: "recent_flow_imbalance", value: self.recent_trade_flow_imbalance(market_state) },
+                DecisionMetric {
+                    name: "pullback_bps",
+                    value: self.pullback_from_high_bps(market_state),
+                },
+                DecisionMetric {
+                    name: "reclaim_bps",
+                    value: expected_edge_bps,
+                },
+                DecisionMetric {
+                    name: "flow_imbalance",
+                    value: market_state.trade_flow_imbalance(),
+                },
+                DecisionMetric {
+                    name: "recent_flow_imbalance",
+                    value: self.recent_trade_flow_imbalance(market_state),
+                },
                 DecisionMetric {
                     name: "edge_after_cost_bps",
                     value: expected_edge_after_cost_bps(

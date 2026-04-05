@@ -1,5 +1,5 @@
-use strategies::SpreadRegimeCaptureStrategy;
 use std::fs;
+use strategies::SpreadRegimeCaptureStrategy;
 use trade::market::{BookLevel, BookTicker, DepthLevel, DepthSnapshot, MarketEvent, MarketState};
 use trade::strategy::{Strategy, StrategyContext};
 use trade::trader::OrderType;
@@ -18,6 +18,8 @@ fn flat_context() -> StrategyContext {
         max_position_notional: 35.0,
         initial_capital: 100.0,
         tick_size: 0.01,
+        step_size: None,
+        min_notional: None,
     }
 }
 
@@ -34,6 +36,8 @@ fn long_context(quantity: f64, entry_price: f64, entry_time: f64) -> StrategyCon
         max_position_notional: 35.0,
         initial_capital: 100.0,
         tick_size: 0.01,
+        step_size: None,
+        min_notional: None,
     }
 }
 
@@ -123,9 +127,7 @@ async fn enters_long_on_price_dislocation_below_fair_value() {
         is_buyer_market_maker: true,
         ..Default::default()
     });
-    strategy
-        .on_event(&dislocation_trade, &market_state)
-        .await;
+    strategy.on_event(&dislocation_trade, &market_state).await;
     market_state.apply(&dislocation_trade);
 
     let decision = strategy.decide(&market_state, &flat_context());
@@ -137,15 +139,20 @@ async fn enters_long_on_price_dislocation_below_fair_value() {
             expected_edge_bps,
             ..
         } => {
-            assert_eq!(*side, Side::Buy, "should enter long on downward dislocation");
-            assert_eq!(*order_type, OrderType::Maker, "entry should use maker order");
+            assert_eq!(
+                *side,
+                Side::Buy,
+                "should enter long on downward dislocation"
+            );
+            assert_eq!(
+                *order_type,
+                OrderType::Maker,
+                "entry should use maker order"
+            );
             assert_eq!(*rationale, "spread_regime_capture_entry");
             assert!(*expected_edge_bps > 0.0, "edge should be positive");
         }
-        _ => panic!(
-            "expected buy intent, got {:?}",
-            decision.intent
-        ),
+        _ => panic!("expected buy intent, got {:?}", decision.intent),
     }
 
     let _ = fs::remove_file(config_path);
@@ -173,9 +180,7 @@ async fn no_entry_on_upward_dislocation_long_only() {
         is_buyer_market_maker: false,
         ..Default::default()
     });
-    strategy
-        .on_event(&dislocation_trade, &market_state)
-        .await;
+    strategy.on_event(&dislocation_trade, &market_state).await;
     market_state.apply(&dislocation_trade);
 
     let decision = strategy.decide(&market_state, &flat_context());
@@ -262,7 +267,11 @@ async fn exits_on_stop_loss_via_taker() {
             ..
         } => {
             assert_eq!(*side, Side::Sell, "should exit long position");
-            assert_eq!(*order_type, OrderType::Taker, "stop loss should use taker (emergency)");
+            assert_eq!(
+                *order_type,
+                OrderType::Taker,
+                "stop loss should use taker (emergency)"
+            );
             assert_eq!(*rationale, "stop_loss");
         }
         _ => panic!("expected stop loss exit, got {:?}", decision.intent),
@@ -323,7 +332,11 @@ async fn exits_on_max_hold_time_via_taker() {
             ..
         } => {
             assert_eq!(*side, Side::Sell);
-            assert_eq!(*order_type, OrderType::Taker, "max_hold exit should use taker");
+            assert_eq!(
+                *order_type,
+                OrderType::Taker,
+                "max_hold exit should use taker"
+            );
             assert_eq!(*rationale, "max_hold_time");
         }
         _ => panic!("expected max_hold exit, got {:?}", decision.intent),
@@ -374,7 +387,11 @@ async fn exits_take_profit_via_maker() {
             ..
         } => {
             assert_eq!(*side, Side::Sell, "should exit long position");
-            assert_eq!(*order_type, OrderType::Maker, "take profit should use maker order");
+            assert_eq!(
+                *order_type,
+                OrderType::Maker,
+                "take profit should use maker order"
+            );
             assert_eq!(*rationale, "take_profit");
         }
         _ => panic!("expected take_profit exit, got {:?}", decision.intent),
@@ -385,14 +402,19 @@ async fn exits_take_profit_via_maker() {
 
 #[tokio::test]
 async fn exposes_diagnostics_after_blocked_entry() {
-    let mut strategy =
-        SpreadRegimeCaptureStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy = SpreadRegimeCaptureStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     // Only 2 trades — below min_trades_in_window (5 by default)
     let book = MarketEvent::BookTicker(BookTicker {
-        bid: BookLevel { price: 0.1000, quantity: 100.0 },
-        ask: BookLevel { price: 0.1001, quantity: 100.0 },
+        bid: BookLevel {
+            price: 0.1000,
+            quantity: 100.0,
+        },
+        ask: BookLevel {
+            price: 0.1001,
+            quantity: 100.0,
+        },
         event_time: 1_000,
     });
     strategy.on_event(&book, &market_state).await;

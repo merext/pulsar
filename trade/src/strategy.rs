@@ -27,6 +27,10 @@ pub struct StrategyContext {
     pub initial_capital: f64,
     /// Minimum price increment for the exchange pair.
     pub tick_size: f64,
+    /// Minimum quantity increment (lot size) for the exchange pair.
+    pub step_size: Option<f64>,
+    /// Minimum order notional for the exchange pair.
+    pub min_notional: Option<f64>,
 }
 
 impl StrategyContext {

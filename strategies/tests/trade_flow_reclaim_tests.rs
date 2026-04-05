@@ -17,6 +17,8 @@ fn context_with_position(quantity: f64, entry_price: f64, entry_time: f64) -> St
         max_position_notional: 35.0,
         initial_capital: 100.0,
         tick_size: 0.01,
+        step_size: None,
+        min_notional: None,
     }
 }
 
@@ -62,7 +64,9 @@ async fn enters_on_pullback_reclaim_with_positive_flow() {
 
     let decision = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
     match decision.intent {
-        OrderIntent::Place { side, rationale, .. } => {
+        OrderIntent::Place {
+            side, rationale, ..
+        } => {
             assert_eq!(side, trade::Side::Buy);
             assert_eq!(rationale, "trade_flow_reclaim_entry");
         }
@@ -103,7 +107,9 @@ async fn exits_on_flow_reversal() {
 
     let decision = strategy.decide(&market_state, &context_with_position(200.0, 0.1001, 2.0));
     match decision.intent {
-        OrderIntent::Place { side, rationale, .. } => {
+        OrderIntent::Place {
+            side, rationale, ..
+        } => {
             assert_eq!(side, trade::Side::Sell);
             assert_eq!(rationale, "flow_reversal");
         }
@@ -155,8 +161,16 @@ async fn rejects_entry_when_reclaim_edge_does_not_clear_cost_gate() {
     assert!(matches!(decision.intent, OrderIntent::NoAction));
 
     let diagnostics = strategy.diagnostics();
-    assert_eq!(diagnostics.counters.get("reclaim.blocked_cost_gate"), Some(&1));
-    assert!(diagnostics.gauges.get("reclaim.last_edge_after_cost_bps").is_some_and(|value| *value < 0.0));
+    assert_eq!(
+        diagnostics.counters.get("reclaim.blocked_cost_gate"),
+        Some(&1)
+    );
+    assert!(
+        diagnostics
+            .gauges
+            .get("reclaim.last_edge_after_cost_bps")
+            .is_some_and(|value| *value < 0.0)
+    );
 
     let _ = fs::remove_file(config_path);
 }

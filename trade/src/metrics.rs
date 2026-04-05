@@ -363,6 +363,15 @@ impl TradeManager {
         self.positions.get(symbol)
     }
 
+    /// Fix the entry_price of an existing position without triggering PnL.
+    /// Used at startup when the position was synced with price=0 and the
+    /// real market price becomes available from the first bookTicker.
+    pub fn fix_entry_price(&mut self, symbol: &str, new_entry_price: f64) {
+        if let Some(position) = self.positions.get_mut(symbol) {
+            position.entry_price = new_entry_price;
+        }
+    }
+
     pub fn unrealized_pnl(&self, symbol: &str, current_price: f64) -> f64 {
         if let Some(position) = self.positions.get(symbol) {
             // Calculate gross unrealized PnL
@@ -508,13 +517,20 @@ impl TradeManager {
         self.pending_entry_attribution.remove(symbol);
         self.pending_exit_attribution.remove(symbol);
 
-        if base_free > f64::EPSILON && reference_price > f64::EPSILON {
+        if base_free > f64::EPSILON {
+            // Always register the position if we hold base asset,
+            // even with reference_price=0 (will be corrected on first bookTicker).
+            let price = if reference_price > f64::EPSILON {
+                reference_price
+            } else {
+                0.0
+            };
             self.positions.insert(
                 symbol.to_string(),
                 Position {
                     symbol: symbol.to_string(),
                     quantity: base_free,
-                    entry_price: reference_price,
+                    entry_price: price,
                     entry_time: timestamp,
                 },
             );

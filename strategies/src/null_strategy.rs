@@ -1,7 +1,9 @@
 use std::path::Path;
 use trade::execution::OrderIntent;
 use trade::market::{MarketEvent, MarketState};
-use trade::strategy::{NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyLogger};
+use trade::strategy::{
+    NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyLogger,
+};
 
 pub struct NullStrategy {
     logger: NoOpStrategyLogger,
@@ -28,7 +30,11 @@ impl Strategy for NullStrategy {
 
     async fn on_event(&mut self, _event: &MarketEvent, _market_state: &MarketState) {}
 
-    fn decide(&mut self, market_state: &MarketState, _context: &StrategyContext) -> StrategyDecision {
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        _context: &StrategyContext,
+    ) -> StrategyDecision {
         let _ = market_state;
         StrategyDecision {
             confidence: 0.0,

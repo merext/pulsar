@@ -16,12 +16,15 @@ fn context_with_position(quantity: f64, entry_price: f64, entry_time: f64) -> St
         max_position_notional: 35.0,
         initial_capital: 100.0,
         tick_size: 0.01,
+        step_size: None,
+        min_notional: None,
     }
 }
 
 #[tokio::test]
 async fn enters_on_positive_microprice_edge() {
-    let mut strategy = MicropriceImbalanceMakerStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy =
+        MicropriceImbalanceMakerStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     market_state.apply(&MarketEvent::BookTicker(BookTicker {
@@ -38,7 +41,12 @@ async fn enters_on_positive_microprice_edge() {
 
     let decision = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
     match decision.intent {
-        OrderIntent::Place { side, order_type, rationale, .. } => {
+        OrderIntent::Place {
+            side,
+            order_type,
+            rationale,
+            ..
+        } => {
             assert_eq!(side, trade::Side::Buy);
             assert_eq!(order_type, trade::OrderType::Maker);
             assert_eq!(rationale, "microprice_imbalance_maker_entry");
@@ -49,7 +57,8 @@ async fn enters_on_positive_microprice_edge() {
 
 #[tokio::test]
 async fn exits_when_imbalance_reverses() {
-    let mut strategy = MicropriceImbalanceMakerStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy =
+        MicropriceImbalanceMakerStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     market_state.apply(&MarketEvent::BookTicker(BookTicker {
@@ -66,7 +75,12 @@ async fn exits_when_imbalance_reverses() {
 
     let decision = strategy.decide(&market_state, &context_with_position(100.0, 0.0998, 1.0));
     match decision.intent {
-        OrderIntent::Place { side, order_type, rationale, .. } => {
+        OrderIntent::Place {
+            side,
+            order_type,
+            rationale,
+            ..
+        } => {
             assert_eq!(side, trade::Side::Sell);
             assert_eq!(order_type, trade::OrderType::Maker);
             assert_eq!(rationale, "imbalance_reversal");
@@ -77,7 +91,8 @@ async fn exits_when_imbalance_reverses() {
 
 #[tokio::test]
 async fn emits_decision_metrics_on_entry() {
-    let mut strategy = MicropriceImbalanceMakerStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy =
+        MicropriceImbalanceMakerStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     market_state.apply(&MarketEvent::BookTicker(BookTicker {

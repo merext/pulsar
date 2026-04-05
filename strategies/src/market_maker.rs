@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
+use tracing::{debug, info};
 use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
 use trade::market::{MarketEvent, MarketState};
 use trade::strategy::{
@@ -8,7 +9,6 @@ use trade::strategy::{
     StrategyLogger,
 };
 use trade::trader::OrderType;
-use tracing::{debug, info};
 
 // ---------------------------------------------------------------------------
 // Config
@@ -17,7 +17,6 @@ use tracing::{debug, info};
 #[derive(Debug, Clone, Deserialize)]
 pub struct MarketMakerConfig {
     // --- Spread & pricing ---
-
     /// Minimum spread in bps to accept an entry. If the current spread is below
     /// this threshold, the strategy skips the tick (not enough edge to cover fees).
     #[serde(default = "default_min_spread_bps")]
@@ -34,7 +33,6 @@ pub struct MarketMakerConfig {
     pub min_edge_bps: f64,
 
     // --- Position management ---
-
     /// Maximum hold time in milliseconds. After this, exit via taker.
     #[serde(default = "default_max_hold_millis")]
     pub max_hold_millis: u64,
@@ -49,7 +47,6 @@ pub struct MarketMakerConfig {
     pub entry_cooldown_millis: u64,
 
     // --- Volatility filters ---
-
     /// Maximum realized volatility in bps. If vol exceeds this, skip entry.
     /// During high vol, spreads widen but adverse selection risk is higher.
     #[serde(default = "default_max_vol_bps")]
@@ -61,7 +58,6 @@ pub struct MarketMakerConfig {
     pub panic_vol_bps: f64,
 
     // --- Trade window ---
-
     /// Window in milliseconds for computing microstructure metrics.
     #[serde(default = "default_trade_window_millis")]
     pub trade_window_millis: u64,
@@ -71,7 +67,6 @@ pub struct MarketMakerConfig {
     pub min_trades_in_window: usize,
 
     // --- Order book imbalance ---
-
     /// Skew factor: how much order book imbalance affects quoting.
     /// 0.0 = ignore imbalance, 1.0 = fully adjust.
     /// When bid-heavy (imbalance > 0), we're more willing to buy.
@@ -85,7 +80,6 @@ pub struct MarketMakerConfig {
     pub max_imbalance: f64,
 
     // --- Trade direction filter ---
-
     /// Require the last trade to be seller-initiated (is_buyer_market_maker=true)
     /// before entering. This means price is near the bid — ideal for passive buy.
     /// When false, we also allow entry on buyer-initiated trades (price near ask).
@@ -110,7 +104,6 @@ pub struct MarketMakerConfig {
     pub max_price_position: f64,
 
     // --- Exit pricing ---
-
     /// Minimum edge in bps for passive sell orders relative to entry price.
     /// The sell limit price is floored at entry_price * (1 + min_exit_edge_bps / 10_000).
     /// Set to round_trip_cost_bps (e.g. 20.0) to ensure breakeven after fees.
@@ -121,13 +114,11 @@ pub struct MarketMakerConfig {
     pub min_exit_edge_bps: f64,
 
     // --- Sizing ---
-
     /// Fraction of available cash to use per entry (0.0 - 1.0).
     #[serde(default = "default_cash_fraction")]
     pub cash_fraction: f64,
 
     // --- Dynamic sizing ---
-
     /// Enable dynamic position sizing based on spread, vol, and budget.
     /// When false, static `cash_fraction` is used (backward compatible).
     #[serde(default)]
@@ -157,7 +148,6 @@ pub struct MarketMakerConfig {
     pub budget_guard_threshold: f64,
 
     // --- Two-sided market-making ---
-
     /// Enable two-sided quoting mode. When true, the strategy returns
     /// QuoteBothSides intent with simultaneous buy and sell limit orders.
     /// When false, uses the original single-sided logic (backward compatible).
@@ -196,33 +186,87 @@ pub struct MarketMakerConfig {
     pub requote_threshold_bps: f64,
 }
 
-fn default_min_spread_bps() -> f64 { 30.0 }
-fn default_round_trip_cost_bps() -> f64 { 20.0 }
-fn default_min_edge_bps() -> f64 { 5.0 }
-fn default_max_hold_millis() -> u64 { 300_000 } // 5 minutes
-fn default_stop_loss_bps() -> f64 { 500.0 }
-fn default_entry_cooldown_millis() -> u64 { 5_000 }
-fn default_max_vol_bps() -> f64 { 1000.0 }
-fn default_panic_vol_bps() -> f64 { 2000.0 }
-fn default_trade_window_millis() -> u64 { 60_000 }
-fn default_min_trades_in_window() -> usize { 2 }
-fn default_imbalance_skew() -> f64 { 0.0 }
-fn default_max_imbalance() -> f64 { 1.0 }
-fn default_require_seller_initiated() -> bool { true }
-fn default_min_sell_flow_fraction() -> f64 { 0.0 }
-fn default_price_position_window() -> usize { 20 }
-fn default_max_price_position() -> f64 { 0.3 }
-fn default_min_exit_edge_bps() -> f64 { 0.0 }
-fn default_cash_fraction() -> f64 { 0.9 }
-fn default_min_cash_fraction() -> f64 { 0.02 }
-fn default_max_cash_fraction() -> f64 { 0.15 }
-fn default_spread_ref_bps() -> f64 { 100.0 }
-fn default_vol_ref_bps() -> f64 { 50.0 }
-fn default_budget_guard_threshold() -> f64 { 0.5 }
-fn default_half_spread_bps() -> f64 { 3.0 }
-fn default_inventory_skew_bps() -> f64 { 0.8 }
-fn default_max_inventory_fraction() -> f64 { 0.5 }
-fn default_requote_threshold_bps() -> f64 { 0.5 }
+fn default_min_spread_bps() -> f64 {
+    30.0
+}
+fn default_round_trip_cost_bps() -> f64 {
+    20.0
+}
+fn default_min_edge_bps() -> f64 {
+    5.0
+}
+fn default_max_hold_millis() -> u64 {
+    300_000
+} // 5 minutes
+fn default_stop_loss_bps() -> f64 {
+    500.0
+}
+fn default_entry_cooldown_millis() -> u64 {
+    5_000
+}
+fn default_max_vol_bps() -> f64 {
+    1000.0
+}
+fn default_panic_vol_bps() -> f64 {
+    2000.0
+}
+fn default_trade_window_millis() -> u64 {
+    60_000
+}
+fn default_min_trades_in_window() -> usize {
+    2
+}
+fn default_imbalance_skew() -> f64 {
+    0.0
+}
+fn default_max_imbalance() -> f64 {
+    1.0
+}
+fn default_require_seller_initiated() -> bool {
+    true
+}
+fn default_min_sell_flow_fraction() -> f64 {
+    0.0
+}
+fn default_price_position_window() -> usize {
+    20
+}
+fn default_max_price_position() -> f64 {
+    0.3
+}
+fn default_min_exit_edge_bps() -> f64 {
+    0.0
+}
+fn default_cash_fraction() -> f64 {
+    0.9
+}
+fn default_min_cash_fraction() -> f64 {
+    0.02
+}
+fn default_max_cash_fraction() -> f64 {
+    0.15
+}
+fn default_spread_ref_bps() -> f64 {
+    100.0
+}
+fn default_vol_ref_bps() -> f64 {
+    50.0
+}
+fn default_budget_guard_threshold() -> f64 {
+    0.5
+}
+fn default_half_spread_bps() -> f64 {
+    3.0
+}
+fn default_inventory_skew_bps() -> f64 {
+    0.8
+}
+fn default_max_inventory_fraction() -> f64 {
+    0.5
+}
+fn default_requote_threshold_bps() -> f64 {
+    0.5
+}
 
 impl Default for MarketMakerConfig {
     fn default() -> Self {
@@ -483,11 +527,7 @@ impl MarketMakerStrategy {
     ///   - budget_guard: low remaining capital → smaller bet (preventing budget exhaustion)
     ///
     /// Result is clamped to [min_cash_fraction, max_cash_fraction].
-    fn compute_dynamic_cf(
-        &self,
-        market_state: &MarketState,
-        context: &StrategyContext,
-    ) -> f64 {
+    fn compute_dynamic_cf(&self, market_state: &MarketState, context: &StrategyContext) -> f64 {
         let base_cf = self.config.cash_fraction;
 
         // --- Spread factor: wider spread = more edge = bigger bet ---
@@ -639,7 +679,8 @@ impl MarketMakerStrategy {
 
         // ========== Price position filter ==========
         if self.config.max_price_position < 1.0 && self.config.price_position_window > 0 {
-            let recent_stats = market_state.recent_trade_window_stats(self.config.price_position_window);
+            let recent_stats =
+                market_state.recent_trade_window_stats(self.config.price_position_window);
             if recent_stats.trade_count >= 2 {
                 if let (Some(low), Some(high)) = (
                     market_state.trade_window_low_price(),
@@ -812,8 +853,10 @@ impl MarketMakerStrategy {
 
         // --- Requote threshold: skip if prices haven't changed enough ---
         if self.last_buy_quote > 0.0 && self.last_sell_quote > 0.0 {
-            let buy_change_bps = ((buy_price - self.last_buy_quote) / self.last_buy_quote * 10_000.0).abs();
-            let sell_change_bps = ((sell_price - self.last_sell_quote) / self.last_sell_quote * 10_000.0).abs();
+            let buy_change_bps =
+                ((buy_price - self.last_buy_quote) / self.last_buy_quote * 10_000.0).abs();
+            let sell_change_bps =
+                ((sell_price - self.last_sell_quote) / self.last_sell_quote * 10_000.0).abs();
             if buy_change_bps < self.config.requote_threshold_bps
                 && sell_change_bps < self.config.requote_threshold_bps
             {
@@ -934,32 +977,86 @@ impl Strategy for MarketMakerStrategy {
 
     fn diagnostics(&self) -> StrategyDiagnostics {
         let mut counters = BTreeMap::new();
-        counters.insert("mm.total_decisions".into(), self.diagnostics.total_decisions);
-        counters.insert("mm.blocked_no_quote".into(), self.diagnostics.blocked_no_quote);
-        counters.insert("mm.blocked_spread_narrow".into(), self.diagnostics.blocked_spread_narrow);
-        counters.insert("mm.blocked_no_edge".into(), self.diagnostics.blocked_no_edge);
-        counters.insert("mm.blocked_vol_high".into(), self.diagnostics.blocked_vol_high);
-        counters.insert("mm.blocked_min_trades".into(), self.diagnostics.blocked_min_trades);
-        counters.insert("mm.blocked_cooldown".into(), self.diagnostics.blocked_cooldown);
-        counters.insert("mm.blocked_imbalance".into(), self.diagnostics.blocked_imbalance);
-        counters.insert("mm.blocked_not_seller_initiated".into(), self.diagnostics.blocked_not_seller_initiated);
-        counters.insert("mm.blocked_sell_flow_low".into(), self.diagnostics.blocked_sell_flow_low);
-        counters.insert("mm.blocked_price_too_high".into(), self.diagnostics.blocked_price_too_high);
-        counters.insert("mm.entries_passive".into(), self.diagnostics.entries_passive);
-        counters.insert("mm.exits_passive_sell".into(), self.diagnostics.exits_passive_sell);
-        counters.insert("mm.exits_stop_loss".into(), self.diagnostics.exits_stop_loss);
+        counters.insert(
+            "mm.total_decisions".into(),
+            self.diagnostics.total_decisions,
+        );
+        counters.insert(
+            "mm.blocked_no_quote".into(),
+            self.diagnostics.blocked_no_quote,
+        );
+        counters.insert(
+            "mm.blocked_spread_narrow".into(),
+            self.diagnostics.blocked_spread_narrow,
+        );
+        counters.insert(
+            "mm.blocked_no_edge".into(),
+            self.diagnostics.blocked_no_edge,
+        );
+        counters.insert(
+            "mm.blocked_vol_high".into(),
+            self.diagnostics.blocked_vol_high,
+        );
+        counters.insert(
+            "mm.blocked_min_trades".into(),
+            self.diagnostics.blocked_min_trades,
+        );
+        counters.insert(
+            "mm.blocked_cooldown".into(),
+            self.diagnostics.blocked_cooldown,
+        );
+        counters.insert(
+            "mm.blocked_imbalance".into(),
+            self.diagnostics.blocked_imbalance,
+        );
+        counters.insert(
+            "mm.blocked_not_seller_initiated".into(),
+            self.diagnostics.blocked_not_seller_initiated,
+        );
+        counters.insert(
+            "mm.blocked_sell_flow_low".into(),
+            self.diagnostics.blocked_sell_flow_low,
+        );
+        counters.insert(
+            "mm.blocked_price_too_high".into(),
+            self.diagnostics.blocked_price_too_high,
+        );
+        counters.insert(
+            "mm.entries_passive".into(),
+            self.diagnostics.entries_passive,
+        );
+        counters.insert(
+            "mm.exits_passive_sell".into(),
+            self.diagnostics.exits_passive_sell,
+        );
+        counters.insert(
+            "mm.exits_stop_loss".into(),
+            self.diagnostics.exits_stop_loss,
+        );
         counters.insert("mm.exits_max_hold".into(), self.diagnostics.exits_max_hold);
-        counters.insert("mm.exits_panic_vol".into(), self.diagnostics.exits_panic_vol);
+        counters.insert(
+            "mm.exits_panic_vol".into(),
+            self.diagnostics.exits_panic_vol,
+        );
         counters.insert("mm.exits_maker".into(), self.diagnostics.exits_maker);
         counters.insert("mm.exits_taker".into(), self.diagnostics.exits_taker);
 
         let mut gauges = BTreeMap::new();
-        gauges.insert("mm.last_spread_bps".into(), self.diagnostics.last_spread_bps);
+        gauges.insert(
+            "mm.last_spread_bps".into(),
+            self.diagnostics.last_spread_bps,
+        );
         gauges.insert("mm.last_edge_bps".into(), self.diagnostics.last_edge_bps);
         gauges.insert("mm.last_imbalance".into(), self.diagnostics.last_imbalance);
         gauges.insert("mm.last_vol_bps".into(), self.diagnostics.last_vol_bps);
-        gauges.insert("mm.last_price_position".into(), self.diagnostics.last_price_position);
-        gauges.insert("mm.last_effective_cf".into(), self.diagnostics.last_effective_cf);
+        gauges.insert(
+            "mm.last_price_position".into(),
+            self.diagnostics.last_price_position,
+        );
+        gauges.insert(
+            "mm.last_effective_cf".into(),
+            self.diagnostics.last_effective_cf,
+        );
 
         StrategyDiagnostics { counters, gauges }
     }
@@ -1037,9 +1134,9 @@ impl Strategy for MarketMakerStrategy {
                         .or_else(|| {
                             // In trade-only mode, estimate ask as last_price + half_spread
                             let micro = market_state.micro();
-                            market_state.last_price().map(|p| {
-                                p * (1.0 + micro.ema_spread_bps / 20_000.0)
-                            })
+                            market_state
+                                .last_price()
+                                .map(|p| p * (1.0 + micro.ema_spread_bps / 20_000.0))
                         })
                         .unwrap_or(entry_price);
 
@@ -1048,8 +1145,7 @@ impl Strategy for MarketMakerStrategy {
                     // This ensures we don't sell at a loss before fees.
                     // Does NOT affect taker exits (stop_loss, panic_vol, max_hold).
                     let exit_floor_bps = self.passive_exit_floor_bps(market_state, context);
-                    let min_sell_price =
-                        entry_price * (1.0 + exit_floor_bps / 10_000.0);
+                    let min_sell_price = entry_price * (1.0 + exit_floor_bps / 10_000.0);
                     raw_ask.max(min_sell_price)
                 } else {
                     // Taker sell at bid (conservative, fallback to last_price)
@@ -1124,8 +1220,7 @@ impl Strategy for MarketMakerStrategy {
         };
         self.diagnostics.last_effective_cf = effective_cf;
 
-        let Some(quantity) =
-            context.capped_entry_quantity(reference_price, effective_cf, None)
+        let Some(quantity) = context.capped_entry_quantity(reference_price, effective_cf, None)
         else {
             return StrategyDecision::no_action();
         };
@@ -1175,7 +1270,12 @@ mod tests {
     use trade::market::{BookLevel, BookTicker, MarketEvent, MarketState};
     use trade::models::{Position, Trade};
 
-    fn make_trade(price: f64, quantity: f64, trade_time: u64, is_buyer_market_maker: bool) -> MarketEvent {
+    fn make_trade(
+        price: f64,
+        quantity: f64,
+        trade_time: u64,
+        is_buyer_market_maker: bool,
+    ) -> MarketEvent {
         MarketEvent::Trade(Trade {
             event_type: "trade".to_string(),
             event_time: trade_time,
@@ -1280,6 +1380,8 @@ mod tests {
                 max_position_notional: 100.0,
                 initial_capital: 100.0,
                 tick_size: 0.0001,
+                step_size: None,
+                min_notional: None,
             },
         );
 
@@ -1327,6 +1429,8 @@ mod tests {
                 max_position_notional: 10.0,
                 initial_capital: 1_000.0,
                 tick_size: 0.01,
+                step_size: None,
+                min_notional: None,
             },
         );
 

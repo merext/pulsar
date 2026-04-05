@@ -1,5 +1,5 @@
-use strategies::LiquiditySweepReversalStrategy;
 use std::fs;
+use strategies::LiquiditySweepReversalStrategy;
 use trade::market::{BookLevel, BookTicker, MarketEvent, MarketState};
 use trade::strategy::{Strategy, StrategyContext};
 use trade::{OrderIntent, Position, Trade};
@@ -17,6 +17,8 @@ fn context_with_position(quantity: f64, entry_price: f64, entry_time: f64) -> St
         max_position_notional: 35.0,
         initial_capital: 100.0,
         tick_size: 0.01,
+        step_size: None,
+        min_notional: None,
     }
 }
 
@@ -70,7 +72,9 @@ async fn enters_after_local_sweep_and_reclaim() {
 
     let decision = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
     match decision.intent {
-        OrderIntent::Place { side, rationale, .. } => {
+        OrderIntent::Place {
+            side, rationale, ..
+        } => {
             assert_eq!(side, trade::Side::Buy);
             assert_eq!(rationale, "liquidity_sweep_reversal_entry");
         }
@@ -82,7 +86,8 @@ async fn enters_after_local_sweep_and_reclaim() {
 
 #[tokio::test]
 async fn exits_when_reversal_fails() {
-    let mut strategy = LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy =
+        LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     market_state.apply(&MarketEvent::BookTicker(BookTicker {
@@ -111,7 +116,9 @@ async fn exits_when_reversal_fails() {
 
     let decision = strategy.decide(&market_state, &context_with_position(250.0, 0.09925, 3.0));
     match decision.intent {
-        OrderIntent::Place { side, rationale, .. } => {
+        OrderIntent::Place {
+            side, rationale, ..
+        } => {
             assert_eq!(side, trade::Side::Sell);
             assert_eq!(rationale, "reversal_failed");
         }
@@ -121,7 +128,8 @@ async fn exits_when_reversal_fails() {
 
 #[tokio::test]
 async fn rejects_entry_when_recent_flow_or_book_support_is_weak() {
-    let mut strategy = LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy =
+        LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     let prices = [
@@ -159,7 +167,8 @@ async fn rejects_entry_when_recent_flow_or_book_support_is_weak() {
 
 #[tokio::test]
 async fn exposes_sweep_diagnostics_after_blocked_entry() {
-    let mut strategy = LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
+    let mut strategy =
+        LiquiditySweepReversalStrategy::from_file("/dev/null").expect("strategy loads");
     let mut market_state = MarketState::new("DOGEUSDT", strategy.market_state_window_millis());
 
     for index in 0..5 {
@@ -175,7 +184,10 @@ async fn exposes_sweep_diagnostics_after_blocked_entry() {
 
     let _ = strategy.decide(&market_state, &context_with_position(0.0, 0.0, 0.0));
     let diagnostics = strategy.diagnostics();
-    assert_eq!(diagnostics.counters.get("sweep.blocked_min_trades"), Some(&1));
+    assert_eq!(
+        diagnostics.counters.get("sweep.blocked_min_trades"),
+        Some(&1)
+    );
 }
 
 #[tokio::test]
@@ -230,8 +242,16 @@ async fn rejects_entry_when_reclaim_edge_does_not_clear_cost_gate() {
     assert!(matches!(decision.intent, OrderIntent::NoAction));
 
     let diagnostics = strategy.diagnostics();
-    assert_eq!(diagnostics.counters.get("sweep.blocked_cost_gate"), Some(&1));
-    assert!(diagnostics.gauges.get("sweep.last_edge_after_cost_bps").is_some_and(|value| *value < 0.0));
+    assert_eq!(
+        diagnostics.counters.get("sweep.blocked_cost_gate"),
+        Some(&1)
+    );
+    assert!(
+        diagnostics
+            .gauges
+            .get("sweep.last_edge_after_cost_bps")
+            .is_some_and(|value| *value < 0.0)
+    );
 
     let _ = fs::remove_file(config_path);
 }
