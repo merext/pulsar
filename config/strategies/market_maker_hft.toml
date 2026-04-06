@@ -1,0 +1,110 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MarketMakerHftStrategy — Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+# Tuned for DOGEFDUSD (narrow ~1 bps spread, ZERO maker fee on Binance)
+# Built from 25+ live tests + academic papers (A-S, Cartea-Jaimungal, microprice)
+# Multi-level pyramid: 3 levels per side, sizing 3:2:1 (touch→depth)
+
+# --- Pricing ---
+base_half_spread_bps = 0.6        # Base half-spread in bps
+min_half_spread_bps = 0.3         # Minimum half-spread clamp
+max_half_spread_bps = 10.0        # Maximum half-spread clamp
+volatility_reference_bps = 50.0   # Reference vol for spread scaling
+volatility_multiplier_min = 0.5   # Min vol multiplier
+volatility_multiplier_max = 4.0   # Max vol multiplier
+min_edge_bps = 0.3                # Minimum full quoted spread to emit a quote
+vwap_weight = 0.0                 # Pure microprice (0.0). Set >0 to blend with VWAP.
+
+# --- Inventory management (Avellaneda-Stoikov) ---
+max_inventory_fraction = 1.0      # Max inventory = 100% of initial_capital
+gamma = 200.0                     # A-S risk aversion. Reverted from 800 to match
+                                  # profitable GLM strategy. At gamma=200 with vol=50bps:
+                                  # full inventory shifts reservation ~4 bps.
+                                  # gamma=800 was shifting ~16 bps — too aggressive,
+                                  # pulling bids far from touch and reducing fills.
+
+# --- Sizing ---
+step_sizing_factor = 2.0          # Step sizing: qty scales near neutral inventory.
+                                  # At ratio=0.5: qty = min_qty × 2.0 (= 24 DOGE).
+                                  # At ratio=0 or 1: qty = min_qty × 1.0 (= 12 DOGE).
+                                  # 0.0 = disabled (flat min_qty on both sides).
+
+# --- Emergency exits ---
+stop_loss_bps = 500.0             # Taker exit if unrealized PnL drops 500 bps
+panic_vol_bps = 2000.0            # Taker exit if realized vol exceeds 2000 bps
+max_hold_millis = 0               # DISABLED — A-S model manages inventory via quote skewing
+max_vol_bps = 800.0               # Above this vol, no new buys (only sell to unwind)
+
+# --- Cooldown ---
+cooldown_millis = 5000            # No new buys for 5s after a taker exit
+
+# --- Adverse selection filters ---
+imbalance_threshold = 0.70            # Block buys when EMA-smoothed OB imbalance < -0.70
+                                      # Was 0.50 (too aggressive — only 2.4% two-sided in Test 13)
+                                      # 0.70 = only block during extreme imbalance
+imbalance_unblock_threshold = 0.30    # Re-enable buys when smoothed imbalance > -0.30
+                                      # Was 0.15 — gap too small, caused rapid toggle
+                                      # Hysteresis gap of 0.40 prevents oscillation
+imbalance_ema_alpha = 0.02            # EMA alpha for OB imbalance smoothing (halflife ~35 ticks)
+                                      # Was 0.05 (halflife ~14 ticks) — too reactive to noise
+                                      # Slower EMA = fewer false blocks = more two-sided quoting
+trade_flow_threshold = 0.6            # Block buys when trade flow imbalance < -0.6
+                                      # Was 0.4 — too sensitive, blocked too often
+
+# --- Trend filter (Fodra-Labadie directional bet) ---
+slow_ema_alpha = 0.01             # Halflife ~7s at 100ms/tick. Was 0.002 (35s, too laggy).
+trend_activate_ratio = 0.60       # Block buys when price falling AND ratio > 0.60
+                                  # Was 0.50 (blocked buys at balanced 50/50 position!)
+trend_deactivate_ratio = 0.50     # Re-enable buys when ratio drops below 0.50
+                                  # Was 0.40
+
+# --- Requoting ---
+requote_threshold_bps = 0.1       # Min price change before re-quoting
+
+# --- Market state window ---
+trade_window_millis = 30000       # Window for microstructure metrics
+
+# --- Join-best-price ---
+bid_join_max_ratio = 0.50         # Only join best_bid when inventory ratio < 0.50
+                                  # Above this, A-S reservation price controls bid placement
+bid_block_ratio = 0.65            # HARD block: no buy orders at all when ratio > 0.65
+                                  # Was using bid_join_max_ratio (0.35) which blocked buys
+                                  # even at balanced 50/50 position!
+
+# --- Inventory-aware bid offset ---
+bid_offset_start_ratio = 0.50     # Extra bid offset kicks in above 0.50 ratio (was 0.55)
+bid_offset_bps_per_10pct = 15.0   # Extra offset bps per 10% excess (was 10.0)
+
+# --- Inventory-aware ask offset ---
+ask_offset_start_ratio = 0.60     # Lower ask when overweight above 0.60 ratio
+ask_offset_bps_per_10pct = 15.0   # Lower ask by 15 bps per 10% excess to liquidate faster
+
+# --- Multi-level pyramid quoting (Cartea-Jaimungal) ---
+# KEY CHANGE: From single-level back to 3-level, but with PYRAMID sizing.
+# Academic basis: Cartea-Jaimungal multi-level optimal control.
+# Most volume at touch (lowest adverse selection), least at depth.
+# Old approach (inverted pyramid 12→24→36) was catastrophic — deepest levels
+# only fill during sweeps = maximum adverse selection with maximum size.
+# New pyramid (36→24→12) puts max volume where fills are safest.
+ladder_levels = 3                 # 3 levels per side (L0=touch, L1=touch±1t, L2=touch±2t)
+ladder_size_scale = 1.0           # Pyramid factor. qty = min_qty × max(1, (3-L) × 1.0)
+                                  # L0: 36 DOGE, L1: 24 DOGE, L2: 12 DOGE (= 3:2:1)
+ladder_join_best = true           # Level 0 joins best bid/ask for queue priority
+
+# --- Sell-side inventory guard (FIX I) ---
+ask_block_ratio = 0.20            # Block ALL sells when inventory ratio < 0.20
+                                  # Lowered from 0.35 — was too protective, caused sell-only mode
+                                  # Level-specific: L2 pulled at 0.30, L1 at 0.25, L0 at 0.20
+                                  # Only blocks sells when DOGE almost fully depleted
+
+# --- Dynamic gamma (FIX J — DISABLED) ---
+gamma_skew_multiplier = 0.0       # DISABLED: Tests 24-25 showed dynamic gamma + ask widen
+                                  # were counter-productive. Tests 22-23 were profitable without them.
+                                  # gamma_eff = gamma × (1 + 0.0 × q²) = constant 200
+
+# --- Symmetric ask widen for LOW inventory (FIX K — DISABLED) ---
+ask_widen_start_ratio = 0.0       # DISABLED: 0.0 means this logic never triggers.
+                                  # Tests 24-25 showed widening asks on low inventory was
+                                  # counter-productive — combined with FIX J it caused
+                                  # sell VWAP < buy VWAP (buying high, selling low).
+ask_widen_bps_per_10pct = 15.0    # Irrelevant when start_ratio=0.0

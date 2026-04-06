@@ -24,6 +24,10 @@ inventory_skew_factor = 200.0     # Avellaneda-Stoikov gamma (risk aversion). Hi
 
 # --- Sizing ---
 cash_fraction = 0.30              # Base cash fraction per entry
+step_sizing_factor = 2.0          # Step sizing: qty scales up near neutral inventory.
+                                  # At ratio=0.5: qty = min_qty × 2.0 (= 24 DOGE).
+                                  # At ratio=0 or 1: qty = min_qty × 1.0 (= 12 DOGE).
+                                  # 0.0 = disabled (flat min_qty on both sides).
 dynamic_sizing = false            # Enable vol/spread/budget-adjusted sizing
 min_cash_fraction = 0.02          # Floor for dynamic sizing
 max_cash_fraction = 0.40          # Ceiling for dynamic sizing
@@ -46,7 +50,8 @@ max_vol_bps = 800.0               # Above this vol, no new buys (only sell to un
 cooldown_millis = 5000            # No new buys for 5s after a taker exit
 
 # --- Adverse selection filters ---
-max_imbalance = 1.0               # Order book imbalance gate [-1,1]. 1.0 = disabled
+max_imbalance = 0.35              # Order book imbalance gate [-1,1]. Blocks buys when imbalance < -0.35
+                                  # (strong sell pressure). 1.0 = disabled. Re-enabled after microprice fix.
 min_sell_flow_fraction = 0.0      # Min seller-initiated volume fraction. 0.0 = disabled
 min_trades_in_window = 0          # Min trades in window before allowing entry. 0 = disabled
 

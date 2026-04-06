@@ -1,0 +1,982 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// MarketMakerHftStrategy — High-frequency two-sided market maker
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Built from 25 live tests and academic foundations:
+//   - Avellaneda-Stoikov reservation price model
+//   - Microprice for fair value estimation
+//   - Order book imbalance filter for adverse selection protection
+//   - Step sizing for inventory-aware quantity scaling
+//   - Fodra-Labadie directional bets via trend filter
+//
+// DESIGN PRINCIPLES:
+//   1. Zero maker fee → profit = spread captured (every filled round-trip)
+//   2. Inventory managed via PRICE skew (A-S), not quantity
+//   3. Step sizing: bigger qty near neutral, min_qty at extremes
+//   4. Always join best bid/ask on tight-spread pairs (~1 bps)
+//   5. Change-detection logging (no time-based throttle)
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::path::Path;
+use tracing::info;
+use trade::execution::{DecisionMetric, OrderIntent, Side, TimeInForce};
+use trade::market::{MarketEvent, MarketState};
+use trade::strategy::{
+    NoOpStrategyLogger, Strategy, StrategyContext, StrategyDecision, StrategyDiagnostics,
+    StrategyLogger,
+};
+use trade::trader::OrderType;
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MarketMakerHftConfig {
+    // --- Pricing ---
+
+    /// Base half-spread in bps (buy at fair - hs, sell at fair + hs).
+    #[serde(default = "default_base_half_spread_bps")]
+    pub base_half_spread_bps: f64,
+
+    /// Minimum half-spread clamp.
+    #[serde(default = "default_min_half_spread_bps")]
+    pub min_half_spread_bps: f64,
+
+    /// Maximum half-spread clamp.
+    #[serde(default = "default_max_half_spread_bps")]
+    pub max_half_spread_bps: f64,
+
+    /// Reference volatility for spread scaling (bps).
+    #[serde(default = "default_volatility_reference_bps")]
+    pub volatility_reference_bps: f64,
+
+    #[serde(default = "default_volatility_multiplier_min")]
+    pub volatility_multiplier_min: f64,
+
+    #[serde(default = "default_volatility_multiplier_max")]
+    pub volatility_multiplier_max: f64,
+
+    /// Minimum quoted full spread in bps to emit a quote.
+    #[serde(default = "default_min_edge_bps")]
+    pub min_edge_bps: f64,
+
+    /// Weight of VWAP anchor in fair price [0, 1].
+    /// fair = (1 - vwap_weight) * microprice + vwap_weight * vwap
+    /// 0.0 = pure microprice.
+    #[serde(default = "default_vwap_weight")]
+    pub vwap_weight: f64,
+
+    // --- Inventory management ---
+
+    /// Max inventory as fraction of initial_capital [0, 1].
+    #[serde(default = "default_max_inventory_fraction")]
+    pub max_inventory_fraction: f64,
+
+    /// Avellaneda-Stoikov gamma (risk aversion).
+    /// At gamma=200 with vol=50bps: full inventory shifts ~4 bps.
+    #[serde(default = "default_gamma")]
+    pub gamma: f64,
+
+    // --- Sizing ---
+
+    /// Step sizing factor. Scales quantity near neutral inventory:
+    ///   qty = min_qty × (1 + factor × (0.5 - |ratio - 0.5|))
+    /// 0.0 = flat min_qty on both sides.
+    #[serde(default = "default_step_sizing_factor")]
+    pub step_sizing_factor: f64,
+
+    // --- Emergency exits ---
+
+    /// Stop loss in bps. Taker exit if unrealized PnL drops this many bps.
+    #[serde(default = "default_stop_loss_bps")]
+    pub stop_loss_bps: f64,
+
+    /// Panic vol threshold. Taker exit if realized vol exceeds this.
+    #[serde(default = "default_panic_vol_bps")]
+    pub panic_vol_bps: f64,
+
+    /// Max hold time in milliseconds. 0 = disabled.
+    #[serde(default = "default_max_hold_millis")]
+    pub max_hold_millis: u64,
+
+    /// Max vol to allow new buys. Above this, only sell side active.
+    #[serde(default = "default_max_vol_bps")]
+    pub max_vol_bps: f64,
+
+    // --- Cooldown ---
+
+    /// Cooldown after taker exit in ms. No new buys during cooldown.
+    #[serde(default = "default_cooldown_millis")]
+    pub cooldown_millis: u64,
+
+    // --- Adverse selection filters ---
+
+    /// Order book imbalance threshold [0, 1]. Block buys when imbalance < -threshold.
+    /// 1.0 = disabled.
+    /// NOTE: This is the BLOCK threshold. Buys re-enabled at -imbalance_unblock_threshold.
+    /// Uses EMA-smoothed imbalance (not raw bookTicker) for stability.
+    #[serde(default = "default_imbalance_threshold")]
+    pub imbalance_threshold: f64,
+
+    /// Order book imbalance unblock threshold [0, 1].
+    /// Buys re-enabled when smoothed imbalance rises above -unblock_threshold.
+    /// Must be < imbalance_threshold to create hysteresis gap.
+    /// Default 0.15 → block at -0.50, unblock at -0.15.
+    #[serde(default = "default_imbalance_unblock_threshold")]
+    pub imbalance_unblock_threshold: f64,
+
+    /// EMA alpha for smoothing order book imbalance. ~0.05 = halflife ~14 ticks.
+    /// Higher = more responsive, lower = smoother.
+    #[serde(default = "default_imbalance_ema_alpha")]
+    pub imbalance_ema_alpha: f64,
+
+    /// Trade flow imbalance threshold [-1, 1]. Block buys when trade flow < -threshold.
+    /// Negative trade flow = selling dominates.
+    /// 1.0 = disabled.
+    #[serde(default = "default_trade_flow_threshold")]
+    pub trade_flow_threshold: f64,
+
+    // --- Trend filter ---
+
+    /// Slow EMA alpha for trend detection. ~0.002 = halflife ~35s at 100ms/tick.
+    #[serde(default = "default_slow_ema_alpha")]
+    pub slow_ema_alpha: f64,
+
+    /// Inventory ratio to activate trend filter (block buys when falling).
+    #[serde(default = "default_trend_activate_ratio")]
+    pub trend_activate_ratio: f64,
+
+    /// Inventory ratio to deactivate trend filter (hysteresis).
+    #[serde(default = "default_trend_deactivate_ratio")]
+    pub trend_deactivate_ratio: f64,
+
+    // --- Requoting ---
+
+    /// Min price change in bps before re-quoting.
+    #[serde(default = "default_requote_threshold_bps")]
+    pub requote_threshold_bps: f64,
+
+    // --- Market state window ---
+
+    /// Window in ms for trade_window_stats / microstructure.
+    #[serde(default = "default_trade_window_millis")]
+    pub trade_window_millis: u64,
+
+    // --- Join-best-price ---
+
+    /// Inventory ratio below which bids join best_bid.
+    /// Above this ratio, A-S reservation price controls bid placement.
+    #[serde(default = "default_bid_join_max_ratio")]
+    pub bid_join_max_ratio: f64,
+
+    /// Inventory ratio above which ALL buy orders are blocked completely.
+    /// This is a hard safety limit, separate from bid_join_max_ratio (which
+    /// only controls whether bids join the best price vs offset placement).
+    #[serde(default = "default_bid_block_ratio")]
+    pub bid_block_ratio: f64,
+
+    // --- Inventory-aware bid offset ---
+
+    /// Ratio above which extra bid offset kicks in.
+    #[serde(default = "default_bid_offset_start_ratio")]
+    pub bid_offset_start_ratio: f64,
+
+    /// Extra offset bps per 0.10 ratio above bid_offset_start_ratio.
+    #[serde(default = "default_bid_offset_bps_per_10pct")]
+    pub bid_offset_bps_per_10pct: f64,
+
+    // --- Inventory-aware ask offset ---
+
+    /// Ratio above which ask offset (price lowered) kicks in to liquidate inventory faster.
+    #[serde(default = "default_ask_offset_start_ratio")]
+    pub ask_offset_start_ratio: f64,
+
+    /// Extra offset bps per 0.10 ratio above ask_offset_start_ratio.
+    /// Positive = ask price lowered towards mid to fill faster.
+    #[serde(default = "default_ask_offset_bps_per_10pct")]
+    pub ask_offset_bps_per_10pct: f64,
+
+    // --- Ladder quoting ---
+
+    /// Number of price levels per side (1 = single level like QuoteBothSides).
+    /// Default 3: Level 0 at best, Level 1 at best±1tick, Level 2 at best±2ticks.
+    #[serde(default = "default_ladder_levels")]
+    pub ladder_levels: usize,
+
+    /// Size multiplier for deeper levels.
+    /// Level N quantity = min_qty × (1 + N × ladder_size_scale).
+    /// Default 1.0: Level 0 = min_qty, Level 1 = 2×min_qty, Level 2 = 3×min_qty.
+    #[serde(default = "default_ladder_size_scale")]
+    pub ladder_size_scale: f64,
+
+    /// Whether Level 0 (best price) should join best bid/ask.
+    /// When true, Level 0 sits at best bid/ask for queue priority.
+    /// When false, all levels offset from reservation price.
+    #[serde(default = "default_ladder_join_best")]
+    pub ladder_join_best: bool,
+}
+
+// Defaults — tuned for DOGEFDUSD (1 bps spread, zero maker fee)
+fn default_base_half_spread_bps() -> f64 { 0.6 }
+fn default_min_half_spread_bps() -> f64 { 0.3 }
+fn default_max_half_spread_bps() -> f64 { 10.0 }
+fn default_volatility_reference_bps() -> f64 { 50.0 }
+fn default_volatility_multiplier_min() -> f64 { 0.5 }
+fn default_volatility_multiplier_max() -> f64 { 4.0 }
+fn default_min_edge_bps() -> f64 { 0.3 }
+fn default_vwap_weight() -> f64 { 0.0 }
+fn default_max_inventory_fraction() -> f64 { 1.0 }
+fn default_gamma() -> f64 { 200.0 }
+fn default_step_sizing_factor() -> f64 { 2.0 }
+fn default_stop_loss_bps() -> f64 { 500.0 }
+fn default_panic_vol_bps() -> f64 { 2000.0 }
+fn default_max_hold_millis() -> u64 { 0 } // disabled for MM
+fn default_max_vol_bps() -> f64 { 800.0 }
+fn default_cooldown_millis() -> u64 { 5_000 }
+fn default_imbalance_threshold() -> f64 { 0.50 }
+fn default_imbalance_unblock_threshold() -> f64 { 0.15 }
+fn default_imbalance_ema_alpha() -> f64 { 0.05 }
+fn default_trade_flow_threshold() -> f64 { 1.0 } // disabled
+fn default_slow_ema_alpha() -> f64 { 0.002 }
+fn default_trend_activate_ratio() -> f64 { 0.65 }
+fn default_trend_deactivate_ratio() -> f64 { 0.55 }
+fn default_requote_threshold_bps() -> f64 { 0.1 }
+fn default_trade_window_millis() -> u64 { 30_000 }
+fn default_bid_join_max_ratio() -> f64 { 0.50 }
+fn default_bid_block_ratio() -> f64 { 0.65 }
+fn default_bid_offset_start_ratio() -> f64 { 0.55 }
+fn default_bid_offset_bps_per_10pct() -> f64 { 10.0 }
+fn default_ask_offset_start_ratio() -> f64 { 0.60 }
+fn default_ask_offset_bps_per_10pct() -> f64 { 15.0 }
+fn default_ladder_levels() -> usize { 3 }
+fn default_ladder_size_scale() -> f64 { 1.0 }
+fn default_ladder_join_best() -> bool { true }
+
+impl Default for MarketMakerHftConfig {
+    fn default() -> Self {
+        Self {
+            base_half_spread_bps: default_base_half_spread_bps(),
+            min_half_spread_bps: default_min_half_spread_bps(),
+            max_half_spread_bps: default_max_half_spread_bps(),
+            volatility_reference_bps: default_volatility_reference_bps(),
+            volatility_multiplier_min: default_volatility_multiplier_min(),
+            volatility_multiplier_max: default_volatility_multiplier_max(),
+            min_edge_bps: default_min_edge_bps(),
+            vwap_weight: default_vwap_weight(),
+            max_inventory_fraction: default_max_inventory_fraction(),
+            gamma: default_gamma(),
+            step_sizing_factor: default_step_sizing_factor(),
+            stop_loss_bps: default_stop_loss_bps(),
+            panic_vol_bps: default_panic_vol_bps(),
+            max_hold_millis: default_max_hold_millis(),
+            max_vol_bps: default_max_vol_bps(),
+            cooldown_millis: default_cooldown_millis(),
+            imbalance_threshold: default_imbalance_threshold(),
+            imbalance_unblock_threshold: default_imbalance_unblock_threshold(),
+            imbalance_ema_alpha: default_imbalance_ema_alpha(),
+            trade_flow_threshold: default_trade_flow_threshold(),
+            slow_ema_alpha: default_slow_ema_alpha(),
+            trend_activate_ratio: default_trend_activate_ratio(),
+            trend_deactivate_ratio: default_trend_deactivate_ratio(),
+            requote_threshold_bps: default_requote_threshold_bps(),
+            trade_window_millis: default_trade_window_millis(),
+            bid_join_max_ratio: default_bid_join_max_ratio(),
+            bid_block_ratio: default_bid_block_ratio(),
+            bid_offset_start_ratio: default_bid_offset_start_ratio(),
+            bid_offset_bps_per_10pct: default_bid_offset_bps_per_10pct(),
+            ask_offset_start_ratio: default_ask_offset_start_ratio(),
+            ask_offset_bps_per_10pct: default_ask_offset_bps_per_10pct(),
+            ladder_levels: default_ladder_levels(),
+            ladder_size_scale: default_ladder_size_scale(),
+            ladder_join_best: default_ladder_join_best(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+struct HftDiagnostics {
+    total_decisions: usize,
+    blocked_no_quote: usize,
+    blocked_vol_high: usize,
+    blocked_no_edge: usize,
+    blocked_cooldown: usize,
+    blocked_imbalance: usize,
+    blocked_trade_flow: usize,
+    blocked_trend: usize,
+
+    exits_stop_loss: usize,
+    exits_panic_vol: usize,
+    exits_max_hold: usize,
+
+    last_mid_price: f64,
+    last_fair_price: f64,
+    last_half_spread_bps: f64,
+    last_buy_price: f64,
+    last_sell_price: f64,
+    last_buy_quantity: f64,
+    last_sell_quantity: f64,
+    last_inventory_ratio: f64,
+    last_quoted_spread_bps: f64,
+    last_reservation_shift_bps: f64,
+}
+
+// ---------------------------------------------------------------------------
+// Strategy
+// ---------------------------------------------------------------------------
+
+pub struct MarketMakerHftStrategy {
+    config: MarketMakerHftConfig,
+    logger: NoOpStrategyLogger,
+    diagnostics: HftDiagnostics,
+    last_buy_quote: f64,
+    last_sell_quote: f64,
+    last_exit_time_millis: Option<u64>,
+    slow_ema_mid: f64,
+    trend_filter_was_active: bool,
+    /// EMA-smoothed order book imbalance [-1, 1].
+    imbalance_ema: f64,
+    /// Whether the imbalance filter is currently blocking buys (hysteresis state).
+    imbalance_filter_was_active: bool,
+}
+
+impl MarketMakerHftStrategy {
+    fn load_config<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<MarketMakerHftConfig, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path.as_ref())?;
+        let config: MarketMakerHftConfig = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    // --- Fair price: microprice with optional VWAP anchor ---
+    //
+    // microprice = bid × ask_qty / (bid_qty + ask_qty) + ask × bid_qty / (bid_qty + ask_qty)
+    //
+    // When VWAP is available and vwap_weight > 0:
+    //   fair = (1 - w) × microprice + w × vwap
+    //
+    // Returns (best_bid, best_ask, mid_price, fair_price).
+    // mid_price = simple (bid + ask) / 2, used for ratio calculations.
+    // fair_price = microprice or blend, used as A-S reference.
+    fn fair_price_and_book(
+        &self,
+        market_state: &MarketState,
+    ) -> Option<(f64, f64, f64, f64)> {
+        let book = market_state.top_of_book()?;
+        let bid = book.bid.price;
+        let ask = book.ask.price;
+        if bid <= f64::EPSILON || ask <= bid {
+            return None;
+        }
+
+        let mid = (bid + ask) / 2.0;
+
+        // Microprice
+        let bid_qty = book.bid.quantity;
+        let ask_qty = book.ask.quantity;
+        let total_qty = bid_qty + ask_qty;
+        let microprice = if total_qty > f64::EPSILON {
+            bid * ask_qty / total_qty + ask * bid_qty / total_qty
+        } else {
+            mid
+        };
+
+        // Optional VWAP blend
+        let fair = if self.config.vwap_weight > f64::EPSILON {
+            if let Some(vwap) = market_state.trade_window_vwap() {
+                let w = self.config.vwap_weight.clamp(0.0, 1.0);
+                (1.0 - w) * microprice + w * vwap
+            } else {
+                microprice
+            }
+        } else {
+            microprice
+        };
+
+        if fair > f64::EPSILON {
+            Some((bid, ask, mid, fair))
+        } else {
+            None
+        }
+    }
+
+    /// Dynamic half-spread scaled by realized volatility.
+    fn dynamic_half_spread_bps(&self, market_state: &MarketState) -> f64 {
+        let vol_bps = market_state.micro().realized_vol_bps.max(1.0);
+        let reference = self.config.volatility_reference_bps.max(1.0);
+        let vol_multiplier = (vol_bps / reference).clamp(
+            self.config.volatility_multiplier_min,
+            self.config.volatility_multiplier_max,
+        );
+        (self.config.base_half_spread_bps * vol_multiplier).clamp(
+            self.config.min_half_spread_bps,
+            self.config.max_half_spread_bps,
+        )
+    }
+
+    /// Inventory ratio [0, 1]. 0 = empty, 1 = max capacity.
+    fn compute_inventory_ratio(&self, context: &StrategyContext, mid_price: f64) -> f64 {
+        let max_inv = self.max_inventory_notional(context);
+        if max_inv <= f64::EPSILON {
+            return 0.0;
+        }
+        let current = context.current_position.quantity * mid_price;
+        (current / max_inv).clamp(0.0, 1.0)
+    }
+
+    /// Maximum inventory in notional terms.
+    fn max_inventory_notional(&self, context: &StrategyContext) -> f64 {
+        if context.initial_capital > f64::EPSILON {
+            context.initial_capital * self.config.max_inventory_fraction
+        } else if context.max_position_notional > f64::EPSILON {
+            context.max_position_notional
+        } else {
+            0.0
+        }
+    }
+
+    /// Check cooldown after taker exit.
+    fn in_cooldown(&self, market_state: &MarketState) -> bool {
+        if self.config.cooldown_millis == 0 {
+            return false;
+        }
+        let Some(now) = market_state.last_event_time_millis() else {
+            return true;
+        };
+        match self.last_exit_time_millis {
+            Some(exit_time) => now.saturating_sub(exit_time) < self.config.cooldown_millis,
+            None => false,
+        }
+    }
+
+    /// Update EMA-smoothed imbalance. Called once per decide() cycle,
+    /// BEFORE any filter checks, to avoid the double-update bug.
+    fn update_imbalance_ema(&mut self, market_state: &MarketState) {
+        if let Some(raw_imbalance) = market_state.order_book_imbalance() {
+            let alpha = self.config.imbalance_ema_alpha;
+            if self.imbalance_ema.abs() < f64::EPSILON
+                && !self.imbalance_filter_was_active
+            {
+                self.imbalance_ema = raw_imbalance;
+            } else {
+                self.imbalance_ema =
+                    alpha * raw_imbalance + (1.0 - alpha) * self.imbalance_ema;
+            }
+        }
+    }
+
+    /// Buy-side filters. Returns true if buying is allowed.
+    /// NOTE: imbalance_ema is updated in update_imbalance_ema() before this runs.
+    fn check_buy_filters(&mut self, market_state: &MarketState) -> bool {
+        // Order book imbalance filter with EMA smoothing + hysteresis
+        if self.config.imbalance_threshold < 1.0 {
+            if let Some(raw_imbalance) = market_state.order_book_imbalance() {
+                // Hysteresis: block at -threshold, unblock at -unblock_threshold
+                let should_block = if self.imbalance_filter_was_active {
+                    // Already blocking — stay blocked until imbalance recovers
+                    self.imbalance_ema < -self.config.imbalance_unblock_threshold
+                } else {
+                    // Not blocking — only block if imbalance drops below threshold
+                    self.imbalance_ema < -self.config.imbalance_threshold
+                };
+
+                if should_block {
+                    if !self.imbalance_filter_was_active {
+                        info!(
+                            smoothed_imbalance = format!("{:.3}", self.imbalance_ema),
+                            raw_imbalance = format!("{:.3}", raw_imbalance),
+                            threshold = format!("{:.3}", -self.config.imbalance_threshold),
+                            "HFT imbalance filter: blocking buys"
+                        );
+                        self.imbalance_filter_was_active = true;
+                    }
+                    self.diagnostics.blocked_imbalance += 1;
+                    return false;
+                } else if self.imbalance_filter_was_active {
+                    info!(
+                        smoothed_imbalance = format!("{:.3}", self.imbalance_ema),
+                        raw_imbalance = format!("{:.3}", raw_imbalance),
+                        unblock_at = format!("{:.3}", -self.config.imbalance_unblock_threshold),
+                        "HFT imbalance filter: buys re-enabled"
+                    );
+                    self.imbalance_filter_was_active = false;
+                }
+            }
+        }
+
+        // Trade flow imbalance filter
+        if self.config.trade_flow_threshold < 1.0 {
+            let flow = market_state.trade_flow_imbalance();
+            // flow < 0 means seller-dominated
+            if flow < -self.config.trade_flow_threshold {
+                self.diagnostics.blocked_trade_flow += 1;
+                return false;
+            }
+        }
+
+        // Cooldown
+        if self.in_cooldown(market_state) {
+            self.diagnostics.blocked_cooldown += 1;
+            return false;
+        }
+
+        true
+    }
+
+    /// Emergency taker exits. Returns Some((rationale, exit_price)) if should exit.
+    fn check_emergency_exit(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+        bid_price: f64,
+    ) -> Option<(&'static str, f64)> {
+        if context.current_position.quantity <= f64::EPSILON {
+            return None;
+        }
+
+        let entry_price = context.current_position.entry_price;
+        if entry_price <= f64::EPSILON {
+            return None;
+        }
+
+        let valuation_price = market_state
+            .top_of_book()
+            .map(|b| b.bid.price)
+            .unwrap_or(bid_price);
+
+        let pnl_bps = (valuation_price - entry_price) / entry_price * 10_000.0;
+
+        // Stop loss
+        if pnl_bps <= -self.config.stop_loss_bps {
+            self.diagnostics.exits_stop_loss += 1;
+            return Some(("stop_loss", valuation_price));
+        }
+
+        // Panic vol
+        let vol_bps = market_state.micro().realized_vol_bps;
+        if vol_bps > self.config.panic_vol_bps {
+            self.diagnostics.exits_panic_vol += 1;
+            return Some(("panic_vol", valuation_price));
+        }
+
+        // Max hold time
+        if let Some(now) = market_state.last_event_time_millis() {
+            if context.current_position.entry_time > 0.0 && self.config.max_hold_millis > 0 {
+                let held_millis =
+                    now.saturating_sub((context.current_position.entry_time * 1000.0) as u64);
+                if held_millis >= self.config.max_hold_millis {
+                    self.diagnostics.exits_max_hold += 1;
+                    return Some(("max_hold_time", valuation_price));
+                }
+            }
+        }
+
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Strategy trait
+// ---------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+impl Strategy for MarketMakerHftStrategy {
+    fn logger(&self) -> &dyn StrategyLogger {
+        &self.logger
+    }
+
+    fn from_file<P: AsRef<Path>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized,
+    {
+        let config = Self::load_config(config_path)?;
+        Ok(Self {
+            config,
+            logger: NoOpStrategyLogger,
+            diagnostics: HftDiagnostics::default(),
+            last_buy_quote: 0.0,
+            last_sell_quote: 0.0,
+            last_exit_time_millis: None,
+            slow_ema_mid: 0.0,
+            trend_filter_was_active: false,
+            imbalance_ema: 0.0,
+            imbalance_filter_was_active: false,
+        })
+    }
+
+    fn get_info(&self) -> String {
+        "MarketMakerHftStrategy - HFT two-sided maker with microprice, A-S reservation, step sizing".to_string()
+    }
+
+    fn diagnostics(&self) -> StrategyDiagnostics {
+        let mut counters = BTreeMap::new();
+        counters.insert("hft.total_decisions".into(), self.diagnostics.total_decisions);
+        counters.insert("hft.blocked_no_quote".into(), self.diagnostics.blocked_no_quote);
+        counters.insert("hft.blocked_vol_high".into(), self.diagnostics.blocked_vol_high);
+        counters.insert("hft.blocked_no_edge".into(), self.diagnostics.blocked_no_edge);
+        counters.insert("hft.blocked_cooldown".into(), self.diagnostics.blocked_cooldown);
+        counters.insert("hft.blocked_imbalance".into(), self.diagnostics.blocked_imbalance);
+        counters.insert("hft.blocked_trade_flow".into(), self.diagnostics.blocked_trade_flow);
+        counters.insert("hft.blocked_trend".into(), self.diagnostics.blocked_trend);
+        counters.insert("hft.exits_stop_loss".into(), self.diagnostics.exits_stop_loss);
+        counters.insert("hft.exits_panic_vol".into(), self.diagnostics.exits_panic_vol);
+        counters.insert("hft.exits_max_hold".into(), self.diagnostics.exits_max_hold);
+
+        let mut gauges = BTreeMap::new();
+        gauges.insert("hft.last_mid_price".into(), self.diagnostics.last_mid_price);
+        gauges.insert("hft.last_fair_price".into(), self.diagnostics.last_fair_price);
+        gauges.insert("hft.last_half_spread_bps".into(), self.diagnostics.last_half_spread_bps);
+        gauges.insert("hft.last_buy_price".into(), self.diagnostics.last_buy_price);
+        gauges.insert("hft.last_sell_price".into(), self.diagnostics.last_sell_price);
+        gauges.insert("hft.last_buy_quantity".into(), self.diagnostics.last_buy_quantity);
+        gauges.insert("hft.last_sell_quantity".into(), self.diagnostics.last_sell_quantity);
+        gauges.insert("hft.last_inventory_ratio".into(), self.diagnostics.last_inventory_ratio);
+        gauges.insert("hft.last_quoted_spread_bps".into(), self.diagnostics.last_quoted_spread_bps);
+        gauges.insert("hft.last_reservation_shift_bps".into(), self.diagnostics.last_reservation_shift_bps);
+
+        StrategyDiagnostics { counters, gauges }
+    }
+
+    fn market_state_window_millis(&self) -> u64 {
+        self.config.trade_window_millis
+    }
+
+    async fn on_event(&mut self, _event: &MarketEvent, _market_state: &MarketState) {}
+
+    fn decide(
+        &mut self,
+        market_state: &MarketState,
+        context: &StrategyContext,
+    ) -> StrategyDecision {
+        self.diagnostics.total_decisions += 1;
+
+        // ─── 1. Market data ─────────────────────────────────────────────
+        let Some((best_bid, best_ask, mid_price, fair_price)) =
+            self.fair_price_and_book(market_state)
+        else {
+            self.diagnostics.blocked_no_quote += 1;
+            return StrategyDecision::no_action();
+        };
+
+        // ─── 2. Slow EMA for trend detection ────────────────────────────
+        let alpha = self.config.slow_ema_alpha;
+        if self.slow_ema_mid <= f64::EPSILON {
+            self.slow_ema_mid = mid_price;
+        } else {
+            self.slow_ema_mid = alpha * mid_price + (1.0 - alpha) * self.slow_ema_mid;
+        }
+
+        // ─── 3. Emergency taker exits ───────────────────────────────────
+        if let Some((rationale, exit_price)) =
+            self.check_emergency_exit(market_state, context, best_bid)
+        {
+            self.last_exit_time_millis = market_state.last_event_time_millis();
+            return StrategyDecision {
+                confidence: 1.0,
+                intent: OrderIntent::Place {
+                    side: Side::Sell,
+                    order_type: OrderType::Taker,
+                    price: Some(exit_price),
+                    quantity: context.current_position.quantity,
+                    time_in_force: TimeInForce::Ioc,
+                    rationale,
+                    expected_edge_bps: 0.0,
+                },
+                metrics: vec![
+                    DecisionMetric { name: "exit_price", value: exit_price },
+                    DecisionMetric { name: "position_quantity", value: context.current_position.quantity },
+                ],
+            };
+        }
+
+        // ─── 4. Vol gate ────────────────────────────────────────────────
+        let micro = market_state.micro();
+        if micro.realized_vol_bps > self.config.panic_vol_bps {
+            return StrategyDecision::no_action();
+        }
+
+        // ─── 5. Avellaneda-Stoikov reservation price ────────────────────
+        //
+        //   reservation = fair_price - q × γ × σ²
+        //
+        // q_normalized: 0→-1, 0.5→0, 1.0→+1
+        // σ in price terms
+        let inventory_ratio = self.compute_inventory_ratio(context, mid_price);
+        let gamma = self.config.gamma.max(0.0);
+        let q_normalized = 2.0 * inventory_ratio - 1.0;
+        let vol_price = micro.realized_vol_bps / 10_000.0 * mid_price;
+        let reservation_shift = q_normalized * gamma * vol_price * vol_price;
+        let reservation_price = fair_price - reservation_shift;
+
+        // ─── 6. Dynamic half-spread ─────────────────────────────────────
+        let half_spread_bps = self.dynamic_half_spread_bps(market_state);
+
+        let tick_size = context.tick_size.max(f64::EPSILON);
+
+        // ─── 6b. Update imbalance EMA (once per cycle, before filters) ──
+        self.update_imbalance_ema(market_state);
+
+        // ─── 7. Buy-side filters ───────────────────────────────────────
+        // Block buys when inventory is dangerously overweight (above bid_block_ratio).
+        // This prevents the catastrophic pattern: start overweight → buy more → panic sell.
+        // Note: bid_join_max_ratio (default 0.50) only controls whether we join
+        // best_bid for queue priority; bid_block_ratio (default 0.65) is the hard block.
+        let buy_allowed = if inventory_ratio > self.config.bid_block_ratio {
+            false
+        } else if micro.realized_vol_bps > self.config.max_vol_bps {
+            self.diagnostics.blocked_vol_high += 1;
+            false
+        } else if !self.check_buy_filters(market_state) {
+            false
+        } else {
+            // Trend filter with hysteresis (Fodra-Labadie directional bet)
+            let price_falling = mid_price < self.slow_ema_mid;
+            let trend_should_block = if self.trend_filter_was_active {
+                price_falling && inventory_ratio > self.config.trend_deactivate_ratio
+            } else {
+                price_falling && inventory_ratio > self.config.trend_activate_ratio
+            };
+            if trend_should_block {
+                if !self.trend_filter_was_active {
+                    info!(
+                        mid = format!("{:.5}", mid_price),
+                        slow_ema = format!("{:.5}", self.slow_ema_mid),
+                        inv_ratio = format!("{:.3}", inventory_ratio),
+                        "HFT trend filter: blocking buys"
+                    );
+                    self.trend_filter_was_active = true;
+                }
+                self.diagnostics.blocked_trend += 1;
+                false
+            } else {
+                if self.trend_filter_was_active {
+                    info!(
+                        mid = format!("{:.5}", mid_price),
+                        slow_ema = format!("{:.5}", self.slow_ema_mid),
+                        inv_ratio = format!("{:.3}", inventory_ratio),
+                        "HFT trend filter: buys re-enabled"
+                    );
+                    self.trend_filter_was_active = false;
+                }
+                true
+            }
+        };
+
+        // ─── 7b. Sell-side: ALWAYS ALLOWED ─────────────────────────────
+        // KEY LESSON from GLM strategy (profitable): NEVER block sells.
+        // Sells reduce inventory risk — the only constraint is position > 0,
+        // which is enforced later via remaining_position clamp.
+        // Sell-side filters (imbalance, trade flow, trend) were causing the
+        // strategy to hold losing inventory during downtrends instead of
+        // unwinding it through maker sells.
+        let sell_allowed = true;
+
+        // ─── 8. Compute min_qty ────────────────────────────────────────
+        let min_notional = context.min_notional.unwrap_or(1.0);
+        let step_size = context.step_size.unwrap_or(1.0);
+        let min_qty = ((min_notional / best_bid).ceil() / step_size).ceil() * step_size;
+
+        // ─── 9. Build multi-level ladder ───────────────────────────────
+        //
+        // For each level L (0..ladder_levels):
+        //   bid_price[L] = base_bid - L × tick_size
+        //   ask_price[L] = base_ask + L × tick_size
+        //   bid_qty[L]   = min_qty × (1 + L × ladder_size_scale)
+        //   ask_qty[L]   = min_qty × (1 + L × ladder_size_scale)
+        //
+        // Level 0 base_bid/ask: join best_bid/ask (when ladder_join_best
+        // and inventory allows) or use reservation-based price.
+        //
+        // A-S reservation shift is applied as an offset to ALL levels:
+        //   - Positive shift (overweight) → push bids down, push asks down
+        //   - This is the same concept as single-level, applied uniformly.
+        //
+        // Inventory-aware bid/ask offsets are applied on top.
+
+        let n_levels = self.config.ladder_levels.max(1);
+
+        // Base prices for Level 0
+        let mut base_bid = reservation_price * (1.0 - half_spread_bps / 10_000.0);
+        let mut base_ask = reservation_price * (1.0 + half_spread_bps / 10_000.0);
+
+        // Join best price for Level 0
+        if self.config.ladder_join_best {
+            if base_bid < best_bid && inventory_ratio < self.config.bid_join_max_ratio {
+                base_bid = best_bid;
+            }
+            if base_ask > best_ask {
+                base_ask = best_ask;
+            }
+        }
+
+        // Inventory-aware bid offset
+        if inventory_ratio > self.config.bid_offset_start_ratio {
+            let excess = inventory_ratio - self.config.bid_offset_start_ratio;
+            let extra_offset_bps = excess * self.config.bid_offset_bps_per_10pct;
+            base_bid *= 1.0 - extra_offset_bps / 10_000.0;
+        }
+
+        // Inventory-aware ask offset (push ask DOWN to liquidate faster)
+        // BUT never below best_ask — we are a MAKER, not a taker.
+        if inventory_ratio > self.config.ask_offset_start_ratio {
+            let excess = inventory_ratio - self.config.ask_offset_start_ratio;
+            let extra_offset_bps = excess * self.config.ask_offset_bps_per_10pct;
+            base_ask *= 1.0 - extra_offset_bps / 10_000.0;
+        }
+
+        // ── HARD anti-crossing guard ──
+        // BID must be <= best_bid (we NEVER cross the spread to buy)
+        if base_bid > best_bid {
+            base_bid = best_bid;
+        }
+        // ASK must be >= best_ask (we NEVER cross the spread to sell)
+        if base_ask < best_ask {
+            base_ask = best_ask;
+        }
+        // Sanity: ask must be above bid
+        if base_ask <= base_bid {
+            base_ask = base_bid + tick_size;
+        }
+
+        // Minimum edge check (on tightest level — Level 0)
+        let quoted_spread_bps = (base_ask - base_bid) / mid_price * 10_000.0;
+        if quoted_spread_bps < self.config.min_edge_bps * 2.0 {
+            self.diagnostics.blocked_no_edge += 1;
+            return StrategyDecision::no_action();
+        }
+
+        let position = context.current_position.quantity;
+        let mut remaining_cash = context.available_cash;
+        let mut remaining_position = position;
+
+        let mut bids: Vec<(f64, f64)> = Vec::with_capacity(n_levels);
+        let mut asks: Vec<(f64, f64)> = Vec::with_capacity(n_levels);
+        // Track used price ticks to prevent multiple levels collapsing to same price
+        let mut used_bid_ticks: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut used_ask_ticks: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+        for level in 0..n_levels {
+            // Price: each deeper level is 1 tick further from mid
+            let bid_price_raw = base_bid - (level as f64) * tick_size;
+            let ask_price_raw = base_ask + (level as f64) * tick_size;
+
+            // Round to tick_size
+            let bid_price = (bid_price_raw / tick_size).floor() * tick_size;
+            let mut ask_price = (ask_price_raw / tick_size).ceil() * tick_size;
+
+            // Per-level anti-crossing guard: each ASK level must be >= best_ask
+            if ask_price < best_ask {
+                ask_price = best_ask + (level as f64) * tick_size;
+                ask_price = (ask_price / tick_size).ceil() * tick_size;
+            }
+            // Per-level anti-crossing guard: each BID level must be <= best_bid
+            let bid_price = if bid_price > best_bid {
+                best_bid - (level as f64) * tick_size
+            } else {
+                bid_price
+            };
+            let bid_price = (bid_price / tick_size).floor() * tick_size;
+
+            // Size: deeper levels have proportionally larger size
+            let level_multiplier = 1.0 + (level as f64) * self.config.ladder_size_scale;
+            let level_qty = ((min_qty * level_multiplier) / step_size).ceil() * step_size;
+
+            // --- BID ---
+            if buy_allowed && bid_price > f64::EPSILON {
+                let bid_tick = (bid_price / tick_size).round() as i64;
+                // Skip if another level already placed at this price tick
+                if !used_bid_ticks.contains(&bid_tick) {
+                    let mut bid_qty = level_qty;
+
+                    // Check cash constraint
+                    let cost = bid_qty * bid_price;
+                    if cost > remaining_cash {
+                        let affordable = (remaining_cash / bid_price / step_size).floor() * step_size;
+                        bid_qty = affordable;
+                    }
+
+                    if bid_qty >= min_qty && bid_qty * bid_price >= min_notional {
+                        remaining_cash -= bid_qty * bid_price;
+                        bids.push((bid_price, bid_qty));
+                        used_bid_ticks.insert(bid_tick);
+                    }
+                }
+            }
+
+            // --- ASK ---
+            if sell_allowed && ask_price > f64::EPSILON {
+                let ask_tick = (ask_price / tick_size).round() as i64;
+                // Skip if another level already placed at this price tick
+                if !used_ask_ticks.contains(&ask_tick) {
+                    let mut ask_qty = level_qty;
+
+                    // Clamp to available position
+                    ask_qty = ask_qty.min(remaining_position);
+
+                    // Round
+                    ask_qty = (ask_qty / step_size).floor() * step_size;
+
+                    if ask_qty >= min_qty && ask_qty * ask_price >= min_notional {
+                        remaining_position -= ask_qty;
+                        asks.push((ask_price, ask_qty));
+                        used_ask_ticks.insert(ask_tick);
+                    }
+                }
+            }
+        }
+
+        // Need at least one side
+        if bids.is_empty() && asks.is_empty() {
+            return StrategyDecision::no_action();
+        }
+
+        // ─── 10. Diagnostics & return ──────────────────────────────────
+        let total_bid_qty: f64 = bids.iter().map(|(_, q)| q).sum();
+        let total_ask_qty: f64 = asks.iter().map(|(_, q)| q).sum();
+        self.diagnostics.last_mid_price = mid_price;
+        self.diagnostics.last_fair_price = fair_price;
+        self.diagnostics.last_half_spread_bps = half_spread_bps;
+        self.diagnostics.last_buy_price = bids.first().map(|(p, _)| *p).unwrap_or(0.0);
+        self.diagnostics.last_sell_price = asks.first().map(|(p, _)| *p).unwrap_or(0.0);
+        self.diagnostics.last_buy_quantity = total_bid_qty;
+        self.diagnostics.last_sell_quantity = total_ask_qty;
+        self.diagnostics.last_inventory_ratio = inventory_ratio;
+        self.diagnostics.last_quoted_spread_bps = quoted_spread_bps;
+        self.diagnostics.last_reservation_shift_bps = reservation_shift / mid_price * 10_000.0;
+
+        // Track for requote detection
+        self.last_buy_quote = bids.first().map(|(p, _)| *p).unwrap_or(0.0);
+        self.last_sell_quote = asks.first().map(|(p, _)| *p).unwrap_or(0.0);
+
+        StrategyDecision {
+            confidence: 1.0,
+            intent: OrderIntent::QuoteLadder {
+                bids,
+                asks,
+                rationale: "hft_ladder_quote",
+                expected_edge_bps: quoted_spread_bps,
+            },
+            metrics: vec![
+                DecisionMetric { name: "mid_price", value: mid_price },
+                DecisionMetric { name: "fair_price", value: fair_price },
+                DecisionMetric { name: "reservation_price", value: reservation_price },
+                DecisionMetric { name: "half_spread_bps", value: half_spread_bps },
+                DecisionMetric { name: "reservation_shift_bps", value: reservation_shift / mid_price * 10_000.0 },
+                DecisionMetric { name: "inventory_ratio", value: inventory_ratio },
+                DecisionMetric { name: "quoted_spread_bps", value: quoted_spread_bps },
+                DecisionMetric { name: "bid_levels", value: self.diagnostics.last_buy_quantity },
+                DecisionMetric { name: "ask_levels", value: self.diagnostics.last_sell_quantity },
+                DecisionMetric { name: "total_bid_qty", value: total_bid_qty },
+                DecisionMetric { name: "total_ask_qty", value: total_ask_qty },
+            ],
+        }
+    }
+}

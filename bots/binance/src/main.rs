@@ -493,6 +493,9 @@ fn build_strategy(
     let market_maker_bid_ask_glm_config = strategy_config_override
         .map(|p| resolve_workspace_path(p))
         .unwrap_or_else(|| resolve_workspace_path("config/strategies/market_maker_bid_ask_glm.toml"));
+    let market_maker_hft_config = strategy_config_override
+        .map(|p| resolve_workspace_path(p))
+        .unwrap_or_else(|| resolve_workspace_path("config/strategies/market_maker_hft.toml"));
 
     match strategy_name {
         "trade-flow-momentum" => Ok(Box::new(
@@ -549,8 +552,14 @@ fn build_strategy(
             )
             .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
         )),
+        "market-maker-hft" => Ok(Box::new(
+            strategies::market_maker_hft::MarketMakerHftStrategy::from_file(
+                market_maker_hft_config,
+            )
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+        )),
         _ => Err(format!(
-            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture, market-maker, market-maker-ba, market-maker-bid-ask, market-maker-bid-ask-glm",
+            "Unknown strategy '{}'. Available: trade-flow-momentum, trade-flow-reclaim, liquidity-sweep-reversal, microprice-imbalance-maker, spread-regime-capture, market-maker, market-maker-ba, market-maker-bid-ask, market-maker-bid-ask-glm, market-maker-hft",
             strategy_name
         )
         .into()),
@@ -605,6 +614,7 @@ fn strategy_config_path(strategy_name: &str) -> Result<&'static str, Box<dyn Err
         "market-maker-ba" => Ok("config/strategies/market_maker_ba.toml"),
         "market-maker-bid-ask" => Ok("config/strategies/market_maker_bid_ask.toml"),
         "market-maker-bid-ask-glm" => Ok("config/strategies/market_maker_bid_ask_glm.toml"),
+        "market-maker-hft" => Ok("config/strategies/market_maker_hft.toml"),
         _ => Err(format!("Unknown strategy '{}'.", strategy_name).into()),
     }
 }
@@ -716,6 +726,18 @@ fn build_strategy_from_search_spec(
             ) as Box<dyn Strategy>,
             "market-maker-bid-ask" => Box::new(
                 strategies::market_maker_bid_ask::MarketMakerBidAskStrategy::from_file(
+                    &temp_path,
+                )
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+            ) as Box<dyn Strategy>,
+            "market-maker-bid-ask-glm" => Box::new(
+                strategies::market_maker_bid_ask_glm::MarketMakerBidAskGlmStrategy::from_file(
+                    &temp_path,
+                )
+                .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,
+            ) as Box<dyn Strategy>,
+            "market-maker-hft" => Box::new(
+                strategies::market_maker_hft::MarketMakerHftStrategy::from_file(
                     &temp_path,
                 )
                 .map_err(|err| -> Box<dyn Error + Send + Sync> { err.to_string().into() })?,

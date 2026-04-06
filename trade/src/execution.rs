@@ -46,6 +46,23 @@ pub enum OrderIntent {
         rationale: &'static str,
         expected_edge_bps: f64,
     },
+    /// Multi-level ladder quoting: place multiple orders at different price
+    /// levels on each side simultaneously.
+    ///
+    /// Example with 3 levels:
+    ///   Level 0: best_bid / best_ask       — small size, queue priority (1 bps)
+    ///   Level 1: best ± 1 tick             — medium size (3 bps round trip)
+    ///   Level 2: best ± 2 ticks            — larger size (5 bps round trip)
+    ///
+    /// Each Vec entry is (price, quantity). Empty vec = no orders on that side.
+    /// The trader manages a Vec<ActiveLimitOrder> per side, diffing desired
+    /// levels against existing orders: place new / cancel stale / amend changed.
+    QuoteLadder {
+        bids: Vec<(f64, f64)>,
+        asks: Vec<(f64, f64)>,
+        rationale: &'static str,
+        expected_edge_bps: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

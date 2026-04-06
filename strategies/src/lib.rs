@@ -4,6 +4,7 @@ pub mod market_maker;
 pub mod market_maker_ba;
 pub mod market_maker_bid_ask;
 pub mod market_maker_bid_ask_glm;
+pub mod market_maker_hft;
 pub mod microprice_imbalance_maker;
 pub mod null_strategy;
 pub mod spread_regime_capture;
@@ -15,6 +16,7 @@ pub use market_maker::{MarketMakerConfig, MarketMakerStrategy};
 pub use market_maker_ba::{MarketMakerBaConfig, MarketMakerBaStrategy};
 pub use market_maker_bid_ask::{MarketMakerBidAskConfig, MarketMakerBidAskStrategy};
 pub use market_maker_bid_ask_glm::{MarketMakerBidAskGlmConfig, MarketMakerBidAskGlmStrategy};
+pub use market_maker_hft::{MarketMakerHftConfig, MarketMakerHftStrategy};
 pub use microprice_imbalance_maker::{
     MicropriceImbalanceMakerConfig, MicropriceImbalanceMakerStrategy,
 };

@@ -84,6 +84,14 @@ pub struct MarketMakerBidAskGlmConfig {
     #[serde(default = "default_cash_fraction")]
     pub cash_fraction: f64,
 
+    /// Step sizing factor. Scales quantity near neutral inventory:
+    ///   qty = base_qty × (1 + factor × (0.5 - |ratio - 0.5|))
+    /// At ratio=0.5 (neutral): qty = base_qty × (1 + factor × 0.5)
+    /// At ratio=0 or 1 (max skew): qty = base_qty × 1.0 (min_qty)
+    /// 0.0 = disabled (flat min_qty on both sides).
+    #[serde(default = "default_step_sizing_factor")]
+    pub step_sizing_factor: f64,
+
     /// Enable dynamic sizing (vol, spread, budget adjustments).
     #[serde(default)]
     pub dynamic_sizing: bool,
@@ -181,6 +189,7 @@ fn default_min_edge_bps() -> f64 { 0.5 }
 fn default_max_inventory_fraction() -> f64 { 0.20 }
 fn default_inventory_skew_factor() -> f64 { 0.8 }
 fn default_cash_fraction() -> f64 { 0.10 }
+fn default_step_sizing_factor() -> f64 { 0.0 }  // disabled by default
 fn default_min_cash_fraction() -> f64 { 0.02 }
 fn default_max_cash_fraction() -> f64 { 0.15 }
 fn default_spread_ref_bps() -> f64 { 5.0 }
@@ -211,6 +220,7 @@ impl Default for MarketMakerBidAskGlmConfig {
             max_inventory_fraction: default_max_inventory_fraction(),
             inventory_skew_factor: default_inventory_skew_factor(),
             cash_fraction: default_cash_fraction(),
+            step_sizing_factor: default_step_sizing_factor(),
             dynamic_sizing: false,
             min_cash_fraction: default_min_cash_fraction(),
             max_cash_fraction: default_max_cash_fraction(),
@@ -295,11 +305,22 @@ impl MarketMakerBidAskGlmStrategy {
     }
 
     /// Extract fair price and best bid/ask from bookTicker or EMA fallback.
+    /// Uses microprice when bid/ask quantities are available:
+    ///   microprice = bid × ask_qty / (bid_qty + ask_qty) + ask × bid_qty / (bid_qty + ask_qty)
+    /// Falls back to simple mid when quantities are zero or missing.
     fn fair_price_and_book(&self, market_state: &MarketState) -> Option<(f64, f64, f64)> {
         if let Some(book) = market_state.top_of_book() {
             let bid = book.bid.price;
             let ask = book.ask.price;
-            let fair = (bid + ask) / 2.0;
+            let bid_qty = book.bid.quantity;
+            let ask_qty = book.ask.quantity;
+            let total_qty = bid_qty + ask_qty;
+            let fair = if total_qty > f64::EPSILON {
+                // Microprice: weighted by opposing side's quantity
+                bid * ask_qty / total_qty + ask * bid_qty / total_qty
+            } else {
+                (bid + ask) / 2.0
+            };
             if bid > f64::EPSILON && ask > bid && fair > f64::EPSILON {
                 return Some((bid, ask, fair));
             }
@@ -755,18 +776,27 @@ impl Strategy for MarketMakerBidAskGlmStrategy {
         self.last_buy_quote = buy_price;
         self.last_sell_quote = sell_price;
 
-        // --- Compute quantities (flat min_qty sizing) ---
+        // --- Compute quantities (step sizing) ---
         //
-        // Both sides always quote min_qty. Pure spread capture.
-        // A-S reservation price handles inventory skew via PRICE, not quantity.
-        // No escalation, no cycle counting.
+        // Base: min_qty. When step_sizing_factor > 0, scale up near neutral inventory:
+        //   qty = min_qty × (1 + factor × (0.5 - |ratio - 0.5|))
+        // At ratio=0.5 (balanced): qty = min_qty × (1 + factor × 0.5)
+        // At ratio=0 or 1 (max skew): qty = min_qty × 1.0
+        // A-S reservation price handles inventory skew via PRICE.
 
         let min_notional = context.min_notional.unwrap_or(1.0);
         let step_size = context.step_size.unwrap_or(1.0);
         let min_qty = ((min_notional / buy_price).ceil() / step_size).ceil() * step_size;
 
-        let mut buy_quantity = min_qty;
-        let mut sell_quantity = min_qty;
+        let step_multiplier = if self.config.step_sizing_factor > f64::EPSILON {
+            1.0 + self.config.step_sizing_factor * (0.5 - (inventory_ratio - 0.5).abs())
+        } else {
+            1.0
+        };
+        let base_qty = ((min_qty * step_multiplier) / step_size).ceil() * step_size;
+
+        let mut buy_quantity = base_qty;
+        let mut sell_quantity = base_qty;
 
         // Block buys if filters say so (trend filter, vol gate, etc.)
         if !buy_allowed {

@@ -129,7 +129,8 @@ impl TradeLogger {
         // The initial placement is already logged as INFO by the trader.
         if report.status == ExecutionStatus::Pending
             && (report.reason == Some("limit_order_resting")
-                || report.reason == Some("two_sided_orders_placed"))
+                || report.reason == Some("two_sided_orders_placed")
+                || report.reason == Some("ladder_orders_placed"))
         {
             let requested_quantity = fmt_price(report.requested_quantity);
             let execution_price = fmt_price_opt(report.execution_price);
